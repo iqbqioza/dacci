@@ -280,6 +280,9 @@ export class Keystore {
   private async addKey(secretKey: Uint8Array, name?: string): Promise<PublicKeyInfo> {
     const vault = this.requireVault();
     const pubkey = getPublicKey(secretKey);
+    if (vault.keys.some((key) => key.npub === encodeNpub(pubkey))) {
+      throw new Error("key already exists");
+    }
     const info: StoredKey = {
       id: crypto.randomUUID(),
       name: name?.trim() || `Key ${vault.keys.length + 1}`,

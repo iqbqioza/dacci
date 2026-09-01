@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { decodeNsec, isValidSecretKey } from "@dacci/core";
   import { sendPanelRequest } from "../api";
 
   let { ondone, onclose } = $props<{
@@ -10,7 +11,21 @@
   let error = $state("");
   let importing = $state(false);
 
+  let nsecValid = $derived.by(() => {
+    if (!nsec) {
+      return false;
+    }
+    try {
+      return isValidSecretKey(decodeNsec(nsec));
+    } catch {
+      return false;
+    }
+  });
+
   async function submit() {
+    if (!nsecValid || importing) {
+      return;
+    }
     importing = true;
     error = "";
     try {
@@ -26,24 +41,27 @@
 <div class="space-y-3">
   <button
     type="button"
-    class="text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+    class="text-gray-500 hover:text-gray-900 "
     onclick={onclose}
   >
-    ← 戻る
+    ← Back
   </button>
-  <h2 class="text-base font-medium">鍵のインポート</h2>
+  <h2 class="text-base font-medium">Import Key</h2>
   <label class="block">
-    <span class="mb-1 block text-xs text-gray-500 dark:text-gray-400">秘密鍵 (nsec)</span>
+    <span class="mb-1 block text-xs text-gray-500 ">Secret key (nsec)</span>
     <input
       type="text"
       bind:value={nsec}
       placeholder="nsec1..."
-      class="w-full rounded border border-gray-300 px-3 py-2 font-mono text-xs focus:border-blue-500 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+      class="w-full rounded border border-gray-300 px-3 py-2 font-mono text-xs focus:border-blue-500 focus:outline-none   "
       onkeydown={(e) => {
         if (e.key === "Enter") submit();
       }}
     />
   </label>
+  {#if nsec && !nsecValid}
+    <p class="text-sm text-red-600">Invalid nsec</p>
+  {/if}
   {#if error}
     <p class="text-sm text-red-600">{error}</p>
   {/if}
@@ -51,8 +69,8 @@
     type="button"
     class="w-full rounded bg-blue-600 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
     onclick={submit}
-    disabled={importing}
+    disabled={importing || !nsecValid}
   >
-    インポート
+    Import
   </button>
 </div>

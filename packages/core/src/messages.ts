@@ -75,10 +75,7 @@ export interface PanelCloseMessage {
 
 export type ContentMessage = OpenPanelMessage | ClosePanelMessage | NostrResponse;
 
-export type Theme = "light" | "dark" | "system";
-
 export interface AppSettings {
-  theme: Theme;
   autoLockMinutes: number | null;
 }
 

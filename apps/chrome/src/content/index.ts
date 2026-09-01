@@ -14,7 +14,7 @@ function createPanelFrame(reason?: string): HTMLIFrameElement {
     top: ${PANEL_MARGIN}px;
     right: -${PANEL_WIDTH + PANEL_MARGIN}px;
     width: ${PANEL_WIDTH}px;
-    height: calc(100% - ${PANEL_MARGIN * 2}px);
+    height: ${PANEL_WIDTH}px;
     border: none;
     border-radius: 8px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);

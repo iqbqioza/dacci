@@ -70,11 +70,11 @@
 {:else}
   <div class="space-y-4">
     <div class="flex items-center justify-between">
-      <h2 class="text-base font-medium">鍵の管理</h2>
+      <h2 class="text-base font-medium">Key Management</h2>
       <div class="flex items-center gap-2">
         <button
           type="button"
-          title="鍵を追加"
+          title="Add Key"
           class="rounded bg-blue-600 p-1.5 text-white hover:bg-blue-700"
           onclick={() => (view = "menu")}
         >
@@ -92,19 +92,23 @@
       </div>
     </div>
 
+    <p class="text-xs text-blue-500">
+      Select the key you want to use. The active key is highlighted with a blue border.
+    </p>
+
     {#if error}
       <p class="text-sm text-red-600">{error}</p>
     {/if}
 
     {#if pending > 0}
-      <div class="flex items-center justify-between gap-2 rounded bg-amber-50 px-3 py-2 text-amber-800 dark:bg-amber-950 dark:text-amber-200">
-        <span>保留中の要求があります</span>
+      <div class="flex items-center justify-between gap-2 rounded bg-amber-50 px-3 py-2 text-amber-800  ">
+        <span>Pending requests</span>
         <button
           type="button"
           class="shrink-0 rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700"
           onclick={onselect}
         >
-          鍵を選択して処理
+          Select key to process
         </button>
       </div>
     {/if}
@@ -114,17 +118,17 @@
         <li>
           <div
             class="flex w-full items-center rounded border px-3 py-2 {key.id === activeKeyId
-              ? 'border-blue-500 bg-blue-50 dark:bg-blue-950'
-              : 'border-gray-300 hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800'}"
+              ? 'border-blue-500 bg-blue-50 '
+              : 'border-gray-300 hover:bg-gray-50 '}"
           >
             <button type="button" class="flex-1 text-left" onclick={() => selectKey(key.id)}>
               <span class="block font-medium">{key.name}</span>
-              <span class="block text-xs text-gray-500 dark:text-gray-400">{shortNpub(key.npub)}</span>
+              <span class="block text-xs text-gray-500 ">{shortNpub(key.npub)}</span>
             </button>
             <button
               type="button"
-              title="詳細"
-              class="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+              title="Details"
+              class="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-700 "
               onclick={() => (detailKeyId = key.id)}
             >
               <svg
@@ -151,7 +155,7 @@
         </li>
       {/each}
       {#if keys.length === 0}
-        <li class="text-gray-500 dark:text-gray-400">鍵がありません。</li>
+        <li class="text-gray-500 ">No keys yet.</li>
       {/if}
     </ul>
   </div>

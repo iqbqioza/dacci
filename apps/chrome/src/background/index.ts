@@ -15,7 +15,7 @@ const STORAGE_KEY = "dacci:vault";
 const SETTINGS_KEY = "dacci:settings";
 const SITE_SETTINGS_KEY = "dacci:siteSettings";
 const SESSION_KEY = "dacci:session";
-const DEFAULT_SETTINGS: AppSettings = { theme: "system", autoLockMinutes: 1440 };
+const DEFAULT_SETTINGS: AppSettings = { autoLockMinutes: 1440 };
 
 const sessionStorage: SessionStorage = {
   load: async () => {
