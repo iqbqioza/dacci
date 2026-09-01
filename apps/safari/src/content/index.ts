@@ -18,7 +18,7 @@ function createPanelFrame(): HTMLIFrameElement {
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
     z-index: 2147483647;
     transition: right 0.3s ease-in-out;
-    background: transparent;
+    background: #fff;
   `;
   return frame;
 }
@@ -30,6 +30,7 @@ function openPanel() {
   }
   panelFrame = createPanelFrame();
   document.documentElement.appendChild(panelFrame);
+  void panelFrame.offsetWidth;
   requestAnimationFrame(() => {
     panelFrame!.style.right = `${PANEL_MARGIN}px`;
   });
@@ -43,11 +44,24 @@ function closePanel() {
   window.setTimeout(() => frame.remove(), 300);
 }
 
-browser.runtime.onMessage.addListener((message) => {
-  if (message?.type === "dacci:openPanel") {
-    openPanel();
-  } else if (message?.type === "dacci:closePanel") {
+function togglePanel() {
+  if (panelFrame) {
     closePanel();
+  } else {
+    openPanel();
+  }
+}
+
+window.addEventListener("message", (event) => {
+  if (event.source !== panelFrame?.contentWindow) return;
+  if (event.data?.type === "dacci:closePanel") {
+    closePanel();
+  }
+});
+
+browser.runtime.onMessage.addListener((message) => {
+  if (message?.type === "dacci:togglePanel") {
+    togglePanel();
   }
   return undefined;
 });
