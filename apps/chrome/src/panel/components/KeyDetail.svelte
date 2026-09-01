@@ -89,11 +89,12 @@
   {#if key}
     <div>
       <span class="mb-1 block text-xs text-gray-500">秘密鍵 (nsec)</span>
-      <div class="rounded border border-gray-300 bg-gray-50 px-3 py-2">
-        <p class="break-all font-mono text-xs text-gray-700">
-          {revealed ? key.nsec : `${key.nsec.slice(0, 12)}...${key.nsec.slice(-8)}`}
-        </p>
-      </div>
+      <input
+        type={revealed ? "text" : "password"}
+        readonly
+        value={key.nsec}
+        class="w-full rounded border border-gray-300 bg-gray-50 px-3 py-2 font-mono text-xs text-gray-700 focus:outline-none"
+      />
       <div class="mt-2 flex gap-2">
         <button
           type="button"
