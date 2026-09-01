@@ -1,4 +1,3 @@
-import injectionSource from "./nostr-inject.js?raw";
 import type { NostrResponse } from "@dacci/core";
 
 const PANEL_URL = chrome.runtime.getURL("panel.html");
@@ -6,13 +5,6 @@ const PANEL_WIDTH = 384;
 const PANEL_MARGIN = 16;
 
 let panelFrame: HTMLIFrameElement | null = null;
-
-function injectNostr(): void {
-  const script = document.createElement("script");
-  script.textContent = injectionSource;
-  (document.head ?? document.documentElement).appendChild(script);
-  script.remove();
-}
 
 function createPanelFrame(): HTMLIFrameElement {
   const frame = document.createElement("iframe");
@@ -61,8 +53,6 @@ function togglePanel() {
     openPanel();
   }
 }
-
-injectNostr();
 
 window.addEventListener("message", (event) => {
   if (event.source !== window) return;
