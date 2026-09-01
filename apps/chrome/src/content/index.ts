@@ -36,6 +36,7 @@ function openPanel(reason?: string) {
   requestAnimationFrame(() => {
     panelFrame!.style.right = `${PANEL_MARGIN}px`;
   });
+  void chrome.runtime.sendMessage({ type: "dacci:panelOpen" });
 }
 
 function closePanel() {
@@ -43,6 +44,7 @@ function closePanel() {
   const frame = panelFrame;
   frame.style.right = `-${PANEL_WIDTH + PANEL_MARGIN}px`;
   panelFrame = null;
+  void chrome.runtime.sendMessage({ type: "dacci:panelClose" });
   window.setTimeout(() => frame.remove(), 300);
 }
 

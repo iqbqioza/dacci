@@ -27,6 +27,7 @@ export class Keystore {
   private masterKey: Uint8Array | null = null;
   private secretKeys = new Map<string, Uint8Array>();
   private lockTimer: ReturnType<typeof setTimeout> | null = null;
+  private panelOpen = false;
 
   constructor(
     private storage: VaultStorage,
@@ -36,6 +37,15 @@ export class Keystore {
   setAutoLockMinutes(minutes: number | null): void {
     this.autoLockMinutes = minutes;
     if (this.status === "unlocked") {
+      this.scheduleAutoLock();
+    }
+  }
+
+  setPanelOpen(open: boolean): void {
+    this.panelOpen = open;
+    if (open) {
+      this.clearAutoLock();
+    } else if (this.status === "unlocked") {
       this.scheduleAutoLock();
     }
   }
@@ -238,7 +248,7 @@ export class Keystore {
 
   private scheduleAutoLock(): void {
     this.clearAutoLock();
-    if (this.autoLockMinutes === null) {
+    if (this.panelOpen || this.autoLockMinutes === null) {
       return;
     }
     this.lockTimer = setTimeout(() => {

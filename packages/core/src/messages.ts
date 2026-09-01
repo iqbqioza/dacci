@@ -34,6 +34,14 @@ export interface ClosePanelMessage {
   type: "dacci:closePanel";
 }
 
+export interface PanelOpenMessage {
+  type: "dacci:panelOpen";
+}
+
+export interface PanelCloseMessage {
+  type: "dacci:panelClose";
+}
+
 export type ContentMessage = OpenPanelMessage | ClosePanelMessage | NostrResponse;
 
 export type Theme = "light" | "dark" | "system";

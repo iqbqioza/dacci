@@ -106,6 +106,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     void handleNostrRequest(message as NostrRequest, sender, sendResponse);
     return true;
   }
+  if (message?.type === "dacci:panelOpen") {
+    keystore.setPanelOpen(true);
+    return undefined;
+  }
+  if (message?.type === "dacci:panelClose") {
+    keystore.setPanelOpen(false);
+    return undefined;
+  }
   if (typeof message?.type === "string" && (message.type as string).startsWith("vault:")) {
     void handlePanelRequest(message as PanelRequest, sendResponse);
     return true;

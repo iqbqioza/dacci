@@ -54,6 +54,11 @@
 
   onMount(async () => {
     reason = new URLSearchParams(window.location.search).get("reason") ?? "";
+    void chrome.runtime.sendMessage({ type: "dacci:panelOpen" });
+    const onHide = () => {
+      void chrome.runtime.sendMessage({ type: "dacci:panelClose" });
+    };
+    window.addEventListener("pagehide", onHide);
     mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
     mediaQuery.addEventListener("change", () => {
       if (settings?.theme === "system") {
