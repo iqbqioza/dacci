@@ -428,6 +428,15 @@ async function handlePanelRequest(
       sendResponse({ type: "vault:settings", settings });
       return;
     }
+    case "vault:changePassphrase": {
+      try {
+        await keystore.changePassphrase(message.currentPassphrase, message.newPassphrase);
+        sendResponse({ type: "vault:state", state: getVaultState() });
+      } catch (error) {
+        sendResponse({ type: "vault:error", error: errorMessage(error) });
+      }
+      return;
+    }
     case "vault:confirmDecision": {
       const entry = confirmPendingRequests.shift();
       if (!entry) {

@@ -176,6 +176,35 @@ export class Keystore {
     await this.storage.setVault(vault);
   }
 
+  async changePassphrase(currentPassphrase: string, newPassphrase: string): Promise<void> {
+    this.requireUnlocked();
+    const vault = this.requireVault();
+    const currentMasterKey = verifyPassphrase(vault, currentPassphrase);
+    if (!currentMasterKey) {
+      throw new Error("wrong passphrase");
+    }
+    if (newPassphrase.length < 8) {
+      throw new Error("passphrase too short");
+    }
+    const { vault: newVault, masterKey: newMasterKey } = createVault(newPassphrase);
+    newVault.activeKeyId = vault.activeKeyId;
+    for (const key of vault.keys) {
+      const secretKey = this.secretKeys.get(key.id);
+      if (!secretKey) {
+        throw new Error("key not found");
+      }
+      newVault.keys.push({
+        ...key,
+        encrypted: encryptSecretKey(newMasterKey, secretKey),
+      });
+    }
+    this.vault = newVault;
+    this.masterKey = newMasterKey;
+    await this.storage.setVault(newVault);
+    this.scheduleAutoLock();
+    await this.saveSession();
+  }
+
   async renameKey(keyId: string, name: string): Promise<void> {
     this.requireUnlocked();
     const vault = this.requireVault();

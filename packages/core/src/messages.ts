@@ -91,6 +91,12 @@ export interface SetSettingsMessage {
   settings: AppSettings;
 }
 
+export interface ChangePassphraseMessage {
+  type: "vault:changePassphrase";
+  currentPassphrase: string;
+  newPassphrase: string;
+}
+
 export interface GetStateMessage {
   type: "vault:getState";
 }
@@ -166,6 +172,7 @@ export type PanelRequest =
   | DeleteKeyMessage
   | GetSettingsMessage
   | SetSettingsMessage
+  | ChangePassphraseMessage
   | ConfirmDecisionMessage
   | GetSitePermissionsMessage
   | DeleteSitePermissionMessage;
