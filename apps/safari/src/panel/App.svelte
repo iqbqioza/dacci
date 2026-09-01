@@ -111,7 +111,9 @@
   class="flex h-full flex-col bg-white text-gray-900 {isDark ? 'dark' : ''} dark:bg-gray-900 dark:text-gray-100"
 >
   <header class="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700">
-    <h1 class="text-lg font-semibold">Dacci</h1>
+    <div class="flex items-center gap-2">
+      <img src="icons/icon-32.png" alt="Dacci" class="h-8 w-8" />
+    </div>
     <div class="flex items-center gap-2">
       <button
         type="button"
