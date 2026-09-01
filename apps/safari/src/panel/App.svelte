@@ -5,10 +5,12 @@
   import Setup from "./components/Setup.svelte";
   import Unlock from "./components/Unlock.svelte";
   import KeyManager from "./components/KeyManager.svelte";
+  import KeySelect from "./components/KeySelect.svelte";
 
   let vaultState = $state<VaultState | null>(null);
   let error = $state("");
   let reason = $state("");
+  let selectMode = $state(false);
 
   function close() {
     if (window.parent === window) {
@@ -18,6 +20,11 @@
     }
   }
 
+  async function onUnlocked(state: VaultState) {
+    vaultState = state;
+    selectMode = state.pendingRequests > 0;
+  }
+
   onMount(async () => {
     reason = new URLSearchParams(window.location.search).get("reason") ?? "";
     try {
@@ -25,6 +32,7 @@
         type: "vault:getState",
       });
       vaultState = res.state;
+      selectMode = res.state.pendingRequests > 0;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
@@ -55,11 +63,18 @@
     {:else if !vaultState}
       <p class="text-gray-500">読み込み中...</p>
     {:else if vaultState.status === "uninitialized"}
-      <Setup ondone={(s) => (vaultState = s)} />
+      <Setup ondone={onUnlocked} />
     {:else if vaultState.status === "locked"}
-      <Unlock ondone={(s) => (vaultState = s)} />
+      <Unlock ondone={onUnlocked} />
+    {:else if selectMode}
+      <KeySelect vault={vaultState} />
     {:else}
-      <KeyManager vault={vaultState} onlock={(s) => (vaultState = s)} />
+      <KeyManager
+        vault={vaultState}
+        pending={vaultState.pendingRequests}
+        onselect={() => (selectMode = true)}
+        onlock={(s) => (vaultState = s)}
+      />
     {/if}
   </main>
 </div>

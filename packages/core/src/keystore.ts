@@ -50,6 +50,7 @@ export class Keystore {
       keys: this.vault?.keys.map(keyToPublicInfo) ?? [],
       activeKeyId: this.vault?.activeKeyId ?? null,
       autoLockHours: this.autoLockHours,
+      pendingRequests: 0,
     };
   }
 

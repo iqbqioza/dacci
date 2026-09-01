@@ -5,6 +5,7 @@ import {
   type PanelRequest,
   type PanelResponse,
   type VaultData,
+  type VaultState,
 } from "@dacci/core";
 
 const STORAGE_KEY = "dacci:vault";
@@ -39,6 +40,10 @@ interface PendingRequest {
 }
 
 const pendingRequests: PendingRequest[] = [];
+
+function getVaultState(): VaultState {
+  return { ...keystore.getState(), pendingRequests: pendingRequests.length };
+}
 
 browser.action.onClicked.addListener((tab) => {
   if (tab.id == null) {
@@ -158,14 +163,13 @@ async function handlePanelRequest(
   await initPromise;
   switch (message.type) {
     case "vault:getState": {
-      sendResponse({ type: "vault:state", state: keystore.getState() });
+      sendResponse({ type: "vault:state", state: getVaultState() });
       return;
     }
     case "vault:setup": {
       try {
         await keystore.setup(message.passphrase);
-        flushPendingRequests();
-        sendResponse({ type: "vault:unlocked", state: keystore.getState() });
+        sendResponse({ type: "vault:unlocked", state: getVaultState() });
       } catch (error) {
         sendResponse({ type: "vault:error", error: errorMessage(error) });
       }
@@ -174,16 +178,20 @@ async function handlePanelRequest(
     case "vault:unlock": {
       try {
         await keystore.unlock(message.passphrase);
-        flushPendingRequests();
-        sendResponse({ type: "vault:unlocked", state: keystore.getState() });
+        sendResponse({ type: "vault:unlocked", state: getVaultState() });
       } catch (error) {
         sendResponse({ type: "vault:error", error: errorMessage(error) });
       }
       return;
     }
+    case "vault:flushPending": {
+      flushPendingRequests();
+      sendResponse({ type: "vault:state", state: getVaultState() });
+      return;
+    }
     case "vault:lock": {
       keystore.lock();
-      sendResponse({ type: "vault:state", state: keystore.getState() });
+      sendResponse({ type: "vault:state", state: getVaultState() });
       return;
     }
     case "vault:createKey": {
@@ -207,7 +215,7 @@ async function handlePanelRequest(
     case "vault:selectKey": {
       try {
         await keystore.selectKey(message.keyId);
-        sendResponse({ type: "vault:state", state: keystore.getState() });
+        sendResponse({ type: "vault:state", state: getVaultState() });
       } catch (error) {
         sendResponse({ type: "vault:error", error: errorMessage(error) });
       }
@@ -216,7 +224,7 @@ async function handlePanelRequest(
     case "vault:renameKey": {
       try {
         await keystore.renameKey(message.keyId, message.name);
-        sendResponse({ type: "vault:state", state: keystore.getState() });
+        sendResponse({ type: "vault:state", state: getVaultState() });
       } catch (error) {
         sendResponse({ type: "vault:error", error: errorMessage(error) });
       }

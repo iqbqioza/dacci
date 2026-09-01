@@ -12,6 +12,7 @@ export interface VaultState {
   keys: PublicKeyInfo[];
   activeKeyId: string | null;
   autoLockHours: number;
+  pendingRequests: number;
 }
 
 export interface NostrRequest {
@@ -76,6 +77,10 @@ export interface RenameKeyMessage {
   name: string;
 }
 
+export interface FlushPendingMessage {
+  type: "vault:flushPending";
+}
+
 export type PanelRequest =
   | GetStateMessage
   | SetupMessage
@@ -84,7 +89,8 @@ export type PanelRequest =
   | CreateKeyMessage
   | ImportKeyMessage
   | SelectKeyMessage
-  | RenameKeyMessage;
+  | RenameKeyMessage
+  | FlushPendingMessage;
 
 export type PanelResponse =
   | { type: "vault:state"; state: VaultState }
