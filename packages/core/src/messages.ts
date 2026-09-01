@@ -86,6 +86,11 @@ export interface ExportKeyMessage {
   keyId: string;
 }
 
+export interface DeleteKeyMessage {
+  type: "vault:deleteKey";
+  keyId: string;
+}
+
 export interface ExportedKey {
   id: string;
   name: string;
@@ -103,7 +108,8 @@ export type PanelRequest =
   | SelectKeyMessage
   | RenameKeyMessage
   | FlushPendingMessage
-  | ExportKeyMessage;
+  | ExportKeyMessage
+  | DeleteKeyMessage;
 
 export type PanelResponse =
   | { type: "vault:state"; state: VaultState }

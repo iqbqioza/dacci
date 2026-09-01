@@ -254,6 +254,15 @@ async function handlePanelRequest(
       }
       return;
     }
+    case "vault:deleteKey": {
+      try {
+        await keystore.deleteKey(message.keyId);
+        sendResponse({ type: "vault:state", state: getVaultState() });
+      } catch (error) {
+        sendResponse({ type: "vault:error", error: errorMessage(error) });
+      }
+      return;
+    }
   }
 }
 

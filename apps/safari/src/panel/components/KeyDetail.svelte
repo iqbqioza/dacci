@@ -15,6 +15,8 @@
   let copied = $state(false);
   let error = $state("");
   let saving = $state(false);
+  let deleting = $state(false);
+  let confirmingDelete = $state(false);
 
   onMount(async () => {
     name = initialName;
@@ -46,6 +48,18 @@
     }
   }
 
+  async function deleteKey() {
+    deleting = true;
+    error = "";
+    try {
+      await sendPanelRequest({ type: "vault:deleteKey", keyId });
+      onclose();
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+      deleting = false;
+    }
+  }
+
   async function copy() {
     if (!key) return;
     try {
@@ -64,62 +78,92 @@
   }
 </script>
 
-<div class="space-y-3">
-  <button
-    type="button"
-    class="text-gray-500 hover:text-gray-900"
-    onclick={onclose}
-  >
-    ← 一覧に戻る
-  </button>
+{#if confirmingDelete}
+  <div class="space-y-3">
+    <h2 class="text-base font-medium">鍵を削除</h2>
+    <p class="text-gray-600">
+      「{name || initialName}」を削除しますか？<br />この操作は取り消せません。
+    </p>
+    {#if error}
+      <p class="text-sm text-red-600">{error}</p>
+    {/if}
+    <button
+      type="button"
+      class="w-full rounded bg-red-600 py-2 font-medium text-white hover:bg-red-700 disabled:opacity-50"
+      onclick={deleteKey}
+      disabled={deleting}
+    >
+      削除
+    </button>
+    <button
+      type="button"
+      class="w-full rounded bg-gray-200 py-2 font-medium text-gray-700 hover:bg-gray-300"
+      onclick={() => (confirmingDelete = false)}
+    >
+      キャンセル
+    </button>
+  </div>
+{:else}
+  <div class="space-y-3">
+    <button type="button" class="text-gray-500 hover:text-gray-900" onclick={onclose}>
+      ← 一覧に戻る
+    </button>
 
-  <label class="block">
-    <span class="mb-1 block text-xs text-gray-500">鍵の名前</span>
-    <input
-      type="text"
-      bind:value={name}
-      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none"
-    />
-  </label>
-
-  {#if error}
-    <p class="text-sm text-red-600">{error}</p>
-  {/if}
-
-  {#if key}
-    <div>
-      <span class="mb-1 block text-xs text-gray-500">秘密鍵 (nsec)</span>
+    <label class="block">
+      <span class="mb-1 block text-xs text-gray-500">鍵の名前</span>
       <input
-        type={revealed ? "text" : "password"}
-        readonly
-        value={key.nsec}
-        class="w-full rounded border border-gray-300 bg-gray-50 px-3 py-2 font-mono text-xs text-gray-700 focus:outline-none"
+        type="text"
+        bind:value={name}
+        class="w-full rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none"
       />
-      <div class="mt-2 flex gap-2">
-        <button
-          type="button"
-          class="rounded bg-gray-200 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-300"
-          onclick={() => (revealed = !revealed)}
-        >
-          {revealed ? "隠す" : "表示"}
-        </button>
-        <button
-          type="button"
-          class="rounded bg-gray-200 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-300"
-          onclick={copy}
-        >
-          {copied ? "コピーしました" : "コピー"}
-        </button>
-      </div>
-    </div>
-  {/if}
+    </label>
 
-  <button
-    type="button"
-    class="w-full rounded bg-blue-600 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-    onclick={ok}
-    disabled={saving}
-  >
-    OK
-  </button>
-</div>
+    {#if error}
+      <p class="text-sm text-red-600">{error}</p>
+    {/if}
+
+    {#if key}
+      <div>
+        <span class="mb-1 block text-xs text-gray-500">秘密鍵 (nsec)</span>
+        <input
+          type={revealed ? "text" : "password"}
+          readonly
+          value={key.nsec}
+          class="w-full rounded border border-gray-300 bg-gray-50 px-3 py-2 font-mono text-xs text-gray-700 focus:outline-none"
+        />
+        <div class="mt-2 flex gap-2">
+          <button
+            type="button"
+            class="rounded bg-gray-200 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-300"
+            onclick={() => (revealed = !revealed)}
+          >
+            {revealed ? "隠す" : "表示"}
+          </button>
+          <button
+            type="button"
+            class="rounded bg-gray-200 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-300"
+            onclick={copy}
+          >
+            {copied ? "コピーしました" : "コピー"}
+          </button>
+        </div>
+      </div>
+    {/if}
+
+    <button
+      type="button"
+      class="w-full rounded bg-blue-600 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+      onclick={ok}
+      disabled={saving}
+    >
+      OK
+    </button>
+    <button
+      type="button"
+      class="w-full rounded border border-red-300 py-2 font-medium text-red-600 hover:bg-red-50"
+      onclick={() => (confirmingDelete = true)}
+    >
+      鍵を削除
+    </button>
+  </div>
+{/if}

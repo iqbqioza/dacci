@@ -135,6 +135,21 @@ export class Keystore {
     };
   }
 
+  async deleteKey(keyId: string): Promise<void> {
+    this.requireUnlocked();
+    const vault = this.requireVault();
+    const index = vault.keys.findIndex((entry) => entry.id === keyId);
+    if (index === -1) {
+      throw new Error("key not found");
+    }
+    vault.keys.splice(index, 1);
+    this.secretKeys.delete(keyId);
+    if (vault.activeKeyId === keyId) {
+      vault.activeKeyId = vault.keys[0]?.id ?? null;
+    }
+    await this.storage.setVault(vault);
+  }
+
   getPublicKey(): string {
     this.requireUnlocked();
     return this.getActiveKey().pubkey;
