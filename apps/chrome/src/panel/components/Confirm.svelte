@@ -187,7 +187,7 @@
     </button>
     <button
       type="button"
-      class="w-full rounded bg-red-600 py-2 font-medium text-white hover:bg-red-700 disabled:opacity-50"
+      class="w-full rounded border border-red-500 py-2 font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-950"
       onclick={() => decide("alwaysDeny")}
       disabled={deciding}
     >
