@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+button:not(:disabled),
+[role="button"]:not(:disabled),
+select:not(:disabled),
+summary,
+a[href],
+label[for],
+input[type="checkbox"]:not(:disabled),
+input[type="radio"]:not(:disabled) {
+  cursor: pointer;
+}
