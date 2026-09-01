@@ -26,14 +26,6 @@
       window.parent.postMessage({ type: "dacci:closePanel" }, "*");
     }
   }
-
-  function prettyContent(raw: string): string {
-    try {
-      return JSON.stringify(JSON.parse(raw), null, 2);
-    } catch {
-      return raw;
-    }
-  }
 </script>
 
 <div class="space-y-4">
@@ -47,8 +39,15 @@
 
   <div>
     <span class="mb-1 block text-xs text-gray-500 dark:text-gray-400">内容</span>
-    <pre class="max-h-48 overflow-y-auto whitespace-pre-wrap break-all rounded border border-gray-300 bg-gray-50 p-3 font-mono text-xs text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200">{prettyContent(request.content)}</pre>
+    <pre class="max-h-48 overflow-y-auto whitespace-pre-wrap break-all rounded border border-gray-300 bg-gray-50 p-3 font-mono text-xs text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200">{request.content}</pre>
   </div>
+
+  {#if request.tags.length > 0}
+    <div>
+      <span class="mb-1 block text-xs text-gray-500 dark:text-gray-400">タグ</span>
+      <pre class="max-h-48 overflow-y-auto whitespace-pre-wrap break-all rounded border border-gray-300 bg-gray-50 p-3 font-mono text-xs text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200">{JSON.stringify(request.tags)}</pre>
+    </div>
+  {/if}
 
   {#if error}
     <p class="text-sm text-red-600">{error}</p>

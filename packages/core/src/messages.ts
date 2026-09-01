@@ -21,6 +21,7 @@ export interface ConfirmRequestInfo {
   site: string;
   kind: number;
   content: string;
+  tags: string[][];
 }
 
 export interface ConfirmDecisionMessage {

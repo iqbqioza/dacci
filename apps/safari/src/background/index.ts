@@ -56,14 +56,18 @@ const confirmPendingRequests: PendingRequest[] = [];
 
 function getVaultState(): VaultState {
   const confirm = confirmPendingRequests[0];
+  const event = confirm?.args[0] as
+    | { kind: number; content: string; tags?: string[][] }
+    | undefined;
   return {
     ...keystore.getState(),
     pendingRequests: lockPendingRequests.length + confirmPendingRequests.length,
     confirmRequest: confirm
       ? {
           site: confirm.site ?? "",
-          kind: (confirm.args[0] as { kind: number } | undefined)?.kind ?? 0,
-          content: (confirm.args[0] as { content: string } | undefined)?.content ?? "",
+          kind: event?.kind ?? 0,
+          content: event?.content ?? "",
+          tags: event?.tags ?? [],
         }
       : null,
   };
