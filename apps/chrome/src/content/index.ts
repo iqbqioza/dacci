@@ -1,8 +1,18 @@
+import injectionSource from "./nostr-inject.js?raw";
+import type { NostrResponse } from "@dacci/core";
+
 const PANEL_URL = chrome.runtime.getURL("panel.html");
 const PANEL_WIDTH = 384;
 const PANEL_MARGIN = 16;
 
 let panelFrame: HTMLIFrameElement | null = null;
+
+function injectNostr(): void {
+  const script = document.createElement("script");
+  script.textContent = injectionSource;
+  (document.head ?? document.documentElement).appendChild(script);
+  script.remove();
+}
 
 function createPanelFrame(): HTMLIFrameElement {
   const frame = document.createElement("iframe");
@@ -52,6 +62,17 @@ function togglePanel() {
   }
 }
 
+injectNostr();
+
+window.addEventListener("message", (event) => {
+  if (event.source !== window) return;
+  const data = event.data;
+  if (data?.type !== "nostr:request") return;
+  void chrome.runtime.sendMessage(data).then((response: NostrResponse) => {
+    window.postMessage(response, "*");
+  });
+});
+
 window.addEventListener("message", (event) => {
   if (event.source !== panelFrame?.contentWindow) return;
   if (event.data?.type === "dacci:closePanel") {
@@ -62,5 +83,9 @@ window.addEventListener("message", (event) => {
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "dacci:togglePanel") {
     togglePanel();
+  } else if (message?.type === "dacci:openPanel") {
+    openPanel();
+  } else if (message?.type === "dacci:closePanel") {
+    closePanel();
   }
 });

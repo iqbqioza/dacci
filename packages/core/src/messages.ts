@@ -1,0 +1,98 @@
+import type { EventTemplate } from "./event";
+
+export interface PublicKeyInfo {
+  id: string;
+  name: string;
+  npub: string;
+  createdAt: number;
+}
+
+export interface VaultState {
+  status: "uninitialized" | "locked" | "unlocked";
+  keys: PublicKeyInfo[];
+  activeKeyId: string | null;
+  autoLockHours: number;
+}
+
+export interface NostrRequest {
+  type: "nostr:request";
+  requestId: string;
+  method: string;
+  args: unknown[];
+}
+
+export type NostrResponse =
+  | { type: "nostr:response"; requestId: string; ok: true; result: unknown }
+  | { type: "nostr:response"; requestId: string; ok: false; error: string };
+
+export interface OpenPanelMessage {
+  type: "dacci:openPanel";
+  reason: "manual" | "unlock";
+}
+
+export interface ClosePanelMessage {
+  type: "dacci:closePanel";
+}
+
+export type ContentMessage = OpenPanelMessage | ClosePanelMessage | NostrResponse;
+
+export interface GetStateMessage {
+  type: "vault:getState";
+}
+
+export interface SetupMessage {
+  type: "vault:setup";
+  passphrase: string;
+}
+
+export interface UnlockMessage {
+  type: "vault:unlock";
+  passphrase: string;
+}
+
+export interface LockMessage {
+  type: "vault:lock";
+}
+
+export interface CreateKeyMessage {
+  type: "vault:createKey";
+  name?: string;
+}
+
+export interface ImportKeyMessage {
+  type: "vault:importKey";
+  nsec: string;
+  name?: string;
+}
+
+export interface SelectKeyMessage {
+  type: "vault:selectKey";
+  keyId: string;
+}
+
+export type PanelRequest =
+  | GetStateMessage
+  | SetupMessage
+  | UnlockMessage
+  | LockMessage
+  | CreateKeyMessage
+  | ImportKeyMessage
+  | SelectKeyMessage;
+
+export type PanelResponse =
+  | { type: "vault:state"; state: VaultState }
+  | { type: "vault:error"; error: string }
+  | { type: "vault:unlocked"; state: VaultState }
+  | { type: "vault:created"; key: PublicKeyInfo }
+  | { type: "vault:imported"; key: PublicKeyInfo };
+
+export interface SignEventRequest {
+  type: "nostr:request";
+  requestId: string;
+  method: "signEvent";
+  args: [EventTemplate];
+}
+
+export function createRequestId(): string {
+  return crypto.randomUUID();
+}

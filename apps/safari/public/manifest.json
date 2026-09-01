@@ -5,7 +5,8 @@
   "description": "Nostr Signer browser extension",
   "permissions": ["storage"],
   "background": {
-    "service_worker": "assets/background.js"
+    "service_worker": "assets/background.js",
+    "type": "module"
   },
   "content_scripts": [
     {
