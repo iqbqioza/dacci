@@ -38,8 +38,39 @@ chrome.action.onClicked.addListener((tab) => {
   if (tab.id == null) {
     return;
   }
-  void chrome.tabs.sendMessage(tab.id, { type: "dacci:togglePanel" }).catch(() => {});
+  void toggleOrOpenPanel(tab.id);
 });
+
+async function toggleOrOpenPanel(tabId: number): Promise<void> {
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: "dacci:togglePanel" });
+  } catch {
+    await ensurePanelInTab(tabId);
+  }
+}
+
+async function ensurePanelInTab(tabId: number): Promise<void> {
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: "dacci:openPanel" });
+    return;
+  } catch {
+    // content script not present in this tab; inject it
+  }
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["assets/content.iife.js"],
+    });
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["nostr-bridge.js"],
+      world: "MAIN",
+    });
+  } catch {
+    return;
+  }
+  await chrome.tabs.sendMessage(tabId, { type: "dacci:openPanel" }).catch(() => {});
+}
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "nostr:request") {
@@ -61,9 +92,7 @@ async function handleNostrRequest(
   if (keystore.status !== "unlocked") {
     pendingRequests.push({ ...request, sendResponse });
     if (sender.tab?.id != null) {
-      await chrome.tabs
-        .sendMessage(sender.tab.id, { type: "dacci:openPanel", reason: "unlock" })
-        .catch(() => {});
+      await ensurePanelInTab(sender.tab.id);
     }
     return;
   }

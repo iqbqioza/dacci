@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "description": "Nostr Signer browser extension",
   "minimum_chrome_version": "114",
-  "permissions": ["storage"],
+  "permissions": ["storage", "scripting"],
+  "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "assets/background.js",
     "type": "module"

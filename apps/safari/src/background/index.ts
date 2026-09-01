@@ -38,8 +38,34 @@ browser.action.onClicked.addListener((tab) => {
   if (tab.id == null) {
     return;
   }
-  void browser.tabs.sendMessage(tab.id, { type: "dacci:togglePanel" }).catch(() => {});
+  void toggleOrOpenPanel(tab.id);
 });
+
+async function toggleOrOpenPanel(tabId: number): Promise<void> {
+  try {
+    await browser.tabs.sendMessage(tabId, { type: "dacci:togglePanel" });
+  } catch {
+    await ensurePanelInTab(tabId);
+  }
+}
+
+async function ensurePanelInTab(tabId: number): Promise<void> {
+  try {
+    await browser.tabs.sendMessage(tabId, { type: "dacci:openPanel" });
+    return;
+  } catch {
+    // content script not present in this tab; inject it
+  }
+  try {
+    await browser.scripting.executeScript({
+      target: { tabId },
+      files: ["assets/content.iife.js"],
+    });
+  } catch {
+    return;
+  }
+  await browser.tabs.sendMessage(tabId, { type: "dacci:openPanel" }).catch(() => {});
+}
 
 browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "nostr:request") {
@@ -61,9 +87,7 @@ async function handleNostrRequest(
   if (keystore.status !== "unlocked") {
     pendingRequests.push({ ...request, sendResponse });
     if (sender.tab?.id != null) {
-      await browser.tabs
-        .sendMessage(sender.tab.id, { type: "dacci:openPanel", reason: "unlock" })
-        .catch(() => {});
+      await ensurePanelInTab(sender.tab.id);
     }
     return;
   }

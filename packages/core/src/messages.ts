@@ -27,7 +27,7 @@ export type NostrResponse =
 
 export interface OpenPanelMessage {
   type: "dacci:openPanel";
-  reason: "manual" | "unlock";
+  reason?: "manual" | "unlock";
 }
 
 export interface ClosePanelMessage {

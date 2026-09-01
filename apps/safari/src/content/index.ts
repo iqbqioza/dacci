@@ -14,9 +14,9 @@ function injectNostr(): void {
   script.remove();
 }
 
-function createPanelFrame(): HTMLIFrameElement {
+function createPanelFrame(reason?: string): HTMLIFrameElement {
   const frame = document.createElement("iframe");
-  frame.src = PANEL_URL;
+  frame.src = reason ? `${PANEL_URL}?reason=${encodeURIComponent(reason)}` : PANEL_URL;
   frame.style.cssText = `
     position: fixed;
     top: ${PANEL_MARGIN}px;
@@ -33,12 +33,12 @@ function createPanelFrame(): HTMLIFrameElement {
   return frame;
 }
 
-function openPanel() {
+function openPanel(reason?: string) {
   if (panelFrame) {
     panelFrame.style.right = `${PANEL_MARGIN}px`;
     return;
   }
-  panelFrame = createPanelFrame();
+  panelFrame = createPanelFrame(reason);
   document.documentElement.appendChild(panelFrame);
   void panelFrame.offsetWidth;
   requestAnimationFrame(() => {
@@ -84,7 +84,7 @@ browser.runtime.onMessage.addListener((message) => {
   if (message?.type === "dacci:togglePanel") {
     togglePanel();
   } else if (message?.type === "dacci:openPanel") {
-    openPanel();
+    openPanel(message.reason as string | undefined);
   } else if (message?.type === "dacci:closePanel") {
     closePanel();
   }

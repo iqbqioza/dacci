@@ -8,8 +8,10 @@
 
   let vaultState = $state<VaultState | null>(null);
   let error = $state("");
+  let reason = $state("");
 
   onMount(async () => {
+    reason = new URLSearchParams(window.location.search).get("reason") ?? "";
     try {
       const res = await sendPanelRequest<{ type: "vault:state"; state: VaultState }>({
         type: "vault:getState",
@@ -33,6 +35,13 @@
     </button>
   </header>
   <main class="flex-1 overflow-y-auto p-4 text-sm">
+    {#if reason === "unlock" && vaultState && vaultState.status !== "unlocked"}
+      <p class="mb-3 rounded bg-amber-50 px-3 py-2 text-amber-800">
+        {vaultState.status === "uninitialized"
+          ? "サービスの要求を処理するには、初回セットアップが必要です。"
+          : "サービスの要求を処理するには、ロックを解除してください。"}
+      </p>
+    {/if}
     {#if error}
       <p class="text-red-600">{error}</p>
     {:else if !vaultState}
