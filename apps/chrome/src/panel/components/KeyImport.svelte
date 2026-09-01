@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { decodeNsec, isValidSecretKey } from "@dacci/core";
   import { sendPanelRequest } from "../api";
 
   let { ondone, onclose } = $props<{
@@ -9,6 +10,17 @@
   let nsec = $state("");
   let error = $state("");
   let importing = $state(false);
+
+  let nsecValid = $derived.by(() => {
+    if (!nsec) {
+      return false;
+    }
+    try {
+      return isValidSecretKey(decodeNsec(nsec));
+    } catch {
+      return false;
+    }
+  });
 
   async function submit() {
     importing = true;
@@ -44,6 +56,9 @@
       }}
     />
   </label>
+  {#if nsec && !nsecValid}
+    <p class="text-sm text-red-600">有効な nsec ではありません</p>
+  {/if}
   {#if error}
     <p class="text-sm text-red-600">{error}</p>
   {/if}
@@ -51,7 +66,7 @@
     type="button"
     class="w-full rounded bg-blue-600 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
     onclick={submit}
-    disabled={importing}
+    disabled={importing || !nsecValid}
   >
     インポート
   </button>

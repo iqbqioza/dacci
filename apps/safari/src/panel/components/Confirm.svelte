@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ConfirmRequestInfo, ConfirmDecision, VaultState } from "@dacci/core";
+  import { decodeNsec, isValidSecretKey } from "@dacci/core";
   import { sendPanelRequest } from "../api";
 
   let { request, keysCount, ondone } = $props<{
@@ -14,6 +15,17 @@
   let importMode = $state(false);
   let nsec = $state("");
   let importing = $state(false);
+
+  let nsecValid = $derived.by(() => {
+    if (!nsec) {
+      return false;
+    }
+    try {
+      return isValidSecretKey(decodeNsec(nsec));
+    } catch {
+      return false;
+    }
+  });
 
   $effect(() => {
     request;
@@ -131,7 +143,7 @@
         type="button"
         class="w-full rounded bg-blue-600 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
         onclick={importAndContinue}
-        disabled={importing}
+        disabled={importing || !nsecValid}
       >
         インポート
       </button>
