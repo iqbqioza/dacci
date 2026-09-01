@@ -1,8 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Dacci",
-  "version": "0.0.0",
-  "description": "Nostr Signer browser extension",
+  "version": "0.1.0",
+  "description": "A secure Nostr signer that manages multiple keys, signs events, and encrypts messages in your browser.",
+  "author": "iqbqioza",
+  "homepage_url": "https://github.com/iqbqioza/dacci",
   "minimum_chrome_version": "114",
   "permissions": ["storage", "scripting"],
   "host_permissions": ["<all_urls>"],
