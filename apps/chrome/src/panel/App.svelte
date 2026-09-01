@@ -8,6 +8,7 @@
   import KeySelect from "./components/KeySelect.svelte";
   import Confirm from "./components/Confirm.svelte";
   import Settings from "./components/Settings.svelte";
+  import Info from "./components/Info.svelte";
 
   let vaultState = $state<VaultState | null>(null);
   let error = $state("");
@@ -15,7 +16,22 @@
   let selectMode = $state(false);
   let confirmMode = $state(false);
   let settingsView = $state(false);
+  let infoView = $state(false);
   let settings = $state<AppSettings | null>(null);
+
+  function openSettings() {
+    settingsView = !settingsView;
+    if (settingsView) {
+      infoView = false;
+    }
+  }
+
+  function openInfo() {
+    infoView = !infoView;
+    if (infoView) {
+      settingsView = false;
+    }
+  }
 
   async function loadSettings() {
     const res = await sendPanelRequest<{ type: "vault:settings"; settings: AppSettings }>({
@@ -96,12 +112,33 @@
     <div class="flex items-center gap-2">
       <img src="icons/icon-32.png" alt="Dacci" class="h-8 w-8" />
     </div>
-    <div class="flex items-center gap-2">
+<div class="flex items-center gap-2">
+      <button
+        type="button"
+        title="About"
+        class="rounded p-1.5 text-gray-500 hover:bg-gray-100"
+        onclick={openInfo}
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke-width="1.5"
+          stroke="currentColor"
+          class="h-4 w-4"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12v-.008z"
+          />
+        </svg>
+      </button>
       <button
         type="button"
         title="Settings"
         class="rounded p-1.5 text-gray-500 hover:bg-gray-100"
-        onclick={() => (settingsView = !settingsView)}
+        onclick={openSettings}
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -135,6 +172,8 @@
   <main class="flex-1 overflow-y-auto p-4 text-sm">
     {#if settingsView && settings}
       <Settings settings={settings} onchange={updateSettings} onclose={() => (settingsView = false)} />
+    {:else if infoView}
+      <Info onclose={() => (infoView = false)} />
     {:else if confirmMode && vaultState?.confirmRequest}
       <Confirm
         request={vaultState.confirmRequest}
