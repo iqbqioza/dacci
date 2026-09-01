@@ -50,10 +50,17 @@ export class Keystore {
     this.vault = await this.storage.getVault();
     const session = await this.sessionStorage.load();
     if (session && (session.expiresAt === null || session.expiresAt > Date.now())) {
-      this.masterKey = session.masterKey;
-      this.decryptAllKeys();
-      this.scheduleAutoLock();
-    } else if (session) {
+      try {
+        this.masterKey = session.masterKey;
+        this.decryptAllKeys();
+        this.scheduleAutoLock();
+        return;
+      } catch {
+        this.masterKey = null;
+        this.secretKeys.clear();
+      }
+    }
+    if (session) {
       await this.sessionStorage.clear();
     }
   }

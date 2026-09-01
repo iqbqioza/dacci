@@ -44,7 +44,7 @@ export function calcPaddedLength(len: number): number {
   if (len <= 32) {
     return 32;
   }
-  const nextPower = 1 << (Math.floor(Math.log2(len - 1)) + 1);
+  const nextPower = 2 ** (Math.floor(Math.log2(len - 1)) + 1);
   const chunk = nextPower <= 256 ? 32 : nextPower / 8;
   return chunk * (Math.floor((len - 1) / chunk) + 1);
 }
@@ -91,6 +91,9 @@ export function encrypt(secretKey: Uint8Array, publicKey: string, plaintext: str
 
 export function encryptWithConversationKey(conversationKey: Uint8Array, plaintext: string): string {
   const data = utf8.encode(plaintext);
+  if (data.length === 0) {
+    throw new Error("plaintext too short");
+  }
   if (data.length > MAX_PLAINTEXT_SIZE) {
     throw new Error("plaintext too large");
   }

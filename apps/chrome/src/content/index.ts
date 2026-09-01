@@ -60,9 +60,22 @@ window.addEventListener("message", (event) => {
   if (event.source !== window) return;
   const data = event.data;
   if (data?.type !== "nostr:request") return;
-  void chrome.runtime.sendMessage(data).then((response: NostrResponse) => {
-    window.postMessage(response, "*");
-  });
+  void chrome.runtime.sendMessage(data).then(
+    (response: NostrResponse) => {
+      window.postMessage(response, "*");
+    },
+    (error: unknown) => {
+      window.postMessage(
+        {
+          type: "nostr:response",
+          requestId: data.requestId,
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        "*",
+      );
+    },
+  );
 });
 
 window.addEventListener("message", (event) => {

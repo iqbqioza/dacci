@@ -51,6 +51,7 @@
 
   function updateView(state: VaultState) {
     vaultState = state;
+    error = "";
     confirmMode = state.status === "unlocked" && state.confirmRequest !== null;
     selectMode = !state.confirmRequest && state.pendingRequests > 0;
   }
@@ -151,7 +152,11 @@
     {#if settingsView && settings}
       <Settings settings={settings} onchange={updateSettings} onclose={() => (settingsView = false)} />
     {:else if confirmMode && vaultState?.confirmRequest}
-      <Confirm request={vaultState.confirmRequest} ondone={updateView} />
+      <Confirm
+        request={vaultState.confirmRequest}
+        keysCount={vaultState.keys.length}
+        ondone={updateView}
+      />
     {:else}
       {#if reason === "unlock" && vaultState && vaultState.status !== "unlocked"}
         <p class="mb-3 rounded bg-amber-50 px-3 py-2 text-amber-800 dark:bg-amber-950 dark:text-amber-200">

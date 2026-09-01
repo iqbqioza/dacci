@@ -407,6 +407,10 @@ async function handlePanelRequest(
     case "vault:deleteKey": {
       try {
         await keystore.deleteKey(message.keyId);
+        if (siteSettings[message.keyId]) {
+          delete siteSettings[message.keyId];
+          await browser.storage.local.set({ [SITE_SETTINGS_KEY]: siteSettings });
+        }
         sendResponse({ type: "vault:state", state: getVaultState() });
       } catch (error) {
         sendResponse({ type: "vault:error", error: errorMessage(error) });
