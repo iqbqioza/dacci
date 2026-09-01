@@ -106,22 +106,22 @@
 </script>
 
 <div class="space-y-4">
-  <h2 class="text-base font-medium">署名の確認</h2>
-  <p class="text-gray-600 ">{request.site} からの署名リクエストです。</p>
+  <h2 class="text-base font-medium">Signing Confirmation</h2>
+  <p class="text-gray-600 ">{request.site}  is requesting a signature.</p>
 
   <div class="rounded border border-gray-300 p-3 ">
-    <span class="block text-xs text-gray-500 ">イベント種別</span>
+    <span class="block text-xs text-gray-500 ">Event kind</span>
     <p class="font-mono text-sm">kind: {request.kind}</p>
   </div>
 
   <div>
-    <span class="mb-1 block text-xs text-gray-500 ">内容</span>
+    <span class="mb-1 block text-xs text-gray-500 ">Content</span>
     <pre class="max-h-48 overflow-y-auto whitespace-pre-wrap break-all rounded border border-gray-300 bg-gray-50 p-3 font-mono text-xs text-gray-700   ">{request.content}</pre>
   </div>
 
   {#if request.tags.length > 0}
     <div>
-      <span class="mb-1 block text-xs text-gray-500 ">タグ</span>
+      <span class="mb-1 block text-xs text-gray-500 ">Tags</span>
       <pre class="max-h-48 overflow-y-auto whitespace-pre-wrap break-all rounded border border-gray-300 bg-gray-50 p-3 font-mono text-xs text-gray-700   ">{JSON.stringify(request.tags)}</pre>
     </div>
   {/if}
@@ -131,7 +131,7 @@
   {/if}
 
   {#if keysCount === 0}
-    <p class="text-gray-600 ">鍵がありません。まず鍵を生成またはインポートしてください。</p>
+    <p class="text-gray-600 ">No keys yet. Generate or import a key first.</p>
     {#if importMode}
       <input
         type="text"
@@ -148,14 +148,14 @@
         onclick={importAndContinue}
         disabled={importing || !nsecValid}
       >
-        インポート
+        Import
       </button>
       <button
         type="button"
         class="w-full rounded bg-gray-200 py-2 font-medium text-gray-700 hover:bg-gray-300  "
         onclick={() => (importMode = false)}
       >
-        キャンセル
+        Cancel
       </button>
     {:else}
       <button
@@ -164,14 +164,14 @@
         onclick={createKeyAndContinue}
         disabled={creatingKey}
       >
-        鍵を生成して続行
+        Generate key and continue
       </button>
       <button
         type="button"
         class="w-full rounded border border-blue-500 py-2 font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50 "
         onclick={() => (importMode = true)}
       >
-        鍵をインポート
+        Import a key
       </button>
     {/if}
   {:else}
@@ -182,7 +182,7 @@
       onclick={() => decide("alwaysAllow")}
       disabled={deciding}
     >
-      常に許可
+      Always Allow
     </button>
     <button
       type="button"
@@ -190,7 +190,7 @@
       onclick={() => decide("allow")}
       disabled={deciding}
     >
-      許可
+      Allow
     </button>
     <button
       type="button"
@@ -198,7 +198,7 @@
       onclick={() => decide("deny")}
       disabled={deciding}
     >
-      許可しない
+      Deny
     </button>
     <button
       type="button"
@@ -206,7 +206,7 @@
       onclick={() => decide("alwaysDeny")}
       disabled={deciding}
     >
-      常に許可しない
+      Always Deny
     </button>
     </div>
   {/if}

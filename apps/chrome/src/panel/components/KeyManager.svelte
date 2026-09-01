@@ -70,11 +70,11 @@
 {:else}
   <div class="space-y-4">
     <div class="flex items-center justify-between">
-      <h2 class="text-base font-medium">鍵の管理</h2>
+      <h2 class="text-base font-medium">Key Management</h2>
       <div class="flex items-center gap-2">
         <button
           type="button"
-          title="鍵を追加"
+          title="Add Key"
           class="rounded bg-blue-600 p-1.5 text-white hover:bg-blue-700"
           onclick={() => (view = "menu")}
         >
@@ -98,13 +98,13 @@
 
     {#if pending > 0}
       <div class="flex items-center justify-between gap-2 rounded bg-amber-50 px-3 py-2 text-amber-800  ">
-        <span>保留中の要求があります</span>
+        <span>Pending requests</span>
         <button
           type="button"
           class="shrink-0 rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700"
           onclick={onselect}
         >
-          鍵を選択して処理
+          Select key to process
         </button>
       </div>
     {/if}
@@ -123,7 +123,7 @@
             </button>
             <button
               type="button"
-              title="詳細"
+              title="Details"
               class="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-700 "
               onclick={() => (detailKeyId = key.id)}
             >
@@ -151,7 +151,7 @@
         </li>
       {/each}
       {#if keys.length === 0}
-        <li class="text-gray-500 ">鍵がありません。</li>
+        <li class="text-gray-500 ">No keys yet.</li>
       {/if}
     </ul>
   </div>

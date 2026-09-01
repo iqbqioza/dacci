@@ -95,9 +95,9 @@
 
 {#if confirmSiteKey}
   <div class="space-y-3">
-    <h2 class="text-base font-medium">許可を削除</h2>
+    <h2 class="text-base font-medium">Remove Permission</h2>
     <p class="text-gray-600 ">
-      「{confirmSiteKey}」の許可を削除しますか？<br />削除後は再び確認が表示されます。
+      Remove permission for "{confirmSiteKey}"?<br />You will be asked again afterwards.
     </p>
     {#if error}
       <p class="text-sm text-red-600">{error}</p>
@@ -108,14 +108,14 @@
       onclick={() => confirmSiteKey && remove(confirmSiteKey)}
       disabled={deleting}
     >
-      削除
+      Delete
     </button>
     <button
       type="button"
       class="w-full rounded bg-gray-200 py-2 font-medium text-gray-700 hover:bg-gray-300  "
       onclick={() => (confirmSiteKey = null)}
     >
-      キャンセル
+      Cancel
     </button>
   </div>
 {:else if selectedSite}
@@ -125,7 +125,7 @@
       class="text-gray-500 hover:text-gray-900 "
       onclick={() => (selectedSite = null)}
     >
-      ← サイト一覧に戻る
+      ← Back to sites
     </button>
     <h2 class="text-base font-medium">{selectedSite}</h2>
     {#if error}
@@ -144,12 +144,12 @@
                   ? 'bg-blue-100 text-blue-700  '
                   : 'bg-red-100 text-red-700  '}"
               >
-                {permission.setting === "allow" ? "許可" : "拒否"}
+                {permission.setting === "allow" ? "Allow" : "Deny"}
               </span>
             </div>
             <button
               type="button"
-              title="許可を削除"
+              title="Remove Permission"
               class="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
               onclick={() => (confirmSiteKey = permission.siteKey)}
             >
@@ -172,7 +172,7 @@
         </li>
       {/each}
       {#if selectedKinds.length === 0}
-        <li class="text-gray-500 ">許可している kind はありません。</li>
+        <li class="text-gray-500 ">No permissions for this site.</li>
       {/if}
     </ul>
   </div>
@@ -183,15 +183,15 @@
       class="text-gray-500 hover:text-gray-900 "
       onclick={onclose}
     >
-      ← 戻る
+      ← Back
     </button>
-    <h2 class="text-base font-medium">サイトの許可設定</h2>
+    <h2 class="text-base font-medium">Site Permissions</h2>
     {#if error}
       <p class="text-sm text-red-600">{error}</p>
     {/if}
 
     <div>
-      <h3 class="mb-2 text-sm font-medium text-gray-700 ">許可しているサイト</h3>
+      <h3 class="mb-2 text-sm font-medium text-gray-700 ">Allowed Sites</h3>
       <ul class="space-y-2">
         {#each allowedSites as group (group.site)}
           <li>
@@ -206,13 +206,13 @@
           </li>
         {/each}
         {#if allowedSites.length === 0}
-          <li class="text-gray-500 ">許可しているサイトはありません。</li>
+          <li class="text-gray-500 ">No allowed sites.</li>
         {/if}
       </ul>
     </div>
 
     <div class="border-t border-gray-200 pt-3 ">
-      <h3 class="mb-2 text-sm font-medium text-gray-700 ">許可していないサイト</h3>
+      <h3 class="mb-2 text-sm font-medium text-gray-700 ">Denied Sites</h3>
       <ul class="space-y-2">
         {#each deniedSites as group (group.site)}
           <li>
@@ -227,7 +227,7 @@
           </li>
         {/each}
         {#if deniedSites.length === 0}
-          <li class="text-gray-500 ">許可していないサイトはありません。</li>
+          <li class="text-gray-500 ">No denied sites.</li>
         {/if}
       </ul>
     </div>

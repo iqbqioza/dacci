@@ -12,21 +12,21 @@
     class="text-gray-500 hover:text-gray-900 "
     onclick={onclose}
   >
-    ← 鍵の管理に戻る
+    ← Back to keys
   </button>
-  <h2 class="text-base font-medium">鍵を追加</h2>
+  <h2 class="text-base font-medium">Add Key</h2>
   <button
     type="button"
     class="w-full rounded border border-gray-300 py-2 font-medium text-gray-700 hover:bg-gray-50   "
     onclick={onimport}
   >
-    鍵のインポート
+    Import Key
   </button>
   <button
     type="button"
     class="w-full rounded bg-blue-600 py-2 font-medium text-white hover:bg-blue-700"
     onclick={ongenerate}
   >
-    新しい鍵の生成
+    Generate New Key
   </button>
 </div>

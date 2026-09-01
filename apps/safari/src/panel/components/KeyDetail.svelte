@@ -84,9 +84,9 @@
   <SitePermissions keyId={keyId} onclose={() => (viewSites = false)} />
 {:else if confirmingDelete}
   <div class="space-y-3">
-    <h2 class="text-base font-medium">鍵を削除</h2>
+    <h2 class="text-base font-medium">Delete Key</h2>
     <p class="text-gray-600 ">
-      「{name || initialName}」を削除しますか？<br />この操作は取り消せません。
+      Delete "{name || initialName}"?<br />This cannot be undone.
     </p>
     {#if error}
       <p class="text-sm text-red-600">{error}</p>
@@ -97,14 +97,14 @@
       onclick={deleteKey}
       disabled={deleting}
     >
-      削除
+      Delete
     </button>
     <button
       type="button"
       class="w-full rounded bg-gray-200 py-2 font-medium text-gray-700 hover:bg-gray-300  "
       onclick={() => (confirmingDelete = false)}
     >
-      キャンセル
+      Cancel
     </button>
   </div>
 {:else}
@@ -114,11 +114,11 @@
       class="text-gray-500 hover:text-gray-900 "
       onclick={onclose}
     >
-      ← 一覧に戻る
+      ← Back to keys
     </button>
 
     <label class="block">
-      <span class="mb-1 block text-xs text-gray-500 ">鍵の名前</span>
+      <span class="mb-1 block text-xs text-gray-500 ">Key name</span>
       <input
         type="text"
         bind:value={name}
@@ -132,7 +132,7 @@
 
     {#if key}
       <div>
-        <span class="mb-1 block text-xs text-gray-500 ">秘密鍵 (nsec)</span>
+        <span class="mb-1 block text-xs text-gray-500 ">Secret key (nsec)</span>
         <input
           type={revealed ? "text" : "password"}
           readonly
@@ -145,14 +145,14 @@
             class="rounded bg-gray-200 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-300  "
             onclick={() => (revealed = !revealed)}
           >
-            {revealed ? "隠す" : "表示"}
+            {revealed ? "Hide" : "Show"}
           </button>
           <button
             type="button"
             class="rounded bg-gray-200 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-300  "
             onclick={copy}
           >
-            {copied ? "コピーしました" : "コピー"}
+            {copied ? "Copied" : "Copy"}
           </button>
         </div>
       </div>
@@ -164,21 +164,21 @@
       onclick={ok}
       disabled={saving}
     >
-      鍵の名前を更新
+      Update Key Name
     </button>
     <button
       type="button"
       class="w-full rounded border border-blue-300 py-2 font-medium text-blue-600 hover:bg-blue-50  "
       onclick={() => (viewSites = true)}
     >
-      サイトの許可設定を確認
+      View Site Permissions
     </button>
     <button
       type="button"
       class="w-full rounded border border-red-300 py-2 font-medium text-red-600 hover:bg-red-50  "
       onclick={() => (confirmingDelete = true)}
     >
-      鍵を削除
+      Delete Key
     </button>
   </div>
 {/if}

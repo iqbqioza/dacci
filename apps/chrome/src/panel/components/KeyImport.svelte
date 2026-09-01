@@ -44,11 +44,11 @@
     class="text-gray-500 hover:text-gray-900 "
     onclick={onclose}
   >
-    ← 戻る
+    ← Back
   </button>
-  <h2 class="text-base font-medium">鍵のインポート</h2>
+  <h2 class="text-base font-medium">Import Key</h2>
   <label class="block">
-    <span class="mb-1 block text-xs text-gray-500 ">秘密鍵 (nsec)</span>
+    <span class="mb-1 block text-xs text-gray-500 ">Secret key (nsec)</span>
     <input
       type="text"
       bind:value={nsec}
@@ -60,7 +60,7 @@
     />
   </label>
   {#if nsec && !nsecValid}
-    <p class="text-sm text-red-600">有効な nsec ではありません</p>
+    <p class="text-sm text-red-600">Invalid nsec</p>
   {/if}
   {#if error}
     <p class="text-sm text-red-600">{error}</p>
@@ -71,6 +71,6 @@
     onclick={submit}
     disabled={importing || !nsecValid}
   >
-    インポート
+    Import
   </button>
 </div>

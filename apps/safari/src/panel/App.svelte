@@ -99,7 +99,7 @@
     <div class="flex items-center gap-2">
       <button
         type="button"
-        title="設定"
+        title="Settings"
         class="rounded p-1.5 text-gray-500 hover:bg-gray-100"
         onclick={() => (settingsView = !settingsView)}
       >
@@ -128,7 +128,7 @@
         class="rounded px-2 py-1 text-gray-500 hover:bg-gray-100"
         onclick={close}
       >
-        閉じる
+        Close
       </button>
     </div>
   </header>
@@ -145,14 +145,14 @@
       {#if reason === "unlock" && vaultState && vaultState.status !== "unlocked"}
         <p class="mb-3 rounded bg-amber-50 px-3 py-2 text-amber-800">
           {vaultState.status === "uninitialized"
-            ? "サービスの要求を処理するには、初回セットアップが必要です。"
-            : "サービスの要求を処理するには、ロックを解除してください。"}
+            ? "Initial setup is required to process this request."
+            : "Unlock to process this request."}
         </p>
       {/if}
       {#if error}
         <p class="text-red-600">{error}</p>
       {:else if !vaultState}
-        <p class="text-gray-500">読み込み中...</p>
+        <p class="text-gray-500">Loading...</p>
       {:else if vaultState.status === "uninitialized"}
         <Setup ondone={onUnlocked} />
       {:else if vaultState.status === "locked"}

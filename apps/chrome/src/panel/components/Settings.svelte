@@ -10,16 +10,16 @@
   }>();
 
   const lockOptions: { value: string | number | null; label: string }[] = [
-    { value: 1, label: "1分" },
-    { value: 5, label: "5分" },
-    { value: 15, label: "15分" },
-    { value: 30, label: "30分" },
-    { value: 60, label: "1時間" },
-    { value: 180, label: "3時間" },
-    { value: 360, label: "6時間" },
-    { value: 720, label: "12時間" },
-    { value: 1440, label: "1日" },
-    { value: null, label: "なし" },
+    { value: 1, label: "1 min" },
+    { value: 5, label: "5 min" },
+    { value: 15, label: "15 min" },
+    { value: 30, label: "30 min" },
+    { value: 60, label: "1 hour" },
+    { value: 180, label: "3 hours" },
+    { value: 360, label: "6 hours" },
+    { value: 720, label: "12 hours" },
+    { value: 1440, label: "1 day" },
+    { value: null, label: "Never" },
   ];
 
   let currentPassphrase = $state("");
@@ -36,11 +36,11 @@
     passError = "";
     passSuccess = false;
     if (newPassphrase.length < 8) {
-      passError = "新パスフレーズは8文字以上にしてください";
+      passError = "New passphrase must be at least 8 characters";
       return;
     }
     if (newPassphrase !== confirmPassphrase) {
-      passError = "新パスフレーズが一致しません";
+      passError = "Passphrases do not match";
       return;
     }
     changing = true;
@@ -69,12 +69,12 @@
 
 <div class="space-y-5">
   <button type="button" class="text-gray-500 hover:text-gray-900 " onclick={onclose}>
-    ← 戻る
+    ← Back
   </button>
-  <h2 class="text-base font-medium">設定</h2>
+  <h2 class="text-base font-medium">Settings</h2>
 
   <label class="block">
-    <span class="mb-1 block text-xs text-gray-500 ">ロック時間</span>
+    <span class="mb-1 block text-xs text-gray-500 ">Lock Time</span>
     <Dropdown
       value={settings.autoLockMinutes}
       options={lockOptions}
@@ -83,23 +83,23 @@
   </label>
 
   <div class="space-y-2 border-t border-gray-200 pt-4 ">
-    <h3 class="text-sm font-medium text-gray-700 ">パスフレーズ変更</h3>
+    <h3 class="text-sm font-medium text-gray-700 ">Change Passphrase</h3>
     <input
       type="password"
       bind:value={currentPassphrase}
-      placeholder="現在のパスフレーズ"
+      placeholder="Current passphrase"
       class="w-full rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none   "
     />
     <input
       type="password"
       bind:value={newPassphrase}
-      placeholder="新パスフレーズ (8文字以上)"
+      placeholder="New passphrase (8+ characters)"
       class="w-full rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none   "
     />
     <input
       type="password"
       bind:value={confirmPassphrase}
-      placeholder="パスフレーズ確認"
+      placeholder="Confirm passphrase"
       class="w-full rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none   "
       onkeydown={(e) => {
         if (e.key === "Enter") changePassphrase();
@@ -109,7 +109,7 @@
       <p class="text-sm text-red-600">{passError}</p>
     {/if}
     {#if passSuccess}
-      <p class="text-sm text-green-700 ">パスフレーズを変更しました。</p>
+      <p class="text-sm text-green-700 ">Passphrase updated.</p>
     {/if}
     <button
       type="button"
@@ -117,7 +117,7 @@
       onclick={changePassphrase}
       disabled={changing}
     >
-      パスフレーズ更新
+      Update Passphrase
     </button>
   </div>
 </div>

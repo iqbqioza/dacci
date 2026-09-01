@@ -63,8 +63,8 @@
 </script>
 
 <div class="space-y-3">
-  <h2 class="text-base font-medium">鍵を選択</h2>
-  <p class="text-gray-600 ">この要求を処理する鍵を選択してください。</p>
+  <h2 class="text-base font-medium">Select a Key</h2>
+  <p class="text-gray-600 ">Select the key to process this request.</p>
   {#if error}
     <p class="text-sm text-red-600">{error}</p>
   {/if}
@@ -84,7 +84,7 @@
       </li>
     {/each}
     {#if keys.length === 0}
-      <li class="text-gray-500 ">鍵がありません。</li>
+      <li class="text-gray-500 ">No keys yet.</li>
     {/if}
   </ul>
   {#if keys.length === 0}
@@ -93,7 +93,7 @@
       class="w-full rounded bg-blue-600 py-2 font-medium text-white hover:bg-blue-700"
       onclick={createAndUse}
     >
-      鍵を生成して続行
+      Generate key and continue
     </button>
   {/if}
 </div>
