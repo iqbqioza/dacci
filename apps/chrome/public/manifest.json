@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Dacci",
+  "version": "0.0.0",
+  "description": "Nostr Signer browser extension",
+  "minimum_chrome_version": "114",
+  "permissions": ["storage"],
+  "background": {
+    "service_worker": "assets/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["assets/content.iife.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["panel.html"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "action": {
+    "default_title": "Dacci"
+  }
+}

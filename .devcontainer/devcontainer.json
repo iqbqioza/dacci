@@ -1,0 +1,9 @@
+{
+  "name": "dacci-monorepo",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "remoteUser": "vscode",
+  "containerUser": "vscode",
+  "postCreateCommand": "npm --version"
+}
