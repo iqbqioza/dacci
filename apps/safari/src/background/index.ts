@@ -65,13 +65,14 @@ const keystore = new Keystore(
 );
 
 let settings: AppSettings = DEFAULT_SETTINGS;
-let siteSettings: Record<string, "allow" | "deny"> = {};
+let siteSettings: Record<string, Record<string, "allow" | "deny">> = {};
 
 const initPromise = (async () => {
   await keystore.init();
   const stored = await browser.storage.local.get([SETTINGS_KEY, SITE_SETTINGS_KEY]);
   settings = { ...DEFAULT_SETTINGS, ...(stored[SETTINGS_KEY] as Partial<AppSettings> | undefined) };
-  siteSettings = (stored[SITE_SETTINGS_KEY] as Record<string, "allow" | "deny"> | undefined) ?? {};
+  siteSettings =
+    (stored[SITE_SETTINGS_KEY] as Record<string, Record<string, "allow" | "deny">> | undefined) ?? {};
   keystore.setAutoLockMinutes(settings.autoLockMinutes);
   console.log(`Dacci background loaded (status: ${keystore.status})`);
 })();
@@ -86,6 +87,7 @@ interface PendingRequest extends RequestPayload {
   sendResponse: (response: NostrResponse) => void;
   site?: string;
   siteKey?: string;
+  keyId?: string;
   tabId?: number;
 }
 
@@ -224,7 +226,8 @@ async function maybeConfirmOrRespond(
   if (request.method === "signEvent" && site) {
     const kind = (request.args[0] as { kind?: number } | undefined)?.kind;
     const siteKey = kind === undefined ? site : `${site}:${kind}`;
-    const setting = siteSettings[siteKey];
+    const keyId = keystore.activeKeyId;
+    const setting = keyId ? siteSettings[keyId]?.[siteKey] : undefined;
     if (setting === "deny") {
       sendResponse({
         type: "nostr:response",
@@ -236,6 +239,9 @@ async function maybeConfirmOrRespond(
     }
     if (setting !== "allow") {
       const entry: PendingRequest = { ...request, sendResponse, site, siteKey };
+      if (keyId) {
+        entry.keyId = keyId;
+      }
       if (tabId !== undefined) {
         entry.tabId = tabId;
       }
@@ -428,8 +434,10 @@ async function handlePanelRequest(
         message.decision === "allow" || message.decision === "alwaysAllow";
       if (message.decision === "alwaysAllow" || message.decision === "alwaysDeny") {
         const siteKey = entry.siteKey;
-        if (siteKey) {
-          siteSettings[siteKey] = allow ? "allow" : "deny";
+        const keyId = entry.keyId;
+        if (siteKey && keyId) {
+          const perKey = (siteSettings[keyId] ??= {});
+          perKey[siteKey] = allow ? "allow" : "deny";
           await browser.storage.local.set({ [SITE_SETTINGS_KEY]: siteSettings });
         }
       }
@@ -445,6 +453,34 @@ async function handlePanelRequest(
       }
       await notifyStateChanged();
       sendResponse({ type: "vault:state", state: getVaultState() });
+      return;
+    }
+    case "vault:getSitePermissions": {
+      const perKey = siteSettings[message.keyId] ?? {};
+      const permissions = Object.entries(perKey).map(([siteKey, setting]) => ({
+        siteKey,
+        setting,
+      }));
+      sendResponse({ type: "vault:sitePermissions", permissions });
+      return;
+    }
+    case "vault:deleteSitePermission": {
+      const perKey = siteSettings[message.keyId];
+      if (perKey) {
+        delete perKey[message.siteKey];
+        if (Object.keys(perKey).length === 0) {
+          delete siteSettings[message.keyId];
+        }
+        await browser.storage.local.set({ [SITE_SETTINGS_KEY]: siteSettings });
+      }
+      const updated = siteSettings[message.keyId] ?? {};
+      sendResponse({
+        type: "vault:sitePermissions",
+        permissions: Object.entries(updated).map(([siteKey, setting]) => ({
+          siteKey,
+          setting,
+        })),
+      });
       return;
     }
   }

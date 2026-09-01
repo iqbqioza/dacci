@@ -29,6 +29,22 @@ export interface ConfirmDecisionMessage {
   decision: ConfirmDecision;
 }
 
+export interface SitePermissionInfo {
+  siteKey: string;
+  setting: "allow" | "deny";
+}
+
+export interface GetSitePermissionsMessage {
+  type: "vault:getSitePermissions";
+  keyId: string;
+}
+
+export interface DeleteSitePermissionMessage {
+  type: "vault:deleteSitePermission";
+  keyId: string;
+  siteKey: string;
+}
+
 export interface NostrRequest {
   type: "nostr:request";
   requestId: string;
@@ -150,7 +166,9 @@ export type PanelRequest =
   | DeleteKeyMessage
   | GetSettingsMessage
   | SetSettingsMessage
-  | ConfirmDecisionMessage;
+  | ConfirmDecisionMessage
+  | GetSitePermissionsMessage
+  | DeleteSitePermissionMessage;
 
 export type PanelResponse =
   | { type: "vault:state"; state: VaultState }
@@ -159,7 +177,8 @@ export type PanelResponse =
   | { type: "vault:created"; key: PublicKeyInfo }
   | { type: "vault:imported"; key: PublicKeyInfo }
   | { type: "vault:exported"; key: ExportedKey }
-  | { type: "vault:settings"; settings: AppSettings };
+  | { type: "vault:settings"; settings: AppSettings }
+  | { type: "vault:sitePermissions"; permissions: SitePermissionInfo[] };
 
 export interface SignEventRequest {
   type: "nostr:request";

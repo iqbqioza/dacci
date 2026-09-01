@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import type { ExportedKey } from "@dacci/core";
   import { sendPanelRequest } from "../api";
+  import SitePermissions from "./SitePermissions.svelte";
 
   let { keyId, initialName, onclose } = $props<{
     keyId: string;
@@ -17,6 +18,7 @@
   let saving = $state(false);
   let deleting = $state(false);
   let confirmingDelete = $state(false);
+  let viewSites = $state(false);
 
   onMount(async () => {
     name = initialName;
@@ -78,7 +80,9 @@
   }
 </script>
 
-{#if confirmingDelete}
+{#if viewSites}
+  <SitePermissions keyId={keyId} onclose={() => (viewSites = false)} />
+{:else if confirmingDelete}
   <div class="space-y-3">
     <h2 class="text-base font-medium">鍵を削除</h2>
     <p class="text-gray-600 dark:text-gray-300">
@@ -161,6 +165,13 @@
       disabled={saving}
     >
       OK
+    </button>
+    <button
+      type="button"
+      class="w-full rounded border border-blue-300 py-2 font-medium text-blue-600 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-950"
+      onclick={() => (viewSites = true)}
+    >
+      許可しているサイトを確認
     </button>
     <button
       type="button"

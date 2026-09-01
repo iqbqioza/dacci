@@ -83,6 +83,10 @@ export class Keystore {
     return this.masterKey ? "unlocked" : "locked";
   }
 
+  get activeKeyId(): string | null {
+    return this.vault?.activeKeyId ?? null;
+  }
+
   getState(): VaultState {
     return {
       status: this.status,
