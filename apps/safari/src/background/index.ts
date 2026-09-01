@@ -5,14 +5,50 @@ import {
   type NostrResponse,
   type PanelRequest,
   type PanelResponse,
+  type SessionStorage,
   type VaultData,
   type VaultState,
 } from "@dacci/core";
+import { bytesToHex, hexToBytes } from "@dacci/core";
 
 const STORAGE_KEY = "dacci:vault";
 const SETTINGS_KEY = "dacci:settings";
 const SITE_SETTINGS_KEY = "dacci:siteSettings";
+const SESSION_KEY = "dacci:session";
 const DEFAULT_SETTINGS: AppSettings = { theme: "system", autoLockMinutes: 1440 };
+
+const sessionStorage: SessionStorage = {
+  load: async () => {
+    if (!browser.storage.session) {
+      return null;
+    }
+    const stored = await browser.storage.session.get(SESSION_KEY);
+    const data = stored[SESSION_KEY] as
+      | { masterKey?: string; expiresAt?: number | null }
+      | undefined;
+    if (!data?.masterKey) {
+      return null;
+    }
+    return {
+      masterKey: hexToBytes(data.masterKey),
+      expiresAt: data.expiresAt ?? null,
+    };
+  },
+  save: async ({ masterKey, expiresAt }) => {
+    if (!browser.storage.session) {
+      return;
+    }
+    await browser.storage.session.set({
+      [SESSION_KEY]: { masterKey: bytesToHex(masterKey), expiresAt },
+    });
+  },
+  clear: async () => {
+    if (!browser.storage.session) {
+      return;
+    }
+    await browser.storage.session.remove(SESSION_KEY);
+  },
+};
 
 const keystore = new Keystore(
   {
@@ -24,6 +60,7 @@ const keystore = new Keystore(
       await browser.storage.local.set({ [STORAGE_KEY]: vault });
     },
   },
+  sessionStorage,
   DEFAULT_SETTINGS.autoLockMinutes,
 );
 
@@ -48,6 +85,7 @@ type RequestPayload = Pick<NostrRequest, "requestId" | "method" | "args">;
 interface PendingRequest extends RequestPayload {
   sendResponse: (response: NostrResponse) => void;
   site?: string;
+  siteKey?: string;
   tabId?: number;
 }
 
@@ -184,7 +222,9 @@ async function maybeConfirmOrRespond(
   tabId?: number,
 ): Promise<void> {
   if (request.method === "signEvent" && site) {
-    const setting = siteSettings[site];
+    const kind = (request.args[0] as { kind?: number } | undefined)?.kind;
+    const siteKey = kind === undefined ? site : `${site}:${kind}`;
+    const setting = siteSettings[siteKey];
     if (setting === "deny") {
       sendResponse({
         type: "nostr:response",
@@ -195,7 +235,7 @@ async function maybeConfirmOrRespond(
       return;
     }
     if (setting !== "allow") {
-      const entry: PendingRequest = { ...request, sendResponse, site };
+      const entry: PendingRequest = { ...request, sendResponse, site, siteKey };
       if (tabId !== undefined) {
         entry.tabId = tabId;
       }
@@ -260,6 +300,19 @@ function flushPendingRequests(): void {
   }
 }
 
+function prepareConfirmRequests(): void {
+  const remaining: PendingRequest[] = [];
+  for (const request of lockPendingRequests) {
+    if (request.method === "signEvent") {
+      void maybeConfirmOrRespond(request, request.sendResponse, request.site ?? null, request.tabId);
+    } else {
+      remaining.push(request);
+    }
+  }
+  lockPendingRequests.length = 0;
+  lockPendingRequests.push(...remaining);
+}
+
 async function handlePanelRequest(
   message: PanelRequest,
   sendResponse: (response: PanelResponse) => void,
@@ -273,6 +326,7 @@ async function handlePanelRequest(
     case "vault:setup": {
       try {
         await keystore.setup(message.passphrase);
+        prepareConfirmRequests();
         sendResponse({ type: "vault:unlocked", state: getVaultState() });
       } catch (error) {
         sendResponse({ type: "vault:error", error: errorMessage(error) });
@@ -282,6 +336,7 @@ async function handlePanelRequest(
     case "vault:unlock": {
       try {
         await keystore.unlock(message.passphrase);
+        prepareConfirmRequests();
         sendResponse({ type: "vault:unlocked", state: getVaultState() });
       } catch (error) {
         sendResponse({ type: "vault:error", error: errorMessage(error) });
@@ -372,9 +427,9 @@ async function handlePanelRequest(
       const allow =
         message.decision === "allow" || message.decision === "alwaysAllow";
       if (message.decision === "alwaysAllow" || message.decision === "alwaysDeny") {
-        const site = entry.site;
-        if (site) {
-          siteSettings[site] = allow ? "allow" : "deny";
+        const siteKey = entry.siteKey;
+        if (siteKey) {
+          siteSettings[siteKey] = allow ? "allow" : "deny";
           await browser.storage.local.set({ [SITE_SETTINGS_KEY]: siteSettings });
         }
       }

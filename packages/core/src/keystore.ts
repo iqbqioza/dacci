@@ -13,6 +13,17 @@ export interface VaultStorage {
   setVault(vault: VaultData): Promise<void>;
 }
 
+export interface SessionData {
+  masterKey: Uint8Array;
+  expiresAt: number | null;
+}
+
+export interface SessionStorage {
+  load(): Promise<SessionData | null>;
+  save(data: SessionData): Promise<void>;
+  clear(): Promise<void>;
+}
+
 function keyToPublicInfo(key: StoredKey): PublicKeyInfo {
   return {
     id: key.id,
@@ -31,13 +42,27 @@ export class Keystore {
 
   constructor(
     private storage: VaultStorage,
+    private sessionStorage: SessionStorage,
     private autoLockMinutes: number | null,
   ) {}
+
+  async init(): Promise<void> {
+    this.vault = await this.storage.getVault();
+    const session = await this.sessionStorage.load();
+    if (session && (session.expiresAt === null || session.expiresAt > Date.now())) {
+      this.masterKey = session.masterKey;
+      this.decryptAllKeys();
+      this.scheduleAutoLock();
+    } else if (session) {
+      await this.sessionStorage.clear();
+    }
+  }
 
   setAutoLockMinutes(minutes: number | null): void {
     this.autoLockMinutes = minutes;
     if (this.status === "unlocked") {
       this.scheduleAutoLock();
+      void this.saveSession();
     }
   }
 
@@ -47,11 +72,8 @@ export class Keystore {
       this.clearAutoLock();
     } else if (this.status === "unlocked") {
       this.scheduleAutoLock();
+      void this.saveSession();
     }
-  }
-
-  async init(): Promise<void> {
-    this.vault = await this.storage.getVault();
   }
 
   get status(): "uninitialized" | "locked" | "unlocked" {
@@ -81,6 +103,7 @@ export class Keystore {
     this.secretKeys.clear();
     await this.storage.setVault(vault);
     this.scheduleAutoLock();
+    await this.saveSession();
   }
 
   async unlock(passphrase: string): Promise<void> {
@@ -92,17 +115,34 @@ export class Keystore {
       throw new Error("wrong passphrase");
     }
     this.masterKey = masterKey;
-    this.secretKeys.clear();
-    for (const key of this.vault.keys) {
-      this.secretKeys.set(key.id, decryptSecretKey(masterKey, key.encrypted));
-    }
+    this.decryptAllKeys();
     this.scheduleAutoLock();
+    await this.saveSession();
   }
 
   lock(): void {
     this.masterKey = null;
     this.secretKeys.clear();
     this.clearAutoLock();
+    void this.sessionStorage.clear();
+  }
+
+  private decryptAllKeys(): void {
+    this.secretKeys.clear();
+    const masterKey = this.requireMasterKey();
+    for (const key of this.requireVault().keys) {
+      this.secretKeys.set(key.id, decryptSecretKey(masterKey, key.encrypted));
+    }
+  }
+
+  private async saveSession(): Promise<void> {
+    const masterKey = this.masterKey;
+    if (!masterKey) {
+      return;
+    }
+    const expiresAt =
+      this.autoLockMinutes === null ? null : Date.now() + this.autoLockMinutes * 60_000;
+    await this.sessionStorage.save({ masterKey, expiresAt });
   }
 
   async createKey(name?: string): Promise<PublicKeyInfo> {

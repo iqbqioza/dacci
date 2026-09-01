@@ -1,8 +1,11 @@
 <script lang="ts">
-  import type { ConfirmRequestInfo, ConfirmDecision } from "@dacci/core";
+  import type { ConfirmRequestInfo, ConfirmDecision, VaultState } from "@dacci/core";
   import { sendPanelRequest } from "../api";
 
-  let { request } = $props<{ request: ConfirmRequestInfo }>();
+  let { request, ondone } = $props<{
+    request: ConfirmRequestInfo;
+    ondone: (state: VaultState) => void;
+  }>();
 
   let error = $state("");
   let deciding = $state(false);
@@ -11,8 +14,15 @@
     deciding = true;
     error = "";
     try {
-      await sendPanelRequest({ type: "vault:confirmDecision", decision });
-      close();
+      const res = await sendPanelRequest<{ type: "vault:state"; state: VaultState }>({
+        type: "vault:confirmDecision",
+        decision,
+      });
+      if (res.state.confirmRequest) {
+        ondone(res.state);
+      } else {
+        close();
+      }
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
       deciding = false;
