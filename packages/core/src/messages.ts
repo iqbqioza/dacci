@@ -12,6 +12,37 @@ export interface VaultState {
   keys: PublicKeyInfo[];
   activeKeyId: string | null;
   pendingRequests: number;
+  confirmRequest: ConfirmRequestInfo | null;
+}
+
+export type ConfirmDecision = "allow" | "deny" | "alwaysAllow" | "alwaysDeny";
+
+export interface ConfirmRequestInfo {
+  site: string;
+  kind: number;
+  content: string;
+  tags: string[][];
+}
+
+export interface ConfirmDecisionMessage {
+  type: "vault:confirmDecision";
+  decision: ConfirmDecision;
+}
+
+export interface SitePermissionInfo {
+  siteKey: string;
+  setting: "allow" | "deny";
+}
+
+export interface GetSitePermissionsMessage {
+  type: "vault:getSitePermissions";
+  keyId: string;
+}
+
+export interface DeleteSitePermissionMessage {
+  type: "vault:deleteSitePermission";
+  keyId: string;
+  siteKey: string;
 }
 
 export interface NostrRequest {
@@ -27,7 +58,7 @@ export type NostrResponse =
 
 export interface OpenPanelMessage {
   type: "dacci:openPanel";
-  reason?: "manual" | "unlock";
+  reason?: "manual" | "unlock" | "confirm";
 }
 
 export interface ClosePanelMessage {
@@ -58,6 +89,12 @@ export interface GetSettingsMessage {
 export interface SetSettingsMessage {
   type: "vault:setSettings";
   settings: AppSettings;
+}
+
+export interface ChangePassphraseMessage {
+  type: "vault:changePassphrase";
+  currentPassphrase: string;
+  newPassphrase: string;
 }
 
 export interface GetStateMessage {
@@ -134,7 +171,11 @@ export type PanelRequest =
   | ExportKeyMessage
   | DeleteKeyMessage
   | GetSettingsMessage
-  | SetSettingsMessage;
+  | SetSettingsMessage
+  | ChangePassphraseMessage
+  | ConfirmDecisionMessage
+  | GetSitePermissionsMessage
+  | DeleteSitePermissionMessage;
 
 export type PanelResponse =
   | { type: "vault:state"; state: VaultState }
@@ -143,7 +184,8 @@ export type PanelResponse =
   | { type: "vault:created"; key: PublicKeyInfo }
   | { type: "vault:imported"; key: PublicKeyInfo }
   | { type: "vault:exported"; key: ExportedKey }
-  | { type: "vault:settings"; settings: AppSettings };
+  | { type: "vault:settings"; settings: AppSettings }
+  | { type: "vault:sitePermissions"; permissions: SitePermissionInfo[] };
 
 export interface SignEventRequest {
   type: "nostr:request";

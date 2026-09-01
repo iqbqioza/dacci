@@ -5,13 +5,50 @@ import {
   type NostrResponse,
   type PanelRequest,
   type PanelResponse,
+  type SessionStorage,
   type VaultData,
   type VaultState,
 } from "@dacci/core";
+import { bytesToHex, hexToBytes } from "@dacci/core";
 
 const STORAGE_KEY = "dacci:vault";
 const SETTINGS_KEY = "dacci:settings";
+const SITE_SETTINGS_KEY = "dacci:siteSettings";
+const SESSION_KEY = "dacci:session";
 const DEFAULT_SETTINGS: AppSettings = { theme: "system", autoLockMinutes: 1440 };
+
+const sessionStorage: SessionStorage = {
+  load: async () => {
+    if (!chrome.storage.session) {
+      return null;
+    }
+    const stored = await chrome.storage.session.get(SESSION_KEY);
+    const data = stored[SESSION_KEY] as
+      | { masterKey?: string; expiresAt?: number | null }
+      | undefined;
+    if (!data?.masterKey) {
+      return null;
+    }
+    return {
+      masterKey: hexToBytes(data.masterKey),
+      expiresAt: data.expiresAt ?? null,
+    };
+  },
+  save: async ({ masterKey, expiresAt }) => {
+    if (!chrome.storage.session) {
+      return;
+    }
+    await chrome.storage.session.set({
+      [SESSION_KEY]: { masterKey: bytesToHex(masterKey), expiresAt },
+    });
+  },
+  clear: async () => {
+    if (!chrome.storage.session) {
+      return;
+    }
+    await chrome.storage.session.remove(SESSION_KEY);
+  },
+};
 
 const keystore = new Keystore(
   {
@@ -23,15 +60,19 @@ const keystore = new Keystore(
       await chrome.storage.local.set({ [STORAGE_KEY]: vault });
     },
   },
+  sessionStorage,
   DEFAULT_SETTINGS.autoLockMinutes,
 );
 
 let settings: AppSettings = DEFAULT_SETTINGS;
+let siteSettings: Record<string, Record<string, "allow" | "deny">> = {};
 
 const initPromise = (async () => {
   await keystore.init();
-  const stored = await chrome.storage.local.get(SETTINGS_KEY);
+  const stored = await chrome.storage.local.get([SETTINGS_KEY, SITE_SETTINGS_KEY]);
   settings = { ...DEFAULT_SETTINGS, ...(stored[SETTINGS_KEY] as Partial<AppSettings> | undefined) };
+  siteSettings =
+    (stored[SITE_SETTINGS_KEY] as Record<string, Record<string, "allow" | "deny">> | undefined) ?? {};
   keystore.setAutoLockMinutes(settings.autoLockMinutes);
   console.log(`Dacci background loaded (status: ${keystore.status})`);
 })();
@@ -40,17 +81,51 @@ initPromise.catch((error) => {
   console.error("Dacci: failed to load vault", error);
 });
 
-interface PendingRequest {
-  requestId: string;
-  method: string;
-  args: unknown[];
+type RequestPayload = Pick<NostrRequest, "requestId" | "method" | "args">;
+
+interface PendingRequest extends RequestPayload {
   sendResponse: (response: NostrResponse) => void;
+  site?: string;
+  siteKey?: string;
+  keyId?: string;
+  tabId?: number;
 }
 
-const pendingRequests: PendingRequest[] = [];
+const lockPendingRequests: PendingRequest[] = [];
+const confirmPendingRequests: PendingRequest[] = [];
 
 function getVaultState(): VaultState {
-  return { ...keystore.getState(), pendingRequests: pendingRequests.length };
+  const confirm = confirmPendingRequests[0];
+  const event = confirm?.args[0] as
+    | { kind: number; content: string; tags?: string[][] }
+    | undefined;
+  return {
+    ...keystore.getState(),
+    pendingRequests: lockPendingRequests.length + confirmPendingRequests.length,
+    confirmRequest: confirm
+      ? {
+          site: confirm.site ?? "",
+          kind: event?.kind ?? 0,
+          content: event?.content ?? "",
+          tags: event?.tags ?? [],
+        }
+      : null,
+  };
+}
+
+function getSite(sender: chrome.runtime.MessageSender): string | null {
+  if (!sender.url) {
+    return null;
+  }
+  try {
+    return new URL(sender.url).host;
+  } catch {
+    return null;
+  }
+}
+
+async function notifyStateChanged(): Promise<void> {
+  await chrome.runtime.sendMessage({ type: "dacci:stateChanged" }).catch(() => {});
 }
 
 chrome.action.onClicked.addListener((tab) => {
@@ -127,12 +202,56 @@ async function handleNostrRequest(
   sendResponse: (response: NostrResponse) => void,
 ): Promise<void> {
   await initPromise;
+  const site = getSite(sender);
   if (keystore.status !== "unlocked") {
-    pendingRequests.push({ ...request, sendResponse });
+    const entry: PendingRequest = { ...request, sendResponse };
+    if (site) {
+      entry.site = site;
+    }
+    lockPendingRequests.push(entry);
     if (sender.tab?.id != null) {
       await ensurePanelInTab(sender.tab.id);
     }
     return;
+  }
+  await maybeConfirmOrRespond(request, sendResponse, site, sender.tab?.id);
+}
+
+async function maybeConfirmOrRespond(
+  request: RequestPayload,
+  sendResponse: (response: NostrResponse) => void,
+  site: string | null,
+  tabId?: number,
+): Promise<void> {
+  if (request.method === "signEvent" && site) {
+    const kind = (request.args[0] as { kind?: number } | undefined)?.kind;
+    const siteKey = kind === undefined ? site : `${site}:${kind}`;
+    const keyId = keystore.activeKeyId;
+    const setting = keyId ? siteSettings[keyId]?.[siteKey] : undefined;
+    if (setting === "deny") {
+      sendResponse({
+        type: "nostr:response",
+        requestId: request.requestId,
+        ok: false,
+        error: "signing denied by site policy",
+      });
+      return;
+    }
+    if (setting !== "allow") {
+      const entry: PendingRequest = { ...request, sendResponse, site, siteKey };
+      if (keyId) {
+        entry.keyId = keyId;
+      }
+      if (tabId !== undefined) {
+        entry.tabId = tabId;
+      }
+      confirmPendingRequests.push(entry);
+      await notifyStateChanged();
+      if (tabId != null) {
+        await ensurePanelInTab(tabId);
+      }
+      return;
+    }
   }
   await respond(request, sendResponse);
 }
@@ -159,7 +278,7 @@ async function executeMethod(method: string, args: unknown[]): Promise<unknown> 
 }
 
 async function respond(
-  request: Pick<NostrRequest, "requestId" | "method" | "args">,
+  request: RequestPayload,
   sendResponse: (response: NostrResponse) => void,
 ): Promise<void> {
   try {
@@ -181,10 +300,23 @@ async function respond(
 }
 
 function flushPendingRequests(): void {
-  while (pendingRequests.length > 0) {
-    const request = pendingRequests.shift()!;
-    void respond(request, request.sendResponse);
+  while (lockPendingRequests.length > 0) {
+    const request = lockPendingRequests.shift()!;
+    void maybeConfirmOrRespond(request, request.sendResponse, request.site ?? null, request.tabId);
   }
+}
+
+function prepareConfirmRequests(): void {
+  const remaining: PendingRequest[] = [];
+  for (const request of lockPendingRequests) {
+    if (request.method === "signEvent") {
+      void maybeConfirmOrRespond(request, request.sendResponse, request.site ?? null, request.tabId);
+    } else {
+      remaining.push(request);
+    }
+  }
+  lockPendingRequests.length = 0;
+  lockPendingRequests.push(...remaining);
 }
 
 async function handlePanelRequest(
@@ -200,6 +332,7 @@ async function handlePanelRequest(
     case "vault:setup": {
       try {
         await keystore.setup(message.passphrase);
+        prepareConfirmRequests();
         sendResponse({ type: "vault:unlocked", state: getVaultState() });
       } catch (error) {
         sendResponse({ type: "vault:error", error: errorMessage(error) });
@@ -209,6 +342,7 @@ async function handlePanelRequest(
     case "vault:unlock": {
       try {
         await keystore.unlock(message.passphrase);
+        prepareConfirmRequests();
         sendResponse({ type: "vault:unlocked", state: getVaultState() });
       } catch (error) {
         sendResponse({ type: "vault:error", error: errorMessage(error) });
@@ -273,6 +407,10 @@ async function handlePanelRequest(
     case "vault:deleteKey": {
       try {
         await keystore.deleteKey(message.keyId);
+        if (siteSettings[message.keyId]) {
+          delete siteSettings[message.keyId];
+          await chrome.storage.local.set({ [SITE_SETTINGS_KEY]: siteSettings });
+        }
         sendResponse({ type: "vault:state", state: getVaultState() });
       } catch (error) {
         sendResponse({ type: "vault:error", error: errorMessage(error) });
@@ -288,6 +426,74 @@ async function handlePanelRequest(
       keystore.setAutoLockMinutes(settings.autoLockMinutes);
       await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
       sendResponse({ type: "vault:settings", settings });
+      return;
+    }
+    case "vault:changePassphrase": {
+      try {
+        await keystore.changePassphrase(message.currentPassphrase, message.newPassphrase);
+        sendResponse({ type: "vault:state", state: getVaultState() });
+      } catch (error) {
+        sendResponse({ type: "vault:error", error: errorMessage(error) });
+      }
+      return;
+    }
+    case "vault:confirmDecision": {
+      const entry = confirmPendingRequests.shift();
+      if (!entry) {
+        sendResponse({ type: "vault:state", state: getVaultState() });
+        return;
+      }
+      const allow =
+        message.decision === "allow" || message.decision === "alwaysAllow";
+      if (message.decision === "alwaysAllow" || message.decision === "alwaysDeny") {
+        const siteKey = entry.siteKey;
+        const keyId = entry.keyId;
+        if (siteKey && keyId) {
+          const perKey = (siteSettings[keyId] ??= {});
+          perKey[siteKey] = allow ? "allow" : "deny";
+          await chrome.storage.local.set({ [SITE_SETTINGS_KEY]: siteSettings });
+        }
+      }
+      if (allow) {
+        await respond(entry, entry.sendResponse);
+      } else {
+        entry.sendResponse({
+          type: "nostr:response",
+          requestId: entry.requestId,
+          ok: false,
+          error: "signing denied by user",
+        });
+      }
+      await notifyStateChanged();
+      sendResponse({ type: "vault:state", state: getVaultState() });
+      return;
+    }
+    case "vault:getSitePermissions": {
+      const perKey = siteSettings[message.keyId] ?? {};
+      const permissions = Object.entries(perKey).map(([siteKey, setting]) => ({
+        siteKey,
+        setting,
+      }));
+      sendResponse({ type: "vault:sitePermissions", permissions });
+      return;
+    }
+    case "vault:deleteSitePermission": {
+      const perKey = siteSettings[message.keyId];
+      if (perKey) {
+        delete perKey[message.siteKey];
+        if (Object.keys(perKey).length === 0) {
+          delete siteSettings[message.keyId];
+        }
+        await chrome.storage.local.set({ [SITE_SETTINGS_KEY]: siteSettings });
+      }
+      const updated = siteSettings[message.keyId] ?? {};
+      sendResponse({
+        type: "vault:sitePermissions",
+        permissions: Object.entries(updated).map(([siteKey, setting]) => ({
+          siteKey,
+          setting,
+        })),
+      });
       return;
     }
   }

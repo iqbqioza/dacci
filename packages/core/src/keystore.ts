@@ -13,6 +13,17 @@ export interface VaultStorage {
   setVault(vault: VaultData): Promise<void>;
 }
 
+export interface SessionData {
+  masterKey: Uint8Array;
+  expiresAt: number | null;
+}
+
+export interface SessionStorage {
+  load(): Promise<SessionData | null>;
+  save(data: SessionData): Promise<void>;
+  clear(): Promise<void>;
+}
+
 function keyToPublicInfo(key: StoredKey): PublicKeyInfo {
   return {
     id: key.id,
@@ -31,13 +42,34 @@ export class Keystore {
 
   constructor(
     private storage: VaultStorage,
+    private sessionStorage: SessionStorage,
     private autoLockMinutes: number | null,
   ) {}
+
+  async init(): Promise<void> {
+    this.vault = await this.storage.getVault();
+    const session = await this.sessionStorage.load();
+    if (session && (session.expiresAt === null || session.expiresAt > Date.now())) {
+      try {
+        this.masterKey = session.masterKey;
+        this.decryptAllKeys();
+        this.scheduleAutoLock();
+        return;
+      } catch {
+        this.masterKey = null;
+        this.secretKeys.clear();
+      }
+    }
+    if (session) {
+      await this.sessionStorage.clear();
+    }
+  }
 
   setAutoLockMinutes(minutes: number | null): void {
     this.autoLockMinutes = minutes;
     if (this.status === "unlocked") {
       this.scheduleAutoLock();
+      void this.saveSession();
     }
   }
 
@@ -47,11 +79,8 @@ export class Keystore {
       this.clearAutoLock();
     } else if (this.status === "unlocked") {
       this.scheduleAutoLock();
+      void this.saveSession();
     }
-  }
-
-  async init(): Promise<void> {
-    this.vault = await this.storage.getVault();
   }
 
   get status(): "uninitialized" | "locked" | "unlocked" {
@@ -61,12 +90,17 @@ export class Keystore {
     return this.masterKey ? "unlocked" : "locked";
   }
 
+  get activeKeyId(): string | null {
+    return this.vault?.activeKeyId ?? null;
+  }
+
   getState(): VaultState {
     return {
       status: this.status,
       keys: this.vault?.keys.map(keyToPublicInfo) ?? [],
       activeKeyId: this.vault?.activeKeyId ?? null,
       pendingRequests: 0,
+      confirmRequest: null,
     };
   }
 
@@ -80,6 +114,7 @@ export class Keystore {
     this.secretKeys.clear();
     await this.storage.setVault(vault);
     this.scheduleAutoLock();
+    await this.saveSession();
   }
 
   async unlock(passphrase: string): Promise<void> {
@@ -91,17 +126,34 @@ export class Keystore {
       throw new Error("wrong passphrase");
     }
     this.masterKey = masterKey;
-    this.secretKeys.clear();
-    for (const key of this.vault.keys) {
-      this.secretKeys.set(key.id, decryptSecretKey(masterKey, key.encrypted));
-    }
+    this.decryptAllKeys();
     this.scheduleAutoLock();
+    await this.saveSession();
   }
 
   lock(): void {
     this.masterKey = null;
     this.secretKeys.clear();
     this.clearAutoLock();
+    void this.sessionStorage.clear();
+  }
+
+  private decryptAllKeys(): void {
+    this.secretKeys.clear();
+    const masterKey = this.requireMasterKey();
+    for (const key of this.requireVault().keys) {
+      this.secretKeys.set(key.id, decryptSecretKey(masterKey, key.encrypted));
+    }
+  }
+
+  private async saveSession(): Promise<void> {
+    const masterKey = this.masterKey;
+    if (!masterKey) {
+      return;
+    }
+    const expiresAt =
+      this.autoLockMinutes === null ? null : Date.now() + this.autoLockMinutes * 60_000;
+    await this.sessionStorage.save({ masterKey, expiresAt });
   }
 
   async createKey(name?: string): Promise<PublicKeyInfo> {
@@ -122,6 +174,35 @@ export class Keystore {
     }
     vault.activeKeyId = keyId;
     await this.storage.setVault(vault);
+  }
+
+  async changePassphrase(currentPassphrase: string, newPassphrase: string): Promise<void> {
+    this.requireUnlocked();
+    const vault = this.requireVault();
+    const currentMasterKey = verifyPassphrase(vault, currentPassphrase);
+    if (!currentMasterKey) {
+      throw new Error("wrong passphrase");
+    }
+    if (newPassphrase.length < 8) {
+      throw new Error("passphrase too short");
+    }
+    const { vault: newVault, masterKey: newMasterKey } = createVault(newPassphrase);
+    newVault.activeKeyId = vault.activeKeyId;
+    for (const key of vault.keys) {
+      const secretKey = this.secretKeys.get(key.id);
+      if (!secretKey) {
+        throw new Error("key not found");
+      }
+      newVault.keys.push({
+        ...key,
+        encrypted: encryptSecretKey(newMasterKey, secretKey),
+      });
+    }
+    this.vault = newVault;
+    this.masterKey = newMasterKey;
+    await this.storage.setVault(newVault);
+    this.scheduleAutoLock();
+    await this.saveSession();
   }
 
   async renameKey(keyId: string, name: string): Promise<void> {

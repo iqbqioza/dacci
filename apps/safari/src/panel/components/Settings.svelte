@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { AppSettings, Theme } from "@dacci/core";
+  import { sendPanelRequest } from "../api";
+  import Dropdown from "./Dropdown.svelte";
 
   let { settings, onchange, onclose } = $props<{
     settings: AppSettings;
@@ -7,13 +9,13 @@
     onclose: () => void;
   }>();
 
-  const themeOptions: { value: Theme; label: string }[] = [
+  const themeOptions: { value: string | number | null; label: string }[] = [
     { value: "light", label: "ライトモード" },
     { value: "dark", label: "ダークモード" },
     { value: "system", label: "システム" },
   ];
 
-  const lockOptions: { value: number | null; label: string }[] = [
+  const lockOptions: { value: string | number | null; label: string }[] = [
     { value: 1, label: "1分" },
     { value: 5, label: "5分" },
     { value: 15, label: "15分" },
@@ -25,6 +27,47 @@
     { value: 1440, label: "1日" },
     { value: null, label: "なし" },
   ];
+
+  let currentPassphrase = $state("");
+  let newPassphrase = $state("");
+  let confirmPassphrase = $state("");
+  let passError = $state("");
+  let passSuccess = $state(false);
+  let changing = $state(false);
+
+  async function changePassphrase() {
+    passError = "";
+    passSuccess = false;
+    if (newPassphrase.length < 8) {
+      passError = "新パスフレーズは8文字以上にしてください";
+      return;
+    }
+    if (newPassphrase !== confirmPassphrase) {
+      passError = "新パスフレーズが一致しません";
+      return;
+    }
+    changing = true;
+    try {
+      const res = await sendPanelRequest({
+        type: "vault:changePassphrase",
+        currentPassphrase,
+        newPassphrase,
+      });
+      if (res.type === "vault:error") {
+        passError = res.error;
+      } else {
+        currentPassphrase = "";
+        newPassphrase = "";
+        confirmPassphrase = "";
+        passSuccess = true;
+        setTimeout(() => (passSuccess = false), 3000);
+      }
+    } catch (e) {
+      passError = e instanceof Error ? e.message : String(e);
+    } finally {
+      changing = false;
+    }
+  }
 </script>
 
 <div class="space-y-5">
@@ -33,37 +76,60 @@
   </button>
   <h2 class="text-base font-medium">設定</h2>
 
-  <div>
-    <span class="mb-2 block text-xs text-gray-500 dark:text-gray-400">表示色</span>
-    <div class="space-y-2">
-      {#each themeOptions as option}
-        <button
-          type="button"
-          class="w-full rounded border px-3 py-2 text-left {settings.theme === option.value
-            ? 'border-blue-500 bg-blue-50 dark:bg-blue-950'
-            : 'border-gray-300 hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800'}"
-          onclick={() => onchange({ ...settings, theme: option.value })}
-        >
-          {option.label}
-        </button>
-      {/each}
-    </div>
-  </div>
+  <label class="block">
+    <span class="mb-1 block text-xs text-gray-500 dark:text-gray-400">表示色</span>
+    <Dropdown
+      value={settings.theme}
+      options={themeOptions}
+      onselect={(value) => onchange({ ...settings, theme: value as Theme })}
+    />
+  </label>
 
-  <div>
-    <span class="mb-2 block text-xs text-gray-500 dark:text-gray-400">ロック時間</span>
-    <div class="grid grid-cols-2 gap-2">
-      {#each lockOptions as option}
-        <button
-          type="button"
-          class="rounded border px-3 py-2 text-left {settings.autoLockMinutes === option.value
-            ? 'border-blue-500 bg-blue-50 dark:bg-blue-950'
-            : 'border-gray-300 hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800'}"
-          onclick={() => onchange({ ...settings, autoLockMinutes: option.value })}
-        >
-          {option.label}
-        </button>
-      {/each}
-    </div>
+  <label class="block">
+    <span class="mb-1 block text-xs text-gray-500 dark:text-gray-400">ロック時間</span>
+    <Dropdown
+      value={settings.autoLockMinutes}
+      options={lockOptions}
+      onselect={(value) => onchange({ ...settings, autoLockMinutes: value as number | null })}
+    />
+  </label>
+
+  <div class="space-y-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+    <h3 class="text-sm font-medium text-gray-700 dark:text-gray-200">パスフレーズ変更</h3>
+    <input
+      type="password"
+      bind:value={currentPassphrase}
+      placeholder="現在のパスフレーズ"
+      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+    />
+    <input
+      type="password"
+      bind:value={newPassphrase}
+      placeholder="新パスフレーズ (8文字以上)"
+      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+    />
+    <input
+      type="password"
+      bind:value={confirmPassphrase}
+      placeholder="パスフレーズ確認"
+      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+      onkeydown={(e) => {
+        if (e.key === "Enter") changePassphrase();
+      }}
+    />
+    {#if passError}
+      <p class="text-sm text-red-600">{passError}</p>
+    {/if}
+    {#if passSuccess}
+      <p class="text-sm text-green-700 dark:text-green-400">パスフレーズを変更しました。</p>
+    {/if}
+    <button
+      type="button"
+      class="w-full rounded bg-blue-600 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+      onclick={changePassphrase}
+      disabled={changing}
+    >
+      パスフレーズ更新
+    </button>
   </div>
 </div>

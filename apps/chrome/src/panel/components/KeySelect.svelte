@@ -2,7 +2,7 @@
   import type { VaultState } from "@dacci/core";
   import { sendPanelRequest } from "../api";
 
-  let { vault } = $props<{ vault: VaultState }>();
+  let { vault, ondone } = $props<{ vault: VaultState; ondone: (state: VaultState) => void }>();
 
   let keys = $state<VaultState["keys"]>([]);
   let activeKeyId = $state<string | null>(null);
@@ -18,7 +18,14 @@
     try {
       await sendPanelRequest({ type: "vault:selectKey", keyId });
       await sendPanelRequest({ type: "vault:flushPending" });
-      close();
+      const res = await sendPanelRequest<{ type: "vault:state"; state: VaultState }>({
+        type: "vault:getState",
+      });
+      if (res.state.confirmRequest) {
+        ondone(res.state);
+      } else {
+        close();
+      }
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
@@ -29,7 +36,14 @@
     try {
       await sendPanelRequest({ type: "vault:createKey" });
       await sendPanelRequest({ type: "vault:flushPending" });
-      close();
+      const res = await sendPanelRequest<{ type: "vault:state"; state: VaultState }>({
+        type: "vault:getState",
+      });
+      if (res.state.confirmRequest) {
+        ondone(res.state);
+      } else {
+        close();
+      }
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
