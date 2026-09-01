@@ -92,6 +92,10 @@
       </div>
     </div>
 
+    <p class="text-xs text-blue-500">
+      Select the key you want to use. The active key is highlighted with a blue border.
+    </p>
+
     {#if error}
       <p class="text-sm text-red-600">{error}</p>
     {/if}
