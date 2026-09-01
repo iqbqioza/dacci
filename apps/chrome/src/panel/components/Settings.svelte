@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { AppSettings, Theme } from "@dacci/core";
+  import Dropdown from "./Dropdown.svelte";
 
   let { settings, onchange, onclose } = $props<{
     settings: AppSettings;
@@ -7,13 +8,13 @@
     onclose: () => void;
   }>();
 
-  const themeOptions: { value: Theme; label: string }[] = [
+  const themeOptions: { value: string | number | null; label: string }[] = [
     { value: "light", label: "ライトモード" },
     { value: "dark", label: "ダークモード" },
     { value: "system", label: "システム" },
   ];
 
-  const lockOptions: { value: number | null; label: string }[] = [
+  const lockOptions: { value: string | number | null; label: string }[] = [
     { value: 1, label: "1分" },
     { value: 5, label: "5分" },
     { value: 15, label: "15分" },
@@ -33,37 +34,21 @@
   </button>
   <h2 class="text-base font-medium">設定</h2>
 
-  <div>
-    <span class="mb-2 block text-xs text-gray-500 dark:text-gray-400">表示色</span>
-    <div class="space-y-2">
-      {#each themeOptions as option}
-        <button
-          type="button"
-          class="w-full rounded border px-3 py-2 text-left {settings.theme === option.value
-            ? 'border-blue-500 bg-blue-50 dark:bg-blue-950'
-            : 'border-gray-300 hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800'}"
-          onclick={() => onchange({ ...settings, theme: option.value })}
-        >
-          {option.label}
-        </button>
-      {/each}
-    </div>
-  </div>
+  <label class="block">
+    <span class="mb-1 block text-xs text-gray-500 dark:text-gray-400">表示色</span>
+    <Dropdown
+      value={settings.theme}
+      options={themeOptions}
+      onselect={(value) => onchange({ ...settings, theme: value as Theme })}
+    />
+  </label>
 
-  <div>
-    <span class="mb-2 block text-xs text-gray-500 dark:text-gray-400">ロック時間</span>
-    <div class="grid grid-cols-2 gap-2">
-      {#each lockOptions as option}
-        <button
-          type="button"
-          class="rounded border px-3 py-2 text-left {settings.autoLockMinutes === option.value
-            ? 'border-blue-500 bg-blue-50 dark:bg-blue-950'
-            : 'border-gray-300 hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800'}"
-          onclick={() => onchange({ ...settings, autoLockMinutes: option.value })}
-        >
-          {option.label}
-        </button>
-      {/each}
-    </div>
-  </div>
+  <label class="block">
+    <span class="mb-1 block text-xs text-gray-500 dark:text-gray-400">ロック時間</span>
+    <Dropdown
+      value={settings.autoLockMinutes}
+      options={lockOptions}
+      onselect={(value) => onchange({ ...settings, autoLockMinutes: value as number | null })}
+    />
+  </label>
 </div>
