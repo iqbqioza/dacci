@@ -11,6 +11,15 @@ Nostr Signer browser extension
 
 </div>
 
+> [!NOTE]
+> This project is maintained by an individual in their spare time. If you'd like to show your support, please consider a tip via Lightning or Bitcoin.
+>
+> **Lightning address:** [thanks@iqbqioza.com](mailto:thanks@iqbqioza.com)
+>
+> **Bitcoin:** 13LUTf5tBXAv2TyEiKHpg9kVWtgiYz3ZYs
+>
+> **Bitcoin (SegWit):** bc1qttlc8m9gsh24xxqys26gaz2mtgfzw7s7770am6
+
 ## Features
 
 - Manage multiple keys and switch between them
