@@ -81,6 +81,18 @@ export interface FlushPendingMessage {
   type: "vault:flushPending";
 }
 
+export interface ExportKeyMessage {
+  type: "vault:exportKey";
+  keyId: string;
+}
+
+export interface ExportedKey {
+  id: string;
+  name: string;
+  npub: string;
+  nsec: string;
+}
+
 export type PanelRequest =
   | GetStateMessage
   | SetupMessage
@@ -90,14 +102,16 @@ export type PanelRequest =
   | ImportKeyMessage
   | SelectKeyMessage
   | RenameKeyMessage
-  | FlushPendingMessage;
+  | FlushPendingMessage
+  | ExportKeyMessage;
 
 export type PanelResponse =
   | { type: "vault:state"; state: VaultState }
   | { type: "vault:error"; error: string }
   | { type: "vault:unlocked"; state: VaultState }
   | { type: "vault:created"; key: PublicKeyInfo }
-  | { type: "vault:imported"; key: PublicKeyInfo };
+  | { type: "vault:imported"; key: PublicKeyInfo }
+  | { type: "vault:exported"; key: ExportedKey };
 
 export interface SignEventRequest {
   type: "nostr:request";

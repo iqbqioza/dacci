@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { PanelRequest, VaultState } from "@dacci/core";
   import { sendPanelRequest } from "../api";
+  import KeyDetail from "./KeyDetail.svelte";
 
   let { vault, pending, onselect, onlock } = $props<{
     vault: VaultState;
@@ -14,8 +15,7 @@
   let newKeyName = $state("");
   let nsec = $state("");
   let error = $state("");
-  let editingKeyId = $state<string | null>(null);
-  let editName = $state("");
+  let detailKeyId = $state<string | null>(null);
 
   $effect(() => {
     keys = vault.keys;
@@ -60,29 +60,9 @@
     await refresh();
   }
 
-  function startEdit(keyId: string, name: string) {
-    editingKeyId = keyId;
-    editName = name;
-  }
-
-  function cancelEdit() {
-    editingKeyId = null;
-    editName = "";
-  }
-
-  async function saveEdit() {
-    if (!editingKeyId) return;
-    const name = editName.trim();
-    if (!name) return;
-    error = "";
-    try {
-      await sendPanelRequest({ type: "vault:renameKey", keyId: editingKeyId, name });
-      editingKeyId = null;
-      editName = "";
-      await refresh();
-    } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
-    }
+  function closeDetail() {
+    detailKeyId = null;
+    void refresh();
   }
 
   async function lock() {
@@ -97,66 +77,45 @@
   }
 </script>
 
-<div class="space-y-4">
-  <div class="flex items-center justify-between">
-    <h2 class="text-base font-medium">鍵の管理</h2>
-    <button
-      type="button"
-      class="rounded bg-gray-200 px-3 py-1 font-medium text-gray-700 hover:bg-gray-300"
-      onclick={lock}
-    >
-      ロック
-    </button>
-  </div>
-
-  {#if error}
-    <p class="text-sm text-red-600">{error}</p>
-  {/if}
-
-  {#if pending > 0}
-    <div class="flex items-center justify-between gap-2 rounded bg-amber-50 px-3 py-2 text-amber-800">
-      <span>保留中の要求があります</span>
+{#if detailKeyId}
+  <KeyDetail
+    keyId={detailKeyId}
+    initialName={keys.find((k) => k.id === detailKeyId)?.name ?? ""}
+    onclose={closeDetail}
+  />
+{:else}
+  <div class="space-y-4">
+    <div class="flex items-center justify-between">
+      <h2 class="text-base font-medium">鍵の管理</h2>
       <button
         type="button"
-        class="shrink-0 rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700"
-        onclick={onselect}
+        class="rounded bg-gray-200 px-3 py-1 font-medium text-gray-700 hover:bg-gray-300"
+        onclick={lock}
       >
-        鍵を選択して処理
+        ロック
       </button>
     </div>
-  {/if}
 
-  <ul class="space-y-2">
-    {#each keys as key (key.id)}
-      <li>
-        {#if editingKeyId === key.id}
-          <div class="flex items-center gap-2 rounded border border-blue-500 bg-blue-50 px-3 py-2">
-            <input
-              type="text"
-              bind:value={editName}
-              placeholder="鍵の名前"
-              class="flex-1 rounded border border-gray-300 px-2 py-1 focus:border-blue-500 focus:outline-none"
-              onkeydown={(e) => {
-                if (e.key === "Enter") saveEdit();
-                if (e.key === "Escape") cancelEdit();
-              }}
-            />
-            <button
-              type="button"
-              class="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700"
-              onclick={saveEdit}
-            >
-              保存
-            </button>
-            <button
-              type="button"
-              class="rounded bg-gray-200 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-300"
-              onclick={cancelEdit}
-            >
-              取消
-            </button>
-          </div>
-        {:else}
+    {#if error}
+      <p class="text-sm text-red-600">{error}</p>
+    {/if}
+
+    {#if pending > 0}
+      <div class="flex items-center justify-between gap-2 rounded bg-amber-50 px-3 py-2 text-amber-800">
+        <span>保留中の要求があります</span>
+        <button
+          type="button"
+          class="shrink-0 rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700"
+          onclick={onselect}
+        >
+          鍵を選択して処理
+        </button>
+      </div>
+    {/if}
+
+    <ul class="space-y-2">
+      {#each keys as key (key.id)}
+        <li>
           <div
             class="flex w-full items-center rounded border px-3 py-2 {key.id === activeKeyId
               ? 'border-blue-500 bg-blue-50'
@@ -168,9 +127,9 @@
             </button>
             <button
               type="button"
-              title="名前を変更"
+              title="詳細"
               class="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-700"
-              onclick={() => startEdit(key.id, key.name)}
+              onclick={() => (detailKeyId = key.id)}
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -193,44 +152,44 @@
               </svg>
             </button>
           </div>
-        {/if}
-      </li>
-    {/each}
-    {#if keys.length === 0}
-      <li class="text-gray-500">鍵がありません。下から生成またはインポートしてください。</li>
-    {/if}
-  </ul>
+        </li>
+      {/each}
+      {#if keys.length === 0}
+        <li class="text-gray-500">鍵がありません。下から生成またはインポートしてください。</li>
+      {/if}
+    </ul>
 
-  <div class="space-y-2 border-t border-gray-200 pt-3">
-    <div class="flex gap-2">
-      <input
-        type="text"
-        bind:value={newKeyName}
-        placeholder="鍵の名前 (省略可)"
-        class="flex-1 rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none"
-      />
-      <button
-        type="button"
-        class="rounded bg-blue-600 px-3 py-2 font-medium text-white hover:bg-blue-700"
-        onclick={generate}
-      >
-        生成
-      </button>
-    </div>
-    <div class="flex gap-2">
-      <input
-        type="text"
-        bind:value={nsec}
-        placeholder="nsec1... をインポート"
-        class="flex-1 rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none"
-      />
-      <button
-        type="button"
-        class="rounded bg-gray-600 px-3 py-2 font-medium text-white hover:bg-gray-700"
-        onclick={importKey}
-      >
-        インポート
-      </button>
+    <div class="space-y-2 border-t border-gray-200 pt-3">
+      <div class="flex gap-2">
+        <input
+          type="text"
+          bind:value={newKeyName}
+          placeholder="鍵の名前 (省略可)"
+          class="flex-1 rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none"
+        />
+        <button
+          type="button"
+          class="rounded bg-blue-600 px-3 py-2 font-medium text-white hover:bg-blue-700"
+          onclick={generate}
+        >
+          生成
+        </button>
+      </div>
+      <div class="flex gap-2">
+        <input
+          type="text"
+          bind:value={nsec}
+          placeholder="nsec1... をインポート"
+          class="flex-1 rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none"
+        />
+        <button
+          type="button"
+          class="rounded bg-gray-600 px-3 py-2 font-medium text-white hover:bg-gray-700"
+          onclick={importKey}
+        >
+          インポート
+        </button>
+      </div>
     </div>
   </div>
-</div>
+{/if}

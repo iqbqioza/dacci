@@ -1,12 +1,12 @@
 import type { VaultData, StoredKey } from "./vault";
 import { createVault, verifyPassphrase, encryptSecretKey, decryptSecretKey } from "./vault";
 import { generateSecretKey, getPublicKey } from "./keys";
-import { decodeNsec, encodeNpub, decodeNpub } from "./nip19";
+import { decodeNsec, encodeNpub, encodeNsec, decodeNpub } from "./nip19";
 import { signEvent } from "./event";
 import type { EventTemplate, SignedEvent } from "./event";
 import { encrypt as nip04Encrypt, decrypt as nip04Decrypt } from "./nip04";
 import { encrypt as nip44Encrypt, decrypt as nip44Decrypt } from "./nip44";
-import type { PublicKeyInfo, VaultState } from "./messages";
+import type { ExportedKey, PublicKeyInfo, VaultState } from "./messages";
 
 export interface VaultStorage {
   getVault(): Promise<VaultData | null>;
@@ -117,6 +117,22 @@ export class Keystore {
     }
     key.name = name.trim() || key.name;
     await this.storage.setVault(vault);
+  }
+
+  exportKey(keyId: string): ExportedKey {
+    this.requireUnlocked();
+    const vault = this.requireVault();
+    const stored = vault.keys.find((entry) => entry.id === keyId);
+    const secretKey = stored ? this.secretKeys.get(stored.id) : undefined;
+    if (!stored || !secretKey) {
+      throw new Error("key not found");
+    }
+    return {
+      id: stored.id,
+      name: stored.name,
+      npub: stored.npub,
+      nsec: encodeNsec(secretKey),
+    };
   }
 
   getPublicKey(): string {

@@ -245,6 +245,15 @@ async function handlePanelRequest(
       }
       return;
     }
+    case "vault:exportKey": {
+      try {
+        const key = keystore.exportKey(message.keyId);
+        sendResponse({ type: "vault:exported", key });
+      } catch (error) {
+        sendResponse({ type: "vault:error", error: errorMessage(error) });
+      }
+      return;
+    }
   }
 }
 
