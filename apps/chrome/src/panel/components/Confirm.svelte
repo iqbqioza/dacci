@@ -10,6 +10,12 @@
   let error = $state("");
   let deciding = $state(false);
 
+  $effect(() => {
+    request;
+    deciding = false;
+    error = "";
+  });
+
   async function decide(decision: ConfirmDecision) {
     deciding = true;
     error = "";
