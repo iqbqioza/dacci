@@ -23,6 +23,9 @@
   });
 
   async function submit() {
+    if (!nsecValid || importing) {
+      return;
+    }
     importing = true;
     error = "";
     try {

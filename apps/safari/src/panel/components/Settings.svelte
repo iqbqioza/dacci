@@ -36,6 +36,9 @@
   let changing = $state(false);
 
   async function changePassphrase() {
+    if (changing) {
+      return;
+    }
     passError = "";
     passSuccess = false;
     if (newPassphrase.length < 8) {

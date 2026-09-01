@@ -73,6 +73,9 @@
   }
 
   async function importAndContinue() {
+    if (!nsecValid || importing) {
+      return;
+    }
     importing = true;
     error = "";
     try {
