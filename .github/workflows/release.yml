@@ -16,8 +16,12 @@ jobs:
 
       - name: Verify tag signature
         run: |
+          EXPECTED_FP="4645F13D0FEE7A8CE2EA5CCD711DE6FEC3464950"
           curl -fsSL "https://github.com/iqbqioza.gpg" | gpg --import -
-          gpg --list-keys "3C8DFA2DADDDD2213D049B507FDA9B2AAF0E2C0F"
+          if ! gpg --list-keys --with-colons "$EXPECTED_FP" | grep -q "^fpr:::::::::$EXPECTED_FP:"; then
+            echo "Imported key does not match the expected fingerprint $EXPECTED_FP"
+            exit 1
+          fi
           VERIFY_OUTPUT=$(git tag --verify "$GITHUB_REF_NAME" 2>&1)
           VERIFY_STATUS=$?
           echo "$VERIFY_OUTPUT"
@@ -25,11 +29,7 @@ jobs:
             echo "Tag signature verification failed."
             exit 1
           fi
-          if ! echo "$VERIFY_OUTPUT" | grep -q "3C8DFA2DADDDD2213D049B507FDA9B2AAF0E2C0F"; then
-            echo "Tag signature does not match expected key 3C8DFA2DADDDD2213D049B507FDA9B2AAF0E2C0F"
-            exit 1
-          fi
-          echo "Tag signature verified with expected key."
+          echo "Tag signature verified with the expected key."
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
