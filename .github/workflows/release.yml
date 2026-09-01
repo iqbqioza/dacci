@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Get version
+        id: version
+        run: echo "version=$(node -p "require('./apps/chrome/dist/manifest.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Package Chrome extension
+        run: |
+          cd apps/chrome/dist
+          zip -r ../../../dacci-chrome.zip .
+
+      - name: Package Firefox extension
+        run: |
+          cd apps/firefox/dist
+          zip -r ../../../dacci-firefox.zip .
+
+      - name: Rename artifacts
+        run: |
+          mv dacci-chrome.zip dacci-chrome-${{ steps.version.outputs.version }}.zip
+          mv dacci-firefox.zip dacci-firefox-${{ steps.version.outputs.version }}.zip
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" \
+              dacci-chrome-$VERSION.zip dacci-firefox-$VERSION.zip \
+              --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              dacci-chrome-$VERSION.zip dacci-firefox-$VERSION.zip \
+              --title "Dacci v$VERSION" \
+              --notes "Automated release of Dacci v$VERSION for Chrome and Firefox."
+          fi
