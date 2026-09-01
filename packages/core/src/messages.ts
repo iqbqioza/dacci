@@ -70,6 +70,12 @@ export interface SelectKeyMessage {
   keyId: string;
 }
 
+export interface RenameKeyMessage {
+  type: "vault:renameKey";
+  keyId: string;
+  name: string;
+}
+
 export type PanelRequest =
   | GetStateMessage
   | SetupMessage
@@ -77,7 +83,8 @@ export type PanelRequest =
   | LockMessage
   | CreateKeyMessage
   | ImportKeyMessage
-  | SelectKeyMessage;
+  | SelectKeyMessage
+  | RenameKeyMessage;
 
 export type PanelResponse =
   | { type: "vault:state"; state: VaultState }

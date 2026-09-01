@@ -228,6 +228,15 @@ async function handlePanelRequest(
       }
       return;
     }
+    case "vault:renameKey": {
+      try {
+        await keystore.renameKey(message.keyId, message.name);
+        sendResponse({ type: "vault:state", state: keystore.getState() });
+      } catch (error) {
+        sendResponse({ type: "vault:error", error: errorMessage(error) });
+      }
+      return;
+    }
   }
 }
 

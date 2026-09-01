@@ -107,6 +107,17 @@ export class Keystore {
     await this.storage.setVault(vault);
   }
 
+  async renameKey(keyId: string, name: string): Promise<void> {
+    this.requireUnlocked();
+    const vault = this.requireVault();
+    const key = vault.keys.find((entry) => entry.id === keyId);
+    if (!key) {
+      throw new Error("key not found");
+    }
+    key.name = name.trim() || key.name;
+    await this.storage.setVault(vault);
+  }
+
   getPublicKey(): string {
     this.requireUnlocked();
     return this.getActiveKey().pubkey;
