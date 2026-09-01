@@ -30,8 +30,15 @@ export class Keystore {
 
   constructor(
     private storage: VaultStorage,
-    private autoLockHours: number,
+    private autoLockMinutes: number | null,
   ) {}
+
+  setAutoLockMinutes(minutes: number | null): void {
+    this.autoLockMinutes = minutes;
+    if (this.status === "unlocked") {
+      this.scheduleAutoLock();
+    }
+  }
 
   async init(): Promise<void> {
     this.vault = await this.storage.getVault();
@@ -49,7 +56,6 @@ export class Keystore {
       status: this.status,
       keys: this.vault?.keys.map(keyToPublicInfo) ?? [],
       activeKeyId: this.vault?.activeKeyId ?? null,
-      autoLockHours: this.autoLockHours,
       pendingRequests: 0,
     };
   }
@@ -232,9 +238,12 @@ export class Keystore {
 
   private scheduleAutoLock(): void {
     this.clearAutoLock();
+    if (this.autoLockMinutes === null) {
+      return;
+    }
     this.lockTimer = setTimeout(() => {
       this.lock();
-    }, this.autoLockHours * 60 * 60 * 1000);
+    }, this.autoLockMinutes * 60 * 1000);
   }
 
   private clearAutoLock(): void {

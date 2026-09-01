@@ -81,7 +81,7 @@
 {#if confirmingDelete}
   <div class="space-y-3">
     <h2 class="text-base font-medium">鍵を削除</h2>
-    <p class="text-gray-600">
+    <p class="text-gray-600 dark:text-gray-300">
       「{name || initialName}」を削除しますか？<br />この操作は取り消せません。
     </p>
     {#if error}
@@ -97,7 +97,7 @@
     </button>
     <button
       type="button"
-      class="w-full rounded bg-gray-200 py-2 font-medium text-gray-700 hover:bg-gray-300"
+      class="w-full rounded bg-gray-200 py-2 font-medium text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
       onclick={() => (confirmingDelete = false)}
     >
       キャンセル
@@ -105,16 +105,20 @@
   </div>
 {:else}
   <div class="space-y-3">
-    <button type="button" class="text-gray-500 hover:text-gray-900" onclick={onclose}>
+    <button
+      type="button"
+      class="text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+      onclick={onclose}
+    >
       ← 一覧に戻る
     </button>
 
     <label class="block">
-      <span class="mb-1 block text-xs text-gray-500">鍵の名前</span>
+      <span class="mb-1 block text-xs text-gray-500 dark:text-gray-400">鍵の名前</span>
       <input
         type="text"
         bind:value={name}
-        class="w-full rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none"
+        class="w-full rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
       />
     </label>
 
@@ -124,24 +128,24 @@
 
     {#if key}
       <div>
-        <span class="mb-1 block text-xs text-gray-500">秘密鍵 (nsec)</span>
+        <span class="mb-1 block text-xs text-gray-500 dark:text-gray-400">秘密鍵 (nsec)</span>
         <input
           type={revealed ? "text" : "password"}
           readonly
           value={key.nsec}
-          class="w-full rounded border border-gray-300 bg-gray-50 px-3 py-2 font-mono text-xs text-gray-700 focus:outline-none"
+          class="w-full rounded border border-gray-300 bg-gray-50 px-3 py-2 font-mono text-xs text-gray-700 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
         />
         <div class="mt-2 flex gap-2">
           <button
             type="button"
-            class="rounded bg-gray-200 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-300"
+            class="rounded bg-gray-200 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
             onclick={() => (revealed = !revealed)}
           >
             {revealed ? "隠す" : "表示"}
           </button>
           <button
             type="button"
-            class="rounded bg-gray-200 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-300"
+            class="rounded bg-gray-200 px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
             onclick={copy}
           >
             {copied ? "コピーしました" : "コピー"}
@@ -160,7 +164,7 @@
     </button>
     <button
       type="button"
-      class="w-full rounded border border-red-300 py-2 font-medium text-red-600 hover:bg-red-50"
+      class="w-full rounded border border-red-300 py-2 font-medium text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
       onclick={() => (confirmingDelete = true)}
     >
       鍵を削除

@@ -1,5 +1,6 @@
 import {
   Keystore,
+  type AppSettings,
   type NostrRequest,
   type NostrResponse,
   type PanelRequest,
@@ -9,7 +10,8 @@ import {
 } from "@dacci/core";
 
 const STORAGE_KEY = "dacci:vault";
-const AUTO_LOCK_HOURS = 24;
+const SETTINGS_KEY = "dacci:settings";
+const DEFAULT_SETTINGS: AppSettings = { theme: "system", autoLockMinutes: 1440 };
 
 const keystore = new Keystore(
   {
@@ -21,12 +23,18 @@ const keystore = new Keystore(
       await browser.storage.local.set({ [STORAGE_KEY]: vault });
     },
   },
-  AUTO_LOCK_HOURS,
+  DEFAULT_SETTINGS.autoLockMinutes,
 );
 
-const initPromise = keystore.init().then(() => {
+let settings: AppSettings = DEFAULT_SETTINGS;
+
+const initPromise = (async () => {
+  await keystore.init();
+  const stored = await browser.storage.local.get(SETTINGS_KEY);
+  settings = { ...DEFAULT_SETTINGS, ...(stored[SETTINGS_KEY] as Partial<AppSettings> | undefined) };
+  keystore.setAutoLockMinutes(settings.autoLockMinutes);
   console.log(`Dacci Safari background loaded (status: ${keystore.status})`);
-});
+})();
 
 initPromise.catch((error) => {
   console.error("Dacci: failed to load vault", error);
@@ -246,6 +254,17 @@ async function handlePanelRequest(
       } catch (error) {
         sendResponse({ type: "vault:error", error: errorMessage(error) });
       }
+      return;
+    }
+    case "vault:getSettings": {
+      sendResponse({ type: "vault:settings", settings });
+      return;
+    }
+    case "vault:setSettings": {
+      settings = message.settings;
+      keystore.setAutoLockMinutes(settings.autoLockMinutes);
+      await browser.storage.local.set({ [SETTINGS_KEY]: settings });
+      sendResponse({ type: "vault:settings", settings });
       return;
     }
   }

@@ -6,11 +6,10 @@
   import KeyImport from "./KeyImport.svelte";
   import KeyGenerate from "./KeyGenerate.svelte";
 
-  let { vault, pending, onselect, onlock } = $props<{
+  let { vault, pending, onselect } = $props<{
     vault: VaultState;
     pending: number;
     onselect: () => void;
-    onlock: (state: VaultState) => void;
   }>();
 
   let keys = $state<VaultState["keys"]>([]);
@@ -45,13 +44,6 @@
   async function doneAndBackToList() {
     view = "list";
     await refresh();
-  }
-
-  async function lock() {
-    const res = await sendPanelRequest<{ type: "vault:state"; state: VaultState }>({
-      type: "vault:lock",
-    });
-    onlock(res.state);
   }
 
   function shortNpub(npub: string): string {
@@ -97,13 +89,6 @@
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
           </svg>
         </button>
-        <button
-          type="button"
-          class="rounded bg-gray-200 px-3 py-1 font-medium text-gray-700 hover:bg-gray-300"
-          onclick={lock}
-        >
-          ロック
-        </button>
       </div>
     </div>
 
@@ -112,7 +97,7 @@
     {/if}
 
     {#if pending > 0}
-      <div class="flex items-center justify-between gap-2 rounded bg-amber-50 px-3 py-2 text-amber-800">
+      <div class="flex items-center justify-between gap-2 rounded bg-amber-50 px-3 py-2 text-amber-800 dark:bg-amber-950 dark:text-amber-200">
         <span>保留中の要求があります</span>
         <button
           type="button"
@@ -129,17 +114,17 @@
         <li>
           <div
             class="flex w-full items-center rounded border px-3 py-2 {key.id === activeKeyId
-              ? 'border-blue-500 bg-blue-50'
-              : 'border-gray-300 hover:bg-gray-50'}"
+              ? 'border-blue-500 bg-blue-50 dark:bg-blue-950'
+              : 'border-gray-300 hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800'}"
           >
             <button type="button" class="flex-1 text-left" onclick={() => selectKey(key.id)}>
               <span class="block font-medium">{key.name}</span>
-              <span class="block text-xs text-gray-500">{shortNpub(key.npub)}</span>
+              <span class="block text-xs text-gray-500 dark:text-gray-400">{shortNpub(key.npub)}</span>
             </button>
             <button
               type="button"
               title="詳細"
-              class="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-700"
+              class="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-gray-700 dark:hover:text-gray-200"
               onclick={() => (detailKeyId = key.id)}
             >
               <svg
@@ -166,7 +151,7 @@
         </li>
       {/each}
       {#if keys.length === 0}
-        <li class="text-gray-500">鍵がありません。</li>
+        <li class="text-gray-500 dark:text-gray-400">鍵がありません。</li>
       {/if}
     </ul>
   </div>

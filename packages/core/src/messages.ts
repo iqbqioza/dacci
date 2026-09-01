@@ -11,7 +11,6 @@ export interface VaultState {
   status: "uninitialized" | "locked" | "unlocked";
   keys: PublicKeyInfo[];
   activeKeyId: string | null;
-  autoLockHours: number;
   pendingRequests: number;
 }
 
@@ -36,6 +35,22 @@ export interface ClosePanelMessage {
 }
 
 export type ContentMessage = OpenPanelMessage | ClosePanelMessage | NostrResponse;
+
+export type Theme = "light" | "dark" | "system";
+
+export interface AppSettings {
+  theme: Theme;
+  autoLockMinutes: number | null;
+}
+
+export interface GetSettingsMessage {
+  type: "vault:getSettings";
+}
+
+export interface SetSettingsMessage {
+  type: "vault:setSettings";
+  settings: AppSettings;
+}
 
 export interface GetStateMessage {
   type: "vault:getState";
@@ -109,7 +124,9 @@ export type PanelRequest =
   | RenameKeyMessage
   | FlushPendingMessage
   | ExportKeyMessage
-  | DeleteKeyMessage;
+  | DeleteKeyMessage
+  | GetSettingsMessage
+  | SetSettingsMessage;
 
 export type PanelResponse =
   | { type: "vault:state"; state: VaultState }
@@ -117,7 +134,8 @@ export type PanelResponse =
   | { type: "vault:unlocked"; state: VaultState }
   | { type: "vault:created"; key: PublicKeyInfo }
   | { type: "vault:imported"; key: PublicKeyInfo }
-  | { type: "vault:exported"; key: ExportedKey };
+  | { type: "vault:exported"; key: ExportedKey }
+  | { type: "vault:settings"; settings: AppSettings };
 
 export interface SignEventRequest {
   type: "nostr:request";
