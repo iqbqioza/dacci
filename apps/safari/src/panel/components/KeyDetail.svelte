@@ -164,7 +164,7 @@
       onclick={ok}
       disabled={saving}
     >
-      OK
+      鍵の名前を更新
     </button>
     <button
       type="button"
