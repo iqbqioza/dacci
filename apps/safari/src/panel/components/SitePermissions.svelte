@@ -42,6 +42,14 @@
     return [...map.entries()].map(([site, kinds]) => ({ site, kinds }));
   });
 
+  let allowedSites = $derived.by<SiteGroup[]>(() =>
+    sites.filter((group) => group.kinds.some((kind) => kind.setting === "allow")),
+  );
+
+  let deniedSites = $derived.by<SiteGroup[]>(() =>
+    sites.filter((group) => group.kinds.some((kind) => kind.setting === "deny")),
+  );
+
   let selectedKinds = $derived.by<SitePermissionInfo[]>(() => {
     if (!selectedSite) {
       return [];
@@ -177,26 +185,51 @@
     >
       ← 戻る
     </button>
-    <h2 class="text-base font-medium">許可しているサイト</h2>
+    <h2 class="text-base font-medium">サイトの許可設定</h2>
     {#if error}
       <p class="text-sm text-red-600">{error}</p>
     {/if}
-    <ul class="space-y-2">
-      {#each sites as group (group.site)}
-        <li>
-          <button
-            type="button"
-            class="flex w-full items-center rounded border border-gray-300 px-3 py-2 text-left hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800"
-            onclick={() => (selectedSite = group.site)}
-          >
-            <span class="flex-1 break-all font-mono text-sm text-gray-700 dark:text-gray-200">{group.site}</span>
-            <span class="ml-2 text-xs text-gray-400 dark:text-gray-500">{group.kinds.length} kind</span>
-          </button>
-        </li>
-      {/each}
-      {#if sites.length === 0}
-        <li class="text-gray-500 dark:text-gray-400">許可しているサイトはありません。</li>
-      {/if}
-    </ul>
+
+    <div>
+      <h3 class="mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">許可しているサイト</h3>
+      <ul class="space-y-2">
+        {#each allowedSites as group (group.site)}
+          <li>
+            <button
+              type="button"
+              class="flex w-full items-center rounded border border-gray-300 px-3 py-2 text-left hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800"
+              onclick={() => (selectedSite = group.site)}
+            >
+              <span class="flex-1 break-all font-mono text-sm text-gray-700 dark:text-gray-200">{group.site}</span>
+              <span class="ml-2 text-xs text-gray-400 dark:text-gray-500">{group.kinds.length} kind</span>
+            </button>
+          </li>
+        {/each}
+        {#if allowedSites.length === 0}
+          <li class="text-gray-500 dark:text-gray-400">許可しているサイトはありません。</li>
+        {/if}
+      </ul>
+    </div>
+
+    <div class="border-t border-gray-200 pt-3 dark:border-gray-700">
+      <h3 class="mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">許可していないサイト</h3>
+      <ul class="space-y-2">
+        {#each deniedSites as group (group.site)}
+          <li>
+            <button
+              type="button"
+              class="flex w-full items-center rounded border border-gray-300 px-3 py-2 text-left hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800"
+              onclick={() => (selectedSite = group.site)}
+            >
+              <span class="flex-1 break-all font-mono text-sm text-gray-700 dark:text-gray-200">{group.site}</span>
+              <span class="ml-2 text-xs text-gray-400 dark:text-gray-500">{group.kinds.length} kind</span>
+            </button>
+          </li>
+        {/each}
+        {#if deniedSites.length === 0}
+          <li class="text-gray-500 dark:text-gray-400">許可していないサイトはありません。</li>
+        {/if}
+      </ul>
+    </div>
   </div>
 {/if}
