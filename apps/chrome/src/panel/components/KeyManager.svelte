@@ -1,7 +1,10 @@
 <script lang="ts">
-  import type { PanelRequest, VaultState } from "@dacci/core";
+  import type { VaultState } from "@dacci/core";
   import { sendPanelRequest } from "../api";
   import KeyDetail from "./KeyDetail.svelte";
+  import KeyMenu from "./KeyMenu.svelte";
+  import KeyImport from "./KeyImport.svelte";
+  import KeyGenerate from "./KeyGenerate.svelte";
 
   let { vault, pending, onselect, onlock } = $props<{
     vault: VaultState;
@@ -12,10 +15,9 @@
 
   let keys = $state<VaultState["keys"]>([]);
   let activeKeyId = $state<string | null>(null);
-  let newKeyName = $state("");
-  let nsec = $state("");
   let error = $state("");
   let detailKeyId = $state<string | null>(null);
+  let view = $state<"list" | "menu" | "import" | "generate">("list");
 
   $effect(() => {
     keys = vault.keys;
@@ -30,31 +32,6 @@
     activeKeyId = res.state.activeKeyId;
   }
 
-  async function generate() {
-    error = "";
-    try {
-      const request: PanelRequest = newKeyName
-        ? { type: "vault:createKey", name: newKeyName }
-        : { type: "vault:createKey" };
-      await sendPanelRequest(request);
-      newKeyName = "";
-      await refresh();
-    } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
-    }
-  }
-
-  async function importKey() {
-    error = "";
-    try {
-      await sendPanelRequest({ type: "vault:importKey", nsec });
-      nsec = "";
-      await refresh();
-    } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
-    }
-  }
-
   async function selectKey(keyId: string) {
     await sendPanelRequest({ type: "vault:selectKey", keyId });
     await refresh();
@@ -63,6 +40,11 @@
   function closeDetail() {
     detailKeyId = null;
     void refresh();
+  }
+
+  async function doneAndBackToList() {
+    view = "list";
+    await refresh();
   }
 
   async function lock() {
@@ -83,17 +65,46 @@
     initialName={keys.find((k) => k.id === detailKeyId)?.name ?? ""}
     onclose={closeDetail}
   />
+{:else if view === "menu"}
+  <KeyMenu
+    onimport={() => (view = "import")}
+    ongenerate={() => (view = "generate")}
+    onclose={() => (view = "list")}
+  />
+{:else if view === "import"}
+  <KeyImport ondone={doneAndBackToList} onclose={() => (view = "menu")} />
+{:else if view === "generate"}
+  <KeyGenerate ondone={doneAndBackToList} onclose={() => (view = "menu")} />
 {:else}
   <div class="space-y-4">
     <div class="flex items-center justify-between">
       <h2 class="text-base font-medium">鍵の管理</h2>
-      <button
-        type="button"
-        class="rounded bg-gray-200 px-3 py-1 font-medium text-gray-700 hover:bg-gray-300"
-        onclick={lock}
-      >
-        ロック
-      </button>
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          title="鍵を追加"
+          class="rounded bg-blue-600 p-1.5 text-white hover:bg-blue-700"
+          onclick={() => (view = "menu")}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke-width="2"
+            stroke="currentColor"
+            class="h-4 w-4"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="rounded bg-gray-200 px-3 py-1 font-medium text-gray-700 hover:bg-gray-300"
+          onclick={lock}
+        >
+          ロック
+        </button>
+      </div>
     </div>
 
     {#if error}
@@ -155,41 +166,8 @@
         </li>
       {/each}
       {#if keys.length === 0}
-        <li class="text-gray-500">鍵がありません。下から生成またはインポートしてください。</li>
+        <li class="text-gray-500">鍵がありません。</li>
       {/if}
     </ul>
-
-    <div class="space-y-2 border-t border-gray-200 pt-3">
-      <div class="flex gap-2">
-        <input
-          type="text"
-          bind:value={newKeyName}
-          placeholder="鍵の名前 (省略可)"
-          class="flex-1 rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none"
-        />
-        <button
-          type="button"
-          class="rounded bg-blue-600 px-3 py-2 font-medium text-white hover:bg-blue-700"
-          onclick={generate}
-        >
-          生成
-        </button>
-      </div>
-      <div class="flex gap-2">
-        <input
-          type="text"
-          bind:value={nsec}
-          placeholder="nsec1... をインポート"
-          class="flex-1 rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none"
-        />
-        <button
-          type="button"
-          class="rounded bg-gray-600 px-3 py-2 font-medium text-white hover:bg-gray-700"
-          onclick={importKey}
-        >
-          インポート
-        </button>
-      </div>
-    </div>
   </div>
 {/if}
