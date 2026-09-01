@@ -23,7 +23,13 @@ const keystore = new Keystore(
   AUTO_LOCK_HOURS,
 );
 
-await keystore.init();
+const initPromise = keystore.init().then(() => {
+  console.log(`Dacci Safari background loaded (status: ${keystore.status})`);
+});
+
+initPromise.catch((error) => {
+  console.error("Dacci: failed to load vault", error);
+});
 
 interface PendingRequest {
   requestId: string;
@@ -84,6 +90,7 @@ async function handleNostrRequest(
   sender: browser.runtime.MessageSender,
   sendResponse: (response: NostrResponse) => void,
 ): Promise<void> {
+  await initPromise;
   if (keystore.status !== "unlocked") {
     pendingRequests.push({ ...request, sendResponse });
     if (sender.tab?.id != null) {
@@ -148,6 +155,7 @@ async function handlePanelRequest(
   message: PanelRequest,
   sendResponse: (response: PanelResponse) => void,
 ): Promise<void> {
+  await initPromise;
   switch (message.type) {
     case "vault:getState": {
       sendResponse({ type: "vault:state", state: keystore.getState() });

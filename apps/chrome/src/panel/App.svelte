@@ -10,6 +10,14 @@
   let error = $state("");
   let reason = $state("");
 
+  function close() {
+    if (window.parent === window) {
+      window.close();
+    } else {
+      window.parent.postMessage({ type: "dacci:closePanel" }, "*");
+    }
+  }
+
   onMount(async () => {
     reason = new URLSearchParams(window.location.search).get("reason") ?? "";
     try {
@@ -29,7 +37,7 @@
     <button
       type="button"
       class="rounded px-2 py-1 text-gray-500 hover:bg-gray-100"
-      onclick={() => window.parent.postMessage({ type: "dacci:closePanel" }, "*")}
+      onclick={close}
     >
       閉じる
     </button>
