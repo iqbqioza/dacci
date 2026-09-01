@@ -17,11 +17,12 @@ jobs:
       - name: Verify tag signature
         run: |
           curl -fsSL "https://github.com/iqbqioza.gpg" | gpg --import -
+          gpg --list-keys "3C8DFA2DADDDD2213D049B507FDA9B2AAF0E2C0F"
           VERIFY_OUTPUT=$(git tag --verify "$GITHUB_REF_NAME" 2>&1)
           VERIFY_STATUS=$?
+          echo "$VERIFY_OUTPUT"
           if [ $VERIFY_STATUS -ne 0 ]; then
-            echo "Tag signature verification failed:"
-            echo "$VERIFY_OUTPUT"
+            echo "Tag signature verification failed."
             exit 1
           fi
           if ! echo "$VERIFY_OUTPUT" | grep -q "3C8DFA2DADDDD2213D049B507FDA9B2AAF0E2C0F"; then
