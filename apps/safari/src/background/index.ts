@@ -11,6 +11,7 @@ import {
 
 const STORAGE_KEY = "dacci:vault";
 const SETTINGS_KEY = "dacci:settings";
+const SITE_SETTINGS_KEY = "dacci:siteSettings";
 const DEFAULT_SETTINGS: AppSettings = { theme: "system", autoLockMinutes: 1440 };
 
 const keystore = new Keystore(
@@ -27,30 +28,60 @@ const keystore = new Keystore(
 );
 
 let settings: AppSettings = DEFAULT_SETTINGS;
+let siteSettings: Record<string, "allow" | "deny"> = {};
 
 const initPromise = (async () => {
   await keystore.init();
-  const stored = await browser.storage.local.get(SETTINGS_KEY);
+  const stored = await browser.storage.local.get([SETTINGS_KEY, SITE_SETTINGS_KEY]);
   settings = { ...DEFAULT_SETTINGS, ...(stored[SETTINGS_KEY] as Partial<AppSettings> | undefined) };
+  siteSettings = (stored[SITE_SETTINGS_KEY] as Record<string, "allow" | "deny"> | undefined) ?? {};
   keystore.setAutoLockMinutes(settings.autoLockMinutes);
-  console.log(`Dacci Safari background loaded (status: ${keystore.status})`);
+  console.log(`Dacci background loaded (status: ${keystore.status})`);
 })();
 
 initPromise.catch((error) => {
   console.error("Dacci: failed to load vault", error);
 });
 
-interface PendingRequest {
-  requestId: string;
-  method: string;
-  args: unknown[];
+type RequestPayload = Pick<NostrRequest, "requestId" | "method" | "args">;
+
+interface PendingRequest extends RequestPayload {
   sendResponse: (response: NostrResponse) => void;
+  site?: string;
+  tabId?: number;
 }
 
-const pendingRequests: PendingRequest[] = [];
+const lockPendingRequests: PendingRequest[] = [];
+const confirmPendingRequests: PendingRequest[] = [];
 
 function getVaultState(): VaultState {
-  return { ...keystore.getState(), pendingRequests: pendingRequests.length };
+  const confirm = confirmPendingRequests[0];
+  return {
+    ...keystore.getState(),
+    pendingRequests: lockPendingRequests.length + confirmPendingRequests.length,
+    confirmRequest: confirm
+      ? {
+          site: confirm.site ?? "",
+          kind: (confirm.args[0] as { kind: number } | undefined)?.kind ?? 0,
+          content: (confirm.args[0] as { content: string } | undefined)?.content ?? "",
+        }
+      : null,
+  };
+}
+
+function getSite(sender: browser.runtime.MessageSender): string | null {
+  if (!sender.url) {
+    return null;
+  }
+  try {
+    return new URL(sender.url).host;
+  } catch {
+    return null;
+  }
+}
+
+async function notifyStateChanged(): Promise<void> {
+  await browser.runtime.sendMessage({ type: "dacci:stateChanged" }).catch(() => {});
 }
 
 browser.action.onClicked.addListener((tab) => {
@@ -80,7 +111,22 @@ async function ensurePanelInTab(tabId: number): Promise<void> {
       target: { tabId },
       files: ["assets/content.iife.js"],
     });
+    await browser.scripting.executeScript({
+      target: { tabId },
+      files: ["nostr-bridge.js"],
+      world: "MAIN",
+    });
   } catch {
+    // restricted page (e.g. chrome://): open the panel as a popup window
+    console.log("Dacci: injection blocked, opening panel in a popup window");
+    await browser.windows
+      .create({
+        url: browser.runtime.getURL("panel.html"),
+        type: "popup",
+        width: 400,
+        height: 640,
+      })
+      .catch(() => {});
     return;
   }
   await browser.tabs.sendMessage(tabId, { type: "dacci:openPanel" }).catch(() => {});
@@ -112,12 +158,50 @@ async function handleNostrRequest(
   sendResponse: (response: NostrResponse) => void,
 ): Promise<void> {
   await initPromise;
+  const site = getSite(sender);
   if (keystore.status !== "unlocked") {
-    pendingRequests.push({ ...request, sendResponse });
+    const entry: PendingRequest = { ...request, sendResponse };
+    if (site) {
+      entry.site = site;
+    }
+    lockPendingRequests.push(entry);
     if (sender.tab?.id != null) {
       await ensurePanelInTab(sender.tab.id);
     }
     return;
+  }
+  await maybeConfirmOrRespond(request, sendResponse, site, sender.tab?.id);
+}
+
+async function maybeConfirmOrRespond(
+  request: RequestPayload,
+  sendResponse: (response: NostrResponse) => void,
+  site: string | null,
+  tabId?: number,
+): Promise<void> {
+  if (request.method === "signEvent" && site) {
+    const setting = siteSettings[site];
+    if (setting === "deny") {
+      sendResponse({
+        type: "nostr:response",
+        requestId: request.requestId,
+        ok: false,
+        error: "signing denied by site policy",
+      });
+      return;
+    }
+    if (setting !== "allow") {
+      const entry: PendingRequest = { ...request, sendResponse, site };
+      if (tabId !== undefined) {
+        entry.tabId = tabId;
+      }
+      confirmPendingRequests.push(entry);
+      await notifyStateChanged();
+      if (tabId != null) {
+        await ensurePanelInTab(tabId);
+      }
+      return;
+    }
   }
   await respond(request, sendResponse);
 }
@@ -144,7 +228,7 @@ async function executeMethod(method: string, args: unknown[]): Promise<unknown> 
 }
 
 async function respond(
-  request: Pick<NostrRequest, "requestId" | "method" | "args">,
+  request: RequestPayload,
   sendResponse: (response: NostrResponse) => void,
 ): Promise<void> {
   try {
@@ -166,9 +250,9 @@ async function respond(
 }
 
 function flushPendingRequests(): void {
-  while (pendingRequests.length > 0) {
-    const request = pendingRequests.shift()!;
-    void respond(request, request.sendResponse);
+  while (lockPendingRequests.length > 0) {
+    const request = lockPendingRequests.shift()!;
+    void maybeConfirmOrRespond(request, request.sendResponse, request.site ?? null, request.tabId);
   }
 }
 
@@ -273,6 +357,35 @@ async function handlePanelRequest(
       keystore.setAutoLockMinutes(settings.autoLockMinutes);
       await browser.storage.local.set({ [SETTINGS_KEY]: settings });
       sendResponse({ type: "vault:settings", settings });
+      return;
+    }
+    case "vault:confirmDecision": {
+      const entry = confirmPendingRequests.shift();
+      if (!entry) {
+        sendResponse({ type: "vault:state", state: getVaultState() });
+        return;
+      }
+      const allow =
+        message.decision === "allow" || message.decision === "alwaysAllow";
+      if (message.decision === "alwaysAllow" || message.decision === "alwaysDeny") {
+        const site = entry.site;
+        if (site) {
+          siteSettings[site] = allow ? "allow" : "deny";
+          await browser.storage.local.set({ [SITE_SETTINGS_KEY]: siteSettings });
+        }
+      }
+      if (allow) {
+        await respond(entry, entry.sendResponse);
+      } else {
+        entry.sendResponse({
+          type: "nostr:response",
+          requestId: entry.requestId,
+          ok: false,
+          error: "signing denied by user",
+        });
+      }
+      await notifyStateChanged();
+      sendResponse({ type: "vault:state", state: getVaultState() });
       return;
     }
   }

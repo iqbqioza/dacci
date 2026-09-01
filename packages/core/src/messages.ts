@@ -12,6 +12,20 @@ export interface VaultState {
   keys: PublicKeyInfo[];
   activeKeyId: string | null;
   pendingRequests: number;
+  confirmRequest: ConfirmRequestInfo | null;
+}
+
+export type ConfirmDecision = "allow" | "deny" | "alwaysAllow" | "alwaysDeny";
+
+export interface ConfirmRequestInfo {
+  site: string;
+  kind: number;
+  content: string;
+}
+
+export interface ConfirmDecisionMessage {
+  type: "vault:confirmDecision";
+  decision: ConfirmDecision;
 }
 
 export interface NostrRequest {
@@ -27,7 +41,7 @@ export type NostrResponse =
 
 export interface OpenPanelMessage {
   type: "dacci:openPanel";
-  reason?: "manual" | "unlock";
+  reason?: "manual" | "unlock" | "confirm";
 }
 
 export interface ClosePanelMessage {
@@ -134,7 +148,8 @@ export type PanelRequest =
   | ExportKeyMessage
   | DeleteKeyMessage
   | GetSettingsMessage
-  | SetSettingsMessage;
+  | SetSettingsMessage
+  | ConfirmDecisionMessage;
 
 export type PanelResponse =
   | { type: "vault:state"; state: VaultState }

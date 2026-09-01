@@ -6,12 +6,14 @@
   import Unlock from "./components/Unlock.svelte";
   import KeyManager from "./components/KeyManager.svelte";
   import KeySelect from "./components/KeySelect.svelte";
+  import Confirm from "./components/Confirm.svelte";
   import Settings from "./components/Settings.svelte";
 
   let vaultState = $state<VaultState | null>(null);
   let error = $state("");
   let reason = $state("");
   let selectMode = $state(false);
+  let confirmMode = $state(false);
   let settingsView = $state(false);
   let settings = $state<AppSettings | null>(null);
   let isDark = $state(false);
@@ -47,9 +49,29 @@
     }
   }
 
-  async function onUnlocked(state: VaultState) {
+  function updateView(state: VaultState) {
     vaultState = state;
-    selectMode = state.pendingRequests > 0;
+    confirmMode = state.confirmRequest !== null;
+    selectMode = !state.confirmRequest && state.pendingRequests > 0;
+  }
+
+  async function refresh() {
+    try {
+      const res = await sendPanelRequest<{ type: "vault:state"; state: VaultState }>({
+        type: "vault:getState",
+      });
+      updateView(res.state);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  async function onUnlocked(state: VaultState) {
+    updateView(state);
+  }
+
+  function onKeySelectDone(state: VaultState) {
+    updateView(state);
   }
 
   onMount(async () => {
@@ -59,6 +81,11 @@
       void browser.runtime.sendMessage({ type: "dacci:panelClose" });
     };
     window.addEventListener("pagehide", onHide);
+    browser.runtime.onMessage.addListener((message) => {
+      if (message?.type === "dacci:stateChanged") {
+        void refresh();
+      }
+    });
     mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
     mediaQuery.addEventListener("change", () => {
       if (settings?.theme === "system") {
@@ -70,8 +97,7 @@
         sendPanelRequest<{ type: "vault:state"; state: VaultState }>({ type: "vault:getState" }),
         sendPanelRequest<{ type: "vault:settings"; settings: AppSettings }>({ type: "vault:getSettings" }),
       ]);
-      vaultState = stateRes.state;
-      selectMode = stateRes.state.pendingRequests > 0;
+      updateView(stateRes.state);
       settings = settingsRes.settings;
       applyTheme(settingsRes.settings.theme);
     } catch (e) {
@@ -124,6 +150,8 @@
   <main class="flex-1 overflow-y-auto p-4 text-sm">
     {#if settingsView && settings}
       <Settings settings={settings} onchange={updateSettings} onclose={() => (settingsView = false)} />
+    {:else if confirmMode && vaultState?.confirmRequest}
+      <Confirm request={vaultState.confirmRequest} />
     {:else}
       {#if reason === "unlock" && vaultState && vaultState.status !== "unlocked"}
         <p class="mb-3 rounded bg-amber-50 px-3 py-2 text-amber-800 dark:bg-amber-950 dark:text-amber-200">
@@ -141,7 +169,7 @@
       {:else if vaultState.status === "locked"}
         <Unlock ondone={onUnlocked} />
       {:else if selectMode}
-        <KeySelect vault={vaultState} />
+        <KeySelect vault={vaultState} ondone={onKeySelectDone} />
       {:else}
         <KeyManager
           vault={vaultState}
