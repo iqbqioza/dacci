@@ -2,6 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "types": ["chrome", "node", "vite/client"],
+    "noEmit": true,
+    "allowJs": true,
     "paths": {
       "@dacci/core": ["../../packages/core/src/index.ts"]
     }
