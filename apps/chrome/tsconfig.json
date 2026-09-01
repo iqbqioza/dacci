@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["chrome", "node", "vite/client"],
+    "paths": {
+      "@dacci/core": ["../../packages/core/src/index.ts"]
+    }
+  },
+  "include": ["src", "vite.config.ts", "vite.content.config.ts"]
+}
