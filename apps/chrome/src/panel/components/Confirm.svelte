@@ -160,10 +160,10 @@
       </button>
     {/if}
   {:else}
-    <div class="grid grid-cols-2 gap-2">
+    <div class="flex flex-col gap-2">
     <button
       type="button"
-      class="rounded bg-blue-600 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+      class="w-full rounded bg-blue-600 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
       onclick={() => decide("alwaysAllow")}
       disabled={deciding}
     >
@@ -171,7 +171,7 @@
     </button>
     <button
       type="button"
-      class="rounded border border-blue-500 py-2 font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:text-blue-400 dark:hover:bg-blue-950"
+      class="w-full rounded border border-blue-500 py-2 font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:text-blue-400 dark:hover:bg-blue-950"
       onclick={() => decide("allow")}
       disabled={deciding}
     >
@@ -179,7 +179,7 @@
     </button>
     <button
       type="button"
-      class="rounded border border-red-500 py-2 font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-950"
+      class="w-full rounded border border-red-500 py-2 font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-950"
       onclick={() => decide("deny")}
       disabled={deciding}
     >
@@ -187,7 +187,7 @@
     </button>
     <button
       type="button"
-      class="rounded bg-red-600 py-2 font-medium text-white hover:bg-red-700 disabled:opacity-50"
+      class="w-full rounded bg-red-600 py-2 font-medium text-white hover:bg-red-700 disabled:opacity-50"
       onclick={() => decide("alwaysDeny")}
       disabled={deciding}
     >
