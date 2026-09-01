@@ -64,7 +64,7 @@
 
 <div class="space-y-3">
   <h2 class="text-base font-medium">鍵を選択</h2>
-  <p class="text-gray-600 dark:text-gray-300">この要求を処理する鍵を選択してください。</p>
+  <p class="text-gray-600 ">この要求を処理する鍵を選択してください。</p>
   {#if error}
     <p class="text-sm text-red-600">{error}</p>
   {/if}
@@ -74,17 +74,17 @@
         <button
           type="button"
           class="w-full rounded border px-3 py-2 text-left {key.id === activeKeyId
-            ? 'border-blue-500 bg-blue-50 dark:bg-blue-950'
-            : 'border-gray-300 hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-800'}"
+            ? 'border-blue-500 bg-blue-50 '
+            : 'border-gray-300 hover:bg-gray-50 '}"
           onclick={() => choose(key.id)}
         >
           <span class="block font-medium">{key.name}</span>
-          <span class="block text-xs text-gray-500 dark:text-gray-400">{shortNpub(key.npub)}</span>
+          <span class="block text-xs text-gray-500 ">{shortNpub(key.npub)}</span>
         </button>
       </li>
     {/each}
     {#if keys.length === 0}
-      <li class="text-gray-500 dark:text-gray-400">鍵がありません。</li>
+      <li class="text-gray-500 ">鍵がありません。</li>
     {/if}
   </ul>
   {#if keys.length === 0}

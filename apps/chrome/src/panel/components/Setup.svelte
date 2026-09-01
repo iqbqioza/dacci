@@ -33,23 +33,23 @@
 
 <div class="space-y-3">
   <h2 class="text-base font-medium">初回セットアップ</h2>
-  <p class="text-gray-600 dark:text-gray-300">パスフレーズを設定してください。鍵はこのパスフレーズで暗号化して保存されます。</p>
+  <p class="text-gray-600 ">パスフレーズを設定してください。鍵はこのパスフレーズで暗号化して保存されます。</p>
   <label class="block">
-    <span class="mb-1 block text-xs text-gray-500 dark:text-gray-400">パスフレーズ</span>
+    <span class="mb-1 block text-xs text-gray-500 ">パスフレーズ</span>
     <input
       type="password"
       bind:value={passphrase}
       placeholder="8文字以上"
-      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none   "
     />
   </label>
   <label class="block">
-    <span class="mb-1 block text-xs text-gray-500 dark:text-gray-400">確認</span>
+    <span class="mb-1 block text-xs text-gray-500 ">確認</span>
     <input
       type="password"
       bind:value={confirm}
       placeholder="もう一度入力"
-      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none   "
     />
   </label>
   {#if error}

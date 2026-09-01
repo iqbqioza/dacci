@@ -24,14 +24,14 @@
 
 <div class="space-y-3">
   <h2 class="text-base font-medium">ロック解除</h2>
-  <p class="text-gray-600 dark:text-gray-300">パスフレーズを入力してロックを解除してください。</p>
+  <p class="text-gray-600 ">パスフレーズを入力してロックを解除してください。</p>
   <label class="block">
-    <span class="mb-1 block text-xs text-gray-500 dark:text-gray-400">パスフレーズ</span>
+    <span class="mb-1 block text-xs text-gray-500 ">パスフレーズ</span>
     <input
       type="password"
       bind:value={passphrase}
       placeholder="パスフレーズ"
-      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none   "
       onkeydown={(e) => {
         if (e.key === "Enter") submit();
       }}

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { AppSettings, Theme, VaultState } from "@dacci/core";
+  import type { AppSettings, VaultState } from "@dacci/core";
   import { sendPanelRequest } from "./api";
   import Setup from "./components/Setup.svelte";
   import Unlock from "./components/Unlock.svelte";
@@ -16,20 +16,12 @@
   let confirmMode = $state(false);
   let settingsView = $state(false);
   let settings = $state<AppSettings | null>(null);
-  let isDark = $state(false);
-  let mediaQuery: MediaQueryList | null = null;
-
-  function applyTheme(theme: Theme) {
-    const dark = theme === "dark" || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-    isDark = dark;
-  }
 
   async function loadSettings() {
     const res = await sendPanelRequest<{ type: "vault:settings"; settings: AppSettings }>({
       type: "vault:getSettings",
     });
     settings = res.settings;
-    applyTheme(res.settings.theme);
   }
 
   async function updateSettings(next: AppSettings) {
@@ -38,7 +30,6 @@
       settings: next,
     });
     settings = res.settings;
-    applyTheme(res.settings.theme);
   }
 
   function close() {
@@ -87,12 +78,6 @@
         void refresh();
       }
     });
-    mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    mediaQuery.addEventListener("change", () => {
-      if (settings?.theme === "system") {
-        applyTheme("system");
-      }
-    });
     try {
       const [stateRes, settingsRes] = await Promise.all([
         sendPanelRequest<{ type: "vault:state"; state: VaultState }>({ type: "vault:getState" }),
@@ -100,17 +85,14 @@
       ]);
       updateView(stateRes.state);
       settings = settingsRes.settings;
-      applyTheme(settingsRes.settings.theme);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
   });
 </script>
 
-<div
-  class="flex h-full flex-col bg-white text-gray-900 {isDark ? 'dark' : ''} dark:bg-gray-900 dark:text-gray-100"
->
-  <header class="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+<div class="flex h-full flex-col bg-white text-gray-900">
+  <header class="flex items-center justify-between border-b border-gray-200 px-4 py-3">
     <div class="flex items-center gap-2">
       <img src="icons/icon-32.png" alt="Dacci" class="h-8 w-8" />
     </div>
@@ -118,7 +100,7 @@
       <button
         type="button"
         title="設定"
-        class="rounded p-1.5 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+        class="rounded p-1.5 text-gray-500 hover:bg-gray-100"
         onclick={() => (settingsView = !settingsView)}
       >
         <svg
@@ -143,7 +125,7 @@
       </button>
       <button
         type="button"
-        class="rounded px-2 py-1 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+        class="rounded px-2 py-1 text-gray-500 hover:bg-gray-100"
         onclick={close}
       >
         閉じる
@@ -161,7 +143,7 @@
       />
     {:else}
       {#if reason === "unlock" && vaultState && vaultState.status !== "unlocked"}
-        <p class="mb-3 rounded bg-amber-50 px-3 py-2 text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+        <p class="mb-3 rounded bg-amber-50 px-3 py-2 text-amber-800">
           {vaultState.status === "uninitialized"
             ? "サービスの要求を処理するには、初回セットアップが必要です。"
             : "サービスの要求を処理するには、ロックを解除してください。"}
@@ -170,7 +152,7 @@
       {#if error}
         <p class="text-red-600">{error}</p>
       {:else if !vaultState}
-        <p class="text-gray-500 dark:text-gray-400">読み込み中...</p>
+        <p class="text-gray-500">読み込み中...</p>
       {:else if vaultState.status === "uninitialized"}
         <Setup ondone={onUnlocked} />
       {:else if vaultState.status === "locked"}

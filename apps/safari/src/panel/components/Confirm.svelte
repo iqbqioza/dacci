@@ -107,22 +107,22 @@
 
 <div class="space-y-4">
   <h2 class="text-base font-medium">署名の確認</h2>
-  <p class="text-gray-600 dark:text-gray-300">{request.site} からの署名リクエストです。</p>
+  <p class="text-gray-600 ">{request.site} からの署名リクエストです。</p>
 
-  <div class="rounded border border-gray-300 p-3 dark:border-gray-600">
-    <span class="block text-xs text-gray-500 dark:text-gray-400">イベント種別</span>
+  <div class="rounded border border-gray-300 p-3 ">
+    <span class="block text-xs text-gray-500 ">イベント種別</span>
     <p class="font-mono text-sm">kind: {request.kind}</p>
   </div>
 
   <div>
-    <span class="mb-1 block text-xs text-gray-500 dark:text-gray-400">内容</span>
-    <pre class="max-h-48 overflow-y-auto whitespace-pre-wrap break-all rounded border border-gray-300 bg-gray-50 p-3 font-mono text-xs text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200">{request.content}</pre>
+    <span class="mb-1 block text-xs text-gray-500 ">内容</span>
+    <pre class="max-h-48 overflow-y-auto whitespace-pre-wrap break-all rounded border border-gray-300 bg-gray-50 p-3 font-mono text-xs text-gray-700   ">{request.content}</pre>
   </div>
 
   {#if request.tags.length > 0}
     <div>
-      <span class="mb-1 block text-xs text-gray-500 dark:text-gray-400">タグ</span>
-      <pre class="max-h-48 overflow-y-auto whitespace-pre-wrap break-all rounded border border-gray-300 bg-gray-50 p-3 font-mono text-xs text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200">{JSON.stringify(request.tags)}</pre>
+      <span class="mb-1 block text-xs text-gray-500 ">タグ</span>
+      <pre class="max-h-48 overflow-y-auto whitespace-pre-wrap break-all rounded border border-gray-300 bg-gray-50 p-3 font-mono text-xs text-gray-700   ">{JSON.stringify(request.tags)}</pre>
     </div>
   {/if}
 
@@ -131,13 +131,13 @@
   {/if}
 
   {#if keysCount === 0}
-    <p class="text-gray-600 dark:text-gray-300">鍵がありません。まず鍵を生成またはインポートしてください。</p>
+    <p class="text-gray-600 ">鍵がありません。まず鍵を生成またはインポートしてください。</p>
     {#if importMode}
       <input
         type="text"
         bind:value={nsec}
         placeholder="nsec1..."
-        class="w-full rounded border border-gray-300 px-3 py-2 font-mono text-xs focus:border-blue-500 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+        class="w-full rounded border border-gray-300 px-3 py-2 font-mono text-xs focus:border-blue-500 focus:outline-none   "
         onkeydown={(e) => {
           if (e.key === "Enter") importAndContinue();
         }}
@@ -152,7 +152,7 @@
       </button>
       <button
         type="button"
-        class="w-full rounded bg-gray-200 py-2 font-medium text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+        class="w-full rounded bg-gray-200 py-2 font-medium text-gray-700 hover:bg-gray-300  "
         onclick={() => (importMode = false)}
       >
         キャンセル
@@ -168,7 +168,7 @@
       </button>
       <button
         type="button"
-        class="w-full rounded border border-blue-500 py-2 font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:text-blue-400 dark:hover:bg-blue-950"
+        class="w-full rounded border border-blue-500 py-2 font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50 "
         onclick={() => (importMode = true)}
       >
         鍵をインポート
@@ -186,7 +186,7 @@
     </button>
     <button
       type="button"
-      class="w-full rounded border border-blue-500 py-2 font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:text-blue-400 dark:hover:bg-blue-950"
+      class="w-full rounded border border-blue-500 py-2 font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50 "
       onclick={() => decide("allow")}
       disabled={deciding}
     >
@@ -194,7 +194,7 @@
     </button>
     <button
       type="button"
-      class="w-full rounded border border-red-500 py-2 font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-950"
+      class="w-full rounded border border-red-500 py-2 font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 "
       onclick={() => decide("deny")}
       disabled={deciding}
     >
@@ -202,7 +202,7 @@
     </button>
     <button
       type="button"
-      class="w-full rounded border border-red-500 py-2 font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-950"
+      class="w-full rounded border border-red-500 py-2 font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 "
       onclick={() => decide("alwaysDeny")}
       disabled={deciding}
     >

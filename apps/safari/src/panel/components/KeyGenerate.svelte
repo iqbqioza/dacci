@@ -30,19 +30,19 @@
 <div class="space-y-3">
   <button
     type="button"
-    class="text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+    class="text-gray-500 hover:text-gray-900 "
     onclick={onclose}
   >
     ← 戻る
   </button>
   <h2 class="text-base font-medium">新しい鍵の生成</h2>
   <label class="block">
-    <span class="mb-1 block text-xs text-gray-500 dark:text-gray-400">鍵の名前 (省略可)</span>
+    <span class="mb-1 block text-xs text-gray-500 ">鍵の名前 (省略可)</span>
     <input
       type="text"
       bind:value={name}
       placeholder="鍵の名前"
-      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+      class="w-full rounded border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none   "
       onkeydown={(e) => {
         if (e.key === "Enter") submit();
       }}
