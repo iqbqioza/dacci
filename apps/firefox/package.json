@@ -1,0 +1,26 @@
+{
+  "name": "@dacci/firefox",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite build --watch && vite build --watch --config vite.background.config.ts && vite build --watch --config vite.content.config.ts",
+    "build": "vite build && vite build --config vite.background.config.ts && vite build --config vite.content.config.ts",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dacci/core": "*"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/firefox-webext-browser": "^143.0.0",
+    "@types/node": "^26.4.0",
+    "svelte": "^5.57.0",
+    "svelte-check": "^4.7.6",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^6.0.3",
+    "vite": "^8.2.2"
+  }
+}

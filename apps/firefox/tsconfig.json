@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["firefox-webext-browser", "node", "vite/client"],
+    "allowJs": true,
+    "noEmit": true,
+    "paths": {
+      "@dacci/core": ["../../packages/core/src/index.ts"]
+    }
+  },
+  "include": ["src", "vite.config.ts", "vite.background.config.ts", "vite.content.config.ts"]
+}
