@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { AppSettings, VaultState } from "@signr/core";
+  import type { AppSettings, VaultState } from "@dacci/core";
   import { sendPanelRequest } from "./api";
   import Setup from "./components/Setup.svelte";
   import Unlock from "./components/Unlock.svelte";
@@ -52,7 +52,7 @@
     if (window.parent === window) {
       window.close();
     } else {
-      window.parent.postMessage({ type: "signr:closePanel" }, "*");
+      window.parent.postMessage({ type: "dacci:closePanel" }, "*");
     }
   }
 
@@ -84,13 +84,13 @@
 
   onMount(async () => {
     reason = new URLSearchParams(window.location.search).get("reason") ?? "";
-    void chrome.runtime.sendMessage({ type: "signr:panelOpen" });
+    void chrome.runtime.sendMessage({ type: "dacci:panelOpen" });
     const onHide = () => {
-      void chrome.runtime.sendMessage({ type: "signr:panelClose" });
+      void chrome.runtime.sendMessage({ type: "dacci:panelClose" });
     };
     window.addEventListener("pagehide", onHide);
     chrome.runtime.onMessage.addListener((message) => {
-      if (message?.type === "signr:stateChanged") {
+      if (message?.type === "dacci:stateChanged") {
         void refresh();
       }
     });
@@ -110,7 +110,7 @@
 <div class="flex h-full flex-col bg-white text-gray-900">
   <header class="flex items-center justify-between border-b border-gray-200 px-4 py-3">
     <div class="flex items-center gap-2">
-      <img src="icons/icon-32.png" alt="Signr" class="h-8 w-8" />
+      <img src="icons/icon-32.png" alt="Dacci" class="h-8 w-8" />
     </div>
 <div class="flex items-center gap-2">
       <button

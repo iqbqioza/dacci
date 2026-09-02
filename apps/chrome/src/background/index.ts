@@ -8,13 +8,13 @@ import {
   type SessionStorage,
   type VaultData,
   type VaultState,
-} from "@signr/core";
-import { bytesToHex, hexToBytes } from "@signr/core";
+} from "@dacci/core";
+import { bytesToHex, hexToBytes } from "@dacci/core";
 
-const STORAGE_KEY = "signr:vault";
-const SETTINGS_KEY = "signr:settings";
-const SITE_SETTINGS_KEY = "signr:siteSettings";
-const SESSION_KEY = "signr:session";
+const STORAGE_KEY = "dacci:vault";
+const SETTINGS_KEY = "dacci:settings";
+const SITE_SETTINGS_KEY = "dacci:siteSettings";
+const SESSION_KEY = "dacci:session";
 const DEFAULT_SETTINGS: AppSettings = { autoLockMinutes: 1440 };
 
 const sessionStorage: SessionStorage = {
@@ -74,11 +74,11 @@ const initPromise = (async () => {
   siteSettings =
     (stored[SITE_SETTINGS_KEY] as Record<string, Record<string, "allow" | "deny">> | undefined) ?? {};
   keystore.setAutoLockMinutes(settings.autoLockMinutes);
-  console.log(`Signr background loaded (status: ${keystore.status})`);
+  console.log(`Dacci background loaded (status: ${keystore.status})`);
 })();
 
 initPromise.catch((error) => {
-  console.error("Signr: failed to load vault", error);
+  console.error("Dacci: failed to load vault", error);
 });
 
 type RequestPayload = Pick<NostrRequest, "requestId" | "method" | "args">;
@@ -125,7 +125,7 @@ function getSite(sender: chrome.runtime.MessageSender): string | null {
 }
 
 async function notifyStateChanged(): Promise<void> {
-  await chrome.runtime.sendMessage({ type: "signr:stateChanged" }).catch(() => {});
+  await chrome.runtime.sendMessage({ type: "dacci:stateChanged" }).catch(() => {});
 }
 
 chrome.action.onClicked.addListener((tab) => {
@@ -137,7 +137,7 @@ chrome.action.onClicked.addListener((tab) => {
 
 async function toggleOrOpenPanel(tabId: number): Promise<void> {
   try {
-    await chrome.tabs.sendMessage(tabId, { type: "signr:togglePanel" });
+    await chrome.tabs.sendMessage(tabId, { type: "dacci:togglePanel" });
   } catch {
     await ensurePanelInTab(tabId);
   }
@@ -145,7 +145,7 @@ async function toggleOrOpenPanel(tabId: number): Promise<void> {
 
 async function ensurePanelInTab(tabId: number): Promise<void> {
   try {
-    await chrome.tabs.sendMessage(tabId, { type: "signr:openPanel" });
+    await chrome.tabs.sendMessage(tabId, { type: "dacci:openPanel" });
     return;
   } catch {
     // content script not present in this tab; inject it
@@ -162,7 +162,7 @@ async function ensurePanelInTab(tabId: number): Promise<void> {
     });
   } catch {
     // restricted page (e.g. chrome://): open the panel as a popup window
-    console.log("Signr: injection blocked, opening panel in a popup window");
+    console.log("Dacci: injection blocked, opening panel in a popup window");
     await chrome.windows
       .create({
         url: chrome.runtime.getURL("panel.html"),
@@ -173,7 +173,7 @@ async function ensurePanelInTab(tabId: number): Promise<void> {
       .catch(() => {});
     return;
   }
-  await chrome.tabs.sendMessage(tabId, { type: "signr:openPanel" }).catch(() => {});
+  await chrome.tabs.sendMessage(tabId, { type: "dacci:openPanel" }).catch(() => {});
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -181,11 +181,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     void handleNostrRequest(message as NostrRequest, sender, sendResponse);
     return true;
   }
-  if (message?.type === "signr:panelOpen") {
+  if (message?.type === "dacci:panelOpen") {
     keystore.setPanelOpen(true);
     return undefined;
   }
-  if (message?.type === "signr:panelClose") {
+  if (message?.type === "dacci:panelClose") {
     keystore.setPanelOpen(false);
     return undefined;
   }

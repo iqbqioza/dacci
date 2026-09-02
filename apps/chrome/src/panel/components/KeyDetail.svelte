@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { ExportedKey } from "@signr/core";
+  import type { ExportedKey } from "@dacci/core";
   import { sendPanelRequest } from "../api";
   import SitePermissions from "./SitePermissions.svelte";
 
