@@ -63,31 +63,31 @@ jobs:
       - name: Package Chrome extension
         run: |
           cd apps/chrome/dist
-          zip -r ../../../dacci-chrome.zip .
+          zip -r ../../../signr-chrome.zip .
 
       - name: Package Firefox extension
         run: |
           cd apps/firefox/dist
-          zip -r ../../../dacci-firefox.zip .
+          zip -r ../../../signr-firefox.zip .
 
       - name: Rename artifacts
         run: |
           VERSION=${{ steps.version.outputs.version }}
-          mv dacci-chrome.zip dacci-chrome-$VERSION.zip
-          mv dacci-firefox.zip dacci-firefox-$VERSION.zip
+          mv signr-chrome.zip signr-chrome-$VERSION.zip
+          mv signr-firefox.zip signr-firefox-$VERSION.zip
 
       - name: Generate checksums
         run: |
           VERSION=${{ steps.version.outputs.version }}
-          sha256sum dacci-chrome-$VERSION.zip dacci-firefox-$VERSION.zip > SHA256SUMS.txt
+          sha256sum signr-chrome-$VERSION.zip signr-firefox-$VERSION.zip > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@9d57eef8c06cd9d6b433effeeb7a6a77b3ff94ad
         with:
           subject-path: |
-            dacci-chrome-${{ steps.version.outputs.version }}.zip
-            dacci-firefox-${{ steps.version.outputs.version }}.zip
+            signr-chrome-${{ steps.version.outputs.version }}.zip
+            signr-firefox-${{ steps.version.outputs.version }}.zip
 
       - name: Create or update release
         env:
@@ -96,11 +96,11 @@ jobs:
           VERSION=${{ steps.version.outputs.version }}
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" \
-              dacci-chrome-$VERSION.zip dacci-firefox-$VERSION.zip SHA256SUMS.txt \
+              signr-chrome-$VERSION.zip signr-firefox-$VERSION.zip SHA256SUMS.txt \
               --clobber
           else
             gh release create "$GITHUB_REF_NAME" \
-              dacci-chrome-$VERSION.zip dacci-firefox-$VERSION.zip SHA256SUMS.txt \
-              --title "Dacci v$VERSION" \
-              --notes "Automated release of Dacci v$VERSION for Chrome and Firefox."
+              signr-chrome-$VERSION.zip signr-firefox-$VERSION.zip SHA256SUMS.txt \
+              --title "Signr v$VERSION" \
+              --notes "Automated release of Signr v$VERSION for Chrome and Firefox."
           fi

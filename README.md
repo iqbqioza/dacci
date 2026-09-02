@@ -1,13 +1,13 @@
 <div align="center">
 
-<img src="assets/dacci-small.png" alt="Dacci" width="240" />
+<img src="assets/signr-small.png" alt="Signr" width="240" />
 
-# Dacci
+# Signr
 
 Nostr Signer browser extension
 
-[![CI](https://github.com/iqbqioza/dacci/actions/workflows/ci.yml/badge.svg)](https://github.com/iqbqioza/dacci/actions/workflows/ci.yml)
-[![Release](https://github.com/iqbqioza/dacci/actions/workflows/release.yml/badge.svg)](https://github.com/iqbqioza/dacci/actions/workflows/release.yml)
+[![CI](https://github.com/iqbqioza/signr/actions/workflows/ci.yml/badge.svg)](https://github.com/iqbqioza/signr/actions/workflows/ci.yml)
+[![Release](https://github.com/iqbqioza/signr/actions/workflows/release.yml/badge.svg)](https://github.com/iqbqioza/signr/actions/workflows/release.yml)
 
 </div>
 

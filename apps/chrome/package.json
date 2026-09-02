@@ -1,5 +1,5 @@
 {
-  "name": "@dacci/chrome",
+  "name": "@signr/chrome",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@dacci/core": "*"
+    "@signr/core": "*"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.0",

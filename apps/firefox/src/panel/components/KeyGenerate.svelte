@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { PanelRequest } from "@dacci/core";
+  import type { PanelRequest } from "@signr/core";
   import { sendPanelRequest } from "../api";
 
   let { ondone, onclose } = $props<{

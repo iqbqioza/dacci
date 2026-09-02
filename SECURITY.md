@@ -7,10 +7,10 @@ Please **do not** open a public issue for security problems. Report them private
 **How to report:**
 
 1. **Preferred:** use the GitHub private vulnerability reporting form:
-   https://github.com/iqbqioza/dacci/security/advisories/new
+   https://github.com/iqbqioza/signr/security/advisories/new
 2. **Alternatively:** email the maintainer at **takuya@iqbqioza.com** with the subject
-   prefixed with **`[SECURITY-REPORT:dacci]`** (e.g.
-   `[SECURITY-REPORT:dacci] Private key exposure via the NIP-07 bridge`).
+   prefixed with **`[SECURITY-REPORT:signr]`** (e.g.
+   `[SECURITY-REPORT:signr] Private key exposure via the NIP-07 bridge`).
 
 **Please include:**
 

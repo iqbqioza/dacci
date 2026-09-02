@@ -57,20 +57,20 @@ export type NostrResponse =
   | { type: "nostr:response"; requestId: string; ok: false; error: string };
 
 export interface OpenPanelMessage {
-  type: "dacci:openPanel";
+  type: "signr:openPanel";
   reason?: "manual" | "unlock" | "confirm";
 }
 
 export interface ClosePanelMessage {
-  type: "dacci:closePanel";
+  type: "signr:closePanel";
 }
 
 export interface PanelOpenMessage {
-  type: "dacci:panelOpen";
+  type: "signr:panelOpen";
 }
 
 export interface PanelCloseMessage {
-  type: "dacci:panelClose";
+  type: "signr:panelClose";
 }
 
 export type ContentMessage = OpenPanelMessage | ClosePanelMessage | NostrResponse;

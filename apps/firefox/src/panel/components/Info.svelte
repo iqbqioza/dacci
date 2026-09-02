@@ -20,9 +20,9 @@
   </button>
 
   <div class="flex items-center gap-2">
-    <img src="icons/icon-32.png" alt="Dacci" class="h-8 w-8" />
+    <img src="icons/icon-32.png" alt="Signr" class="h-8 w-8" />
     <div>
-      <h2 class="text-base font-medium">Dacci</h2>
+      <h2 class="text-base font-medium">Signr</h2>
       <p class="text-xs text-gray-500">Nostr Signer</p>
     </div>
   </div>
@@ -40,12 +40,12 @@
       <dt class="text-gray-500">GitHub</dt>
       <dd>
         <a
-          href="https://github.com/iqbqioza/dacci"
+          href="https://github.com/iqbqioza/signr"
           target="_blank"
           rel="noreferrer"
           class="text-blue-600 hover:underline"
         >
-          github.com/iqbqioza/dacci
+          github.com/iqbqioza/signr
         </a>
       </dd>
     </div>

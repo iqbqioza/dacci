@@ -1,17 +1,17 @@
 {
   "manifest_version": 3,
-  "name": "Dacci",
+  "name": "Signr",
   "version": "0.1.0",
   "description": "A secure Nostr signer that manages multiple keys, signs events, and encrypts messages in your browser.",
   "author": "iqbqioza",
-  "homepage_url": "https://github.com/iqbqioza/dacci",
+  "homepage_url": "https://github.com/iqbqioza/signr",
   "developer": {
     "name": "iqbqioza",
-    "url": "https://github.com/iqbqioza/dacci"
+    "url": "https://github.com/iqbqioza/signr"
   },
   "browser_specific_settings": {
     "gecko": {
-      "id": "dacci@iqbqioza.com",
+      "id": "signr@iqbqioza.com",
       "strict_min_version": "128.0"
     }
   },
@@ -47,7 +47,7 @@
     }
   ],
   "action": {
-    "default_title": "Dacci",
+    "default_title": "Signr",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png",

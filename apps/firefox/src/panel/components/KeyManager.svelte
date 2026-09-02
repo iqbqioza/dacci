@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { VaultState } from "@dacci/core";
+  import type { VaultState } from "@signr/core";
   import { sendPanelRequest } from "../api";
   import KeyDetail from "./KeyDetail.svelte";
   import KeyMenu from "./KeyMenu.svelte";

@@ -1,5 +1,5 @@
 {
-  "name": "@dacci/core",
+  "name": "@signr/core",
   "version": "0.0.0",
   "private": true,
   "type": "module",

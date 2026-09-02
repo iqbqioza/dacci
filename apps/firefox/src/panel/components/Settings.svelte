@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { AppSettings } from "@dacci/core";
+  import type { AppSettings } from "@signr/core";
   import { sendPanelRequest } from "../api";
   import Dropdown from "./Dropdown.svelte";
 
