@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { decodeNsec, isValidSecretKey } from "@signr/core";
+  import { decodeNsec, isValidSecretKey } from "@dacci/core";
   import { sendPanelRequest } from "../api";
 
   let { ondone, onclose } = $props<{

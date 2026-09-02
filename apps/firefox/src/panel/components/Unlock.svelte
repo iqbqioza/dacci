@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { VaultState } from "@signr/core";
+  import type { VaultState } from "@dacci/core";
   import { sendPanelRequest } from "../api";
 
   let { ondone } = $props<{ ondone: (state: VaultState) => void }>();

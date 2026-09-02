@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { SitePermissionInfo } from "@signr/core";
+  import type { SitePermissionInfo } from "@dacci/core";
   import { sendPanelRequest } from "../api";
 
   let { keyId, onclose } = $props<{

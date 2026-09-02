@@ -1,5 +1,5 @@
 {
-  "name": "signr-monorepo",
+  "name": "dacci-monorepo",
   "build": {
     "dockerfile": "Dockerfile"
   },
