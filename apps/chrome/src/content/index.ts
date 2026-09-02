@@ -1,4 +1,4 @@
-import type { NostrResponse } from "@dacci/core";
+import type { NostrResponse } from "@signr/core";
 
 const PANEL_URL = chrome.runtime.getURL("panel.html");
 const PANEL_WIDTH = 384;
@@ -36,7 +36,7 @@ function openPanel(reason?: string) {
   requestAnimationFrame(() => {
     panelFrame!.style.right = `${PANEL_MARGIN}px`;
   });
-  void chrome.runtime.sendMessage({ type: "dacci:panelOpen" });
+  void chrome.runtime.sendMessage({ type: "signr:panelOpen" });
 }
 
 function closePanel() {
@@ -44,7 +44,7 @@ function closePanel() {
   const frame = panelFrame;
   frame.style.right = `-${PANEL_WIDTH + PANEL_MARGIN}px`;
   panelFrame = null;
-  void chrome.runtime.sendMessage({ type: "dacci:panelClose" });
+  void chrome.runtime.sendMessage({ type: "signr:panelClose" });
   window.setTimeout(() => frame.remove(), 300);
 }
 
@@ -80,17 +80,17 @@ window.addEventListener("message", (event) => {
 
 window.addEventListener("message", (event) => {
   if (event.source !== panelFrame?.contentWindow) return;
-  if (event.data?.type === "dacci:closePanel") {
+  if (event.data?.type === "signr:closePanel") {
     closePanel();
   }
 });
 
 chrome.runtime.onMessage.addListener((message) => {
-  if (message?.type === "dacci:togglePanel") {
+  if (message?.type === "signr:togglePanel") {
     togglePanel();
-  } else if (message?.type === "dacci:openPanel") {
+  } else if (message?.type === "signr:openPanel") {
     openPanel(message.reason as string | undefined);
-  } else if (message?.type === "dacci:closePanel") {
+  } else if (message?.type === "signr:closePanel") {
     closePanel();
   }
 });

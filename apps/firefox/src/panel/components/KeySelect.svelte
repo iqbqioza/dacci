@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { VaultState } from "@dacci/core";
+  import type { VaultState } from "@signr/core";
   import { sendPanelRequest } from "../api";
 
   let { vault, ondone } = $props<{ vault: VaultState; ondone: (state: VaultState) => void }>();
@@ -53,7 +53,7 @@
     if (window.parent === window) {
       window.close();
     } else {
-      window.parent.postMessage({ type: "dacci:closePanel" }, "*");
+      window.parent.postMessage({ type: "signr:closePanel" }, "*");
     }
   }
 

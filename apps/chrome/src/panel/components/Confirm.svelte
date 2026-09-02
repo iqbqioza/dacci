@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { ConfirmRequestInfo, ConfirmDecision, VaultState } from "@dacci/core";
-  import { decodeNsec, isValidSecretKey } from "@dacci/core";
+  import type { ConfirmRequestInfo, ConfirmDecision, VaultState } from "@signr/core";
+  import { decodeNsec, isValidSecretKey } from "@signr/core";
   import { sendPanelRequest } from "../api";
 
   let { request, keysCount, ondone } = $props<{
@@ -100,7 +100,7 @@
     if (window.parent === window) {
       window.close();
     } else {
-      window.parent.postMessage({ type: "dacci:closePanel" }, "*");
+      window.parent.postMessage({ type: "signr:closePanel" }, "*");
     }
   }
 </script>
