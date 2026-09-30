@@ -1,0 +1,13 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "packages/nostr/*"
+
+# Supply-chain hardening: refuse packages released less than 3 days ago.
+# Unit: minutes. 3 days = 4320.
+allowBuilds:
+  esbuild: true
+
+minimumReleaseAge: 4320
+
+# Allowlist for install-time build scripts (vite requires esbuild).

@@ -1,0 +1,12 @@
+{
+  "name": "dacci-monorepo",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@12.8.1",
+  "scripts": {
+    "dev": "pnpm --filter dacci-browser dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint"
+  }
+}

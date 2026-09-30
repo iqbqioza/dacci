@@ -1,0 +1,163 @@
+@import "tailwindcss";
+
+/*
+ * DADS color tokens (Digital Agency Design System).
+ * Structure: 10 primitive hues x steps 50-900 + neutral Solid/Opacity Gray.
+ * Verified against DADS docs: --dads-blue-50 #e8f1fe, key blue #0017c1,
+ * --dads-cyan-200 #99f2ff, --dads-cyan-300 #79e2f2,
+ * --dads-solid-gray-900 #1a1a1a, black #000000.
+ * Anchors marked "provisional" stand in for Figma values that are not
+ * published as text; steps are mechanical color-mix derivations so the
+ * token set stays complete without inventing official hex codes.
+ * Replace provisional anchors with Figma values when available.
+ */
+@theme inline {
+  /* Blue (anchor: official key color) */
+  --dads-blue-50: #e8f1fe;
+  --dads-blue-100: color-mix(in srgb, #0017c1 8%, white);
+  --dads-blue-200: color-mix(in srgb, #0017c1 16%, white);
+  --dads-blue-300: color-mix(in srgb, #0017c1 28%, white);
+  --dads-blue-400: color-mix(in srgb, #0017c1 45%, white);
+  --dads-blue-500: color-mix(in srgb, #0017c1 65%, white);
+  --dads-blue-600: color-mix(in srgb, #0017c1 82%, white);
+  --dads-blue-700: #0017c1;
+  --dads-blue-800: color-mix(in srgb, #0017c1 85%, black);
+  --dads-blue-900: color-mix(in srgb, #0017c1 70%, black);
+
+  /* Light Blue (provisional anchor #0f7bd9) */
+  --dads-light-blue-50: color-mix(in srgb, #0f7bd9 8%, white);
+  --dads-light-blue-100: color-mix(in srgb, #0f7bd9 14%, white);
+  --dads-light-blue-200: color-mix(in srgb, #0f7bd9 24%, white);
+  --dads-light-blue-300: color-mix(in srgb, #0f7bd9 38%, white);
+  --dads-light-blue-400: color-mix(in srgb, #0f7bd9 55%, white);
+  --dads-light-blue-500: color-mix(in srgb, #0f7bd9 72%, white);
+  --dads-light-blue-600: #0f7bd9;
+  --dads-light-blue-700: color-mix(in srgb, #0f7bd9 85%, black);
+  --dads-light-blue-800: color-mix(in srgb, #0f7bd9 70%, black);
+  --dads-light-blue-900: color-mix(in srgb, #0f7bd9 55%, black);
+
+  /* Cyan (verified 200/300) */
+  --dads-cyan-50: color-mix(in srgb, #79e2f2 22%, white);
+  --dads-cyan-100: color-mix(in srgb, #79e2f2 45%, white);
+  --dads-cyan-200: #99f2ff;
+  --dads-cyan-300: #79e2f2;
+  --dads-cyan-400: color-mix(in srgb, #79e2f2 85%, black);
+  --dads-cyan-500: color-mix(in srgb, #0aa5bf 90%, black);
+  --dads-cyan-600: #0aa5bf; /* provisional anchor */
+  --dads-cyan-700: color-mix(in srgb, #0aa5bf 82%, black);
+  --dads-cyan-800: color-mix(in srgb, #0aa5bf 66%, black);
+  --dads-cyan-900: color-mix(in srgb, #0aa5bf 50%, black);
+
+  /* Green (provisional anchor #0f7b3d) */
+  --dads-green-50: color-mix(in srgb, #0f7b3d 8%, white);
+  --dads-green-100: color-mix(in srgb, #0f7b3d 14%, white);
+  --dads-green-200: color-mix(in srgb, #0f7b3d 24%, white);
+  --dads-green-300: color-mix(in srgb, #0f7b3d 38%, white);
+  --dads-green-400: color-mix(in srgb, #0f7b3d 55%, white);
+  --dads-green-500: color-mix(in srgb, #0f7b3d 72%, white);
+  --dads-green-600: #0f7b3d;
+  --dads-green-700: color-mix(in srgb, #0f7b3d 85%, black);
+  --dads-green-800: color-mix(in srgb, #0f7b3d 70%, black);
+  --dads-green-900: color-mix(in srgb, #0f7b3d 55%, black);
+
+  /* Lime (provisional anchor #5aa700) */
+  --dads-lime-50: color-mix(in srgb, #5aa700 10%, white);
+  --dads-lime-100: color-mix(in srgb, #5aa700 18%, white);
+  --dads-lime-200: color-mix(in srgb, #5aa700 30%, white);
+  --dads-lime-300: color-mix(in srgb, #5aa700 45%, white);
+  --dads-lime-400: color-mix(in srgb, #5aa700 62%, white);
+  --dads-lime-500: color-mix(in srgb, #5aa700 80%, white);
+  --dads-lime-600: #5aa700;
+  --dads-lime-700: color-mix(in srgb, #5aa700 85%, black);
+  --dads-lime-800: color-mix(in srgb, #5aa700 70%, black);
+  --dads-lime-900: color-mix(in srgb, #5aa700 55%, black);
+
+  /* Yellow (provisional anchor #c9a100) */
+  --dads-yellow-50: color-mix(in srgb, #c9a100 10%, white);
+  --dads-yellow-100: color-mix(in srgb, #c9a100 18%, white);
+  --dads-yellow-200: color-mix(in srgb, #c9a100 30%, white);
+  --dads-yellow-300: color-mix(in srgb, #c9a100 45%, white);
+  --dads-yellow-400: color-mix(in srgb, #c9a100 62%, white);
+  --dads-yellow-500: color-mix(in srgb, #c9a100 80%, white);
+  --dads-yellow-600: #c9a100;
+  --dads-yellow-700: color-mix(in srgb, #c9a100 85%, black);
+  --dads-yellow-800: color-mix(in srgb, #c9a100 70%, black);
+  --dads-yellow-900: color-mix(in srgb, #c9a100 55%, black);
+
+  /* Orange (provisional anchor #c96a00) */
+  --dads-orange-50: color-mix(in srgb, #c96a00 8%, white);
+  --dads-orange-100: color-mix(in srgb, #c96a00 14%, white);
+  --dads-orange-200: color-mix(in srgb, #c96a00 24%, white);
+  --dads-orange-300: color-mix(in srgb, #c96a00 38%, white);
+  --dads-orange-400: color-mix(in srgb, #c96a00 55%, white);
+  --dads-orange-500: color-mix(in srgb, #c96a00 72%, white);
+  --dads-orange-600: #c96a00;
+  --dads-orange-700: color-mix(in srgb, #c96a00 85%, black);
+  --dads-orange-800: color-mix(in srgb, #c96a00 70%, black);
+  --dads-orange-900: color-mix(in srgb, #c96a00 55%, black);
+
+  /* Red (provisional anchor #d11a2a) */
+  --dads-red-50: color-mix(in srgb, #d11a2a 8%, white);
+  --dads-red-100: color-mix(in srgb, #d11a2a 14%, white);
+  --dads-red-200: color-mix(in srgb, #d11a2a 24%, white);
+  --dads-red-300: color-mix(in srgb, #d11a2a 38%, white);
+  --dads-red-400: color-mix(in srgb, #d11a2a 55%, white);
+  --dads-red-500: color-mix(in srgb, #d11a2a 72%, white);
+  --dads-red-600: #d11a2a;
+  --dads-red-700: color-mix(in srgb, #d11a2a 85%, black);
+  --dads-red-800: color-mix(in srgb, #d11a2a 70%, black);
+  --dads-red-900: color-mix(in srgb, #d11a2a 55%, black);
+
+  /* Magenta (provisional anchor #c9006b) */
+  --dads-magenta-50: color-mix(in srgb, #c9006b 8%, white);
+  --dads-magenta-100: color-mix(in srgb, #c9006b 14%, white);
+  --dads-magenta-200: color-mix(in srgb, #c9006b 24%, white);
+  --dads-magenta-300: color-mix(in srgb, #c9006b 38%, white);
+  --dads-magenta-400: color-mix(in srgb, #c9006b 55%, white);
+  --dads-magenta-500: color-mix(in srgb, #c9006b 72%, white);
+  --dads-magenta-600: #c9006b;
+  --dads-magenta-700: color-mix(in srgb, #c9006b 85%, black);
+  --dads-magenta-800: color-mix(in srgb, #c9006b 70%, black);
+  --dads-magenta-900: color-mix(in srgb, #c9006b 55%, black);
+
+  /* Purple (provisional anchor #6b2bc9) */
+  --dads-purple-50: color-mix(in srgb, #6b2bc9 8%, white);
+  --dads-purple-100: color-mix(in srgb, #6b2bc9 14%, white);
+  --dads-purple-200: color-mix(in srgb, #6b2bc9 24%, white);
+  --dads-purple-300: color-mix(in srgb, #6b2bc9 38%, white);
+  --dads-purple-400: color-mix(in srgb, #6b2bc9 55%, white);
+  --dads-purple-500: color-mix(in srgb, #6b2bc9 72%, white);
+  --dads-purple-600: #6b2bc9;
+  --dads-purple-700: color-mix(in srgb, #6b2bc9 85%, black);
+  --dads-purple-800: color-mix(in srgb, #6b2bc9 70%, black);
+  --dads-purple-900: color-mix(in srgb, #6b2bc9 55%, black);
+
+  /* Neutral: white / black */
+  --dads-white: #ffffff;
+  --dads-black: #000000;
+
+  /* Neutral: Solid Gray (verified 900 #1a1a1a) */
+  --dads-solid-gray-50: #f2f2f2;
+  --dads-solid-gray-100: #e6e6e6;
+  --dads-solid-gray-200: #cccccc;
+  --dads-solid-gray-300: #b3b3b3;
+  --dads-solid-gray-400: #999999;
+  --dads-solid-gray-500: #757575;
+  --dads-solid-gray-600: #5c5c5c;
+  --dads-solid-gray-700: #474747;
+  --dads-solid-gray-800: #2e2e2e;
+  --dads-solid-gray-900: #1a1a1a;
+  --dads-solid-gray-1000: #111111;
+
+  /* Neutral: Opacity Gray (verified 100) */
+  --dads-opacity-gray-50: rgba(0, 0, 0, 0.05);
+  --dads-opacity-gray-100: rgba(0, 0, 0, 0.1);
+  --dads-opacity-gray-200: rgba(0, 0, 0, 0.2);
+  --dads-opacity-gray-300: rgba(0, 0, 0, 0.3);
+  --dads-opacity-gray-400: rgba(0, 0, 0, 0.4);
+}
+
+body {
+  background-color: var(--dads-white);
+  color: var(--dads-solid-gray-900);
+}
