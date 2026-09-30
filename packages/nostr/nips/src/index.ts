@@ -25,6 +25,18 @@ export {
   signEvent,
 } from "./auth.js";
 export type { AuthSecret, UnsignedEvent } from "./auth.js";
+export {
+  buildQuoteRepost,
+  buildReaction,
+  buildReply,
+  buildRepost,
+  mentionedPubkeys,
+  REACTION_KIND,
+  REACTION_PLUS,
+  REPOST_KIND,
+  REPLY_KIND,
+} from "./activity.js";
+export type { ReplyInput } from "./activity.js";
 export { bech32Decode, bech32Encode } from "./bech32.js";
 export {
   decodeNote,

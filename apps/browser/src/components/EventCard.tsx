@@ -2,6 +2,7 @@ import type { NostrEvent } from "dacci-nostr-nips";
 import { encodeNpub } from "dacci-nostr-nips";
 import { createMemo } from "solid-js";
 import { formatTime } from "../nostr.js";
+import { ActionBar } from "./ActionBar.jsx";
 import { ProfileAvatar, ProfileName } from "./ProfileAvatar.jsx";
 import { PostMenu } from "./PostMenu.jsx";
 
@@ -44,6 +45,7 @@ export function EventCard(props: {
         <p class="mt-1 whitespace-pre-wrap break-words text-(--dads-solid-gray-900)">
           {props.event.content}
         </p>
+        <ActionBar event={props.event} />
       </div>
     </article>
   );

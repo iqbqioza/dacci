@@ -11,6 +11,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "dacci-icons": "workspace:*",
     "dacci-nostr-nips": "workspace:*",
     "dacci-nostr-paginator": "workspace:*",
     "dacci-nostr-profile": "workspace:*",

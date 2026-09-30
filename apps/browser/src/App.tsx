@@ -10,9 +10,22 @@ import {
   Switch,
   untrack,
 } from "solid-js";
-import { getSigner, restoreSession, useAuth } from "./auth.jsx";
+import { restoreSession, useAuth } from "./auth.jsx";
 import { fetchEventById, lookupEvent } from "./event-cache.js";
+import {
+  closeCompose,
+  composeBusy,
+  composeError,
+  composeMode,
+  composeOpen,
+  composeTarget,
+  forgetMyActions,
+  openNewPost,
+  submitCompose,
+  type ComposeMode,
+} from "./compose.js";
 import { HomeTimeline } from "./components/HomeTimeline.jsx";
+import { ProfileAvatar, ProfileName } from "./components/ProfileAvatar.jsx";
 import { RelayDebugPanel } from "./components/RelayPanel.jsx";
 import {
   NetworkView,
@@ -21,6 +34,7 @@ import {
   SettingsView,
 } from "./components/Views.jsx";
 import { getConnection } from "./nostr.js";
+import { noticeMessage } from "./notice.js";
 import { resetHomeFeed } from "./home-feed.js";
 import { resetNotifications } from "./notifications-feed.js";
 import { resetProfiles } from "./profile.js";
@@ -42,6 +56,12 @@ import {
   type Route,
 } from "./router.js";
 
+const COMPOSE_TITLES: Record<ComposeMode, string> = {
+  new: "新規投稿",
+  reply: "リプライ",
+  quote: "引用付きリポスト",
+};
+
 const MENU_LABELS: Array<{ menu: Menu; label: string }> = [
   { menu: "home", label: "Home" },
   { menu: "notifications", label: "Notification" },
@@ -53,10 +73,7 @@ const MENU_LABELS: Array<{ menu: Menu; label: string }> = [
 export function App() {
   const [route, setRoute] = createSignal<Route>(parseHash(currentHash()));
   const { menuRoute, eventRoute } = projectRoute(route);
-  const [composeOpen, setComposeOpen] = createSignal(false);
   const [draft, setDraft] = createSignal("");
-  const [publishing, setPublishing] = createSignal(false);
-  const [publishError, setPublishError] = createSignal<string | null>(null);
   const { pubkey } = useAuth();
   const { relayUrls, relayVersion } = useRelays();
   const { feedAuthors } = useFeed();
@@ -108,6 +125,9 @@ export function App() {
       // when it really changed, never just because the view remounted.
       resetHomeFeed();
       resetNotifications();
+      // Highlights on the action rows are personal: a different key must
+      // not inherit them.
+      if (pubkey() === null) forgetMyActions();
     });
   });
 
@@ -120,34 +140,8 @@ export function App() {
   }
 
   async function publish(): Promise<void> {
-    const signer = getSigner();
-    const key = pubkey();
-    const content = draft().trim();
-    if (signer === null || key === null || content === "") return;
-    setPublishing(true);
-    setPublishError(null);
-    try {
-      const event = await signer.signEvent({
-        pubkey: key,
-        created_at: Math.floor(Date.now() / 1000),
-        kind: 1,
-        tags: [],
-        content,
-      });
-      const result = await getConnection(relayUrls()[0]).publish(event);
-      if (result.accepted) {
-        setDraft("");
-        setComposeOpen(false);
-      } else {
-        setPublishError(`投稿が拒否されました: ${result.message}`);
-      }
-    } catch (error) {
-      setPublishError(
-        error instanceof Error ? error.message : "投稿に失敗しました",
-      );
-    } finally {
-      setPublishing(false);
-    }
+    const sent = await submitCompose(draft());
+    if (sent) setDraft("");
   }
 
   return (
@@ -177,7 +171,7 @@ export function App() {
         </ul>
         <button
           class="mt-3 w-full rounded-2xl bg-(--dads-blue-700) px-3 py-2 text-white"
-          onClick={() => setComposeOpen(true)}
+          onClick={openNewPost}
         >
           Compose
         </button>
@@ -202,11 +196,24 @@ export function App() {
         <RelayDebugPanel />
       </aside>
 
-      {/* Compose modal */}
+      {/* Compose modal: a new note, a reply or a quote repost */}
       <Show when={composeOpen()}>
         <div class="fixed inset-0 flex items-center justify-center bg-black/40">
           <div class="w-full max-w-md rounded-2xl bg-white p-4">
-            <h2 class="font-bold">Compose</h2>
+            <h2 class="font-bold">{COMPOSE_TITLES[composeMode()]}</h2>
+            <Show when={composeTarget()}>
+              {(event) => (
+                <div class="mt-2 flex gap-2 rounded-2xl bg-(--dads-solid-gray-100) p-2">
+                  <ProfileAvatar pubkey={event().pubkey} size={28} />
+                  <div class="min-w-0">
+                    <ProfileName pubkey={event().pubkey} class="text-sm" />
+                    <p class="line-clamp-3 text-xs break-words text-(--dads-solid-gray-700)">
+                      {event().content}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </Show>
             <textarea
               class="mt-2 h-32 w-full rounded-2xl border border-(--dads-solid-gray-300) p-2"
               value={draft()}
@@ -217,16 +224,16 @@ export function App() {
                 when={pubkey()}
                 fallback={"投稿にはログインが必要です (Settings) 。"}
               >
-                {"投稿はテスト用リレーに公開されます。"}
+                {"投稿は接続中のリレーへ公開されます。"}
               </Show>
             </p>
-            <Show when={publishError()}>
-              <p class="mt-1 text-sm text-(--dads-red-600)">{publishError()}</p>
+            <Show when={composeError()}>
+              <p class="mt-1 text-sm text-(--dads-red-600)">{composeError()}</p>
             </Show>
             <div class="mt-3 flex justify-end gap-2">
               <button
                 class="rounded-2xl border border-(--dads-solid-gray-300) px-4 py-2"
-                onClick={() => setComposeOpen(false)}
+                onClick={closeCompose}
               >
                 閉じる
               </button>
@@ -235,15 +242,28 @@ export function App() {
                 disabled={
                   pubkey() === null ||
                   draft().trim() === "" ||
-                  publishing()
+                  composeBusy()
                 }
                 onClick={() => void publish()}
               >
-                {publishing() ? "投稿中…" : "投稿"}
+                {composeBusy()
+                  ? "送信中…"
+                  : composeMode() === "quote"
+                    ? "引用投稿"
+                    : composeMode() === "reply"
+                      ? "リプライ"
+                      : "投稿"}
               </button>
             </div>
           </div>
         </div>
+      </Show>
+
+      {/* Transient confirmation for repost and reaction */}
+      <Show when={noticeMessage()}>
+        <p class="pointer-events-none fixed bottom-6 left-1/2 z-30 -translate-x-1/2 rounded-full bg-(--dads-solid-gray-800) px-4 py-2 text-sm text-white">
+          {noticeMessage()}
+        </p>
       </Show>
     </div>
   );
