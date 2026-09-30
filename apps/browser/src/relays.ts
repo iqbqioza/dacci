@@ -123,25 +123,39 @@ async function defaultQuery(url: string, filter: Filter): Promise<NostrEvent[]> 
 }
 
 /**
- * Runs `queryFn` against the current relays and resolves with the first
- * non-empty answer. Bounded by `METADATA_TIMEOUT_MS` so login and reload
- * are never blocked by a dead relay.
+ * Runs `queryFn` against the current relays and resolves as soon as the
+ * first relay answers with something. Waiting for the slowest relay would
+ * make a login take as long as the worst connection, so a deadline is the
+ * only thing that ends the wait.
  */
 async function firstAnswer(
   filter: Filter,
   queryFn: RelayQueryFn,
 ): Promise<NostrEvent[]> {
-  let found: NostrEvent[] = [];
-  await Promise.race([
-    Promise.allSettled(
-      relayUrls().map(async (url) => {
-        const events = await queryFn(url, filter);
-        if (events.length > 0 && found.length === 0) found = events;
-      }),
-    ),
-    new Promise((resolve) => setTimeout(resolve, METADATA_TIMEOUT_MS)),
-  ]);
-  return found;
+  const urls = relayUrls();
+  if (urls.length === 0) return [];
+  return new Promise<NostrEvent[]>((resolve) => {
+    let settled = false;
+    const finish = (events: NostrEvent[]): void => {
+      if (settled) return;
+      settled = true;
+      resolve(events);
+    };
+    const deadline = setTimeout(() => finish([]), METADATA_TIMEOUT_MS);
+    for (const url of urls) {
+      void queryFn(url, filter).then(
+        (events) => {
+          if (events.length > 0) {
+            clearTimeout(deadline);
+            finish(events);
+          }
+        },
+        () => {
+          // A failing relay is simply not the one that answers.
+        },
+      );
+    }
+  });
 }
 
 function setStatus(url: string, status: RelayConnStatus): void {

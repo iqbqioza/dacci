@@ -174,6 +174,39 @@ describe("relay/feed persistence", () => {
     }
   });
 
+  it("resolves on the first answering relay, not the slowest one", async () => {
+    const store = stubStorage();
+    try {
+      store.set(
+        "dacci.relays",
+        JSON.stringify([
+          "wss://slow.example",
+          "wss://fast.example",
+          "wss://dead.example",
+        ]),
+      );
+      initRelays();
+      const started = Date.now();
+      await applyLoginRelaySet("1".repeat(64), async (url) => {
+        if (url === "wss://dead.example") {
+          // Never answers: only the deadline can end the wait.
+          return new Promise<NostrEvent[]>(() => {});
+        }
+        if (url === "wss://slow.example") {
+          await new Promise((r) => setTimeout(r, 900));
+          return [];
+        }
+        return [makeListEvent("1".repeat(64), 1, ["wss://answer.example"])];
+      });
+      expect(Date.now() - started).toBeLessThan(700);
+      expect(useRelays().relayUrls()).toEqual(["wss://answer.example"]);
+    } finally {
+      vi.unstubAllGlobals();
+      clearFeed();
+      restoreDefaults();
+    }
+  });
+
   it("restores the persisted feed as well", () => {
     stubStorage();
     try {

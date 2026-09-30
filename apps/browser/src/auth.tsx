@@ -46,20 +46,26 @@ export function useAuth() {
 async function waitForExtension(timeoutMs: number): Promise<boolean> {
   if (hasNip07Extension()) return true;
   const deadline = Date.now() + timeoutMs;
+  // Start at 20ms and back off: most extensions are there almost at once,
+  // so the UI must not sit on the full budget.
+  let wait = 20;
   while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, wait));
     if (hasNip07Extension()) return true;
+    wait = Math.min(wait * 2, 100);
   }
   return false;
 }
 
 /** The extension can also refuse while the vault is locked: retry briefly. */
 async function pubKeyWithRetry(attempts: number): Promise<string | null> {
+  let wait = 50;
   for (let i = 0; i < attempts; i++) {
     try {
       return await new Nip07Signer().getPublicKey();
     } catch {
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      wait = Math.min(wait * 2, 200);
     }
   }
   return null;
@@ -236,8 +242,8 @@ async function restoreSessionInner(deps: {
     return false;
   }
   const signer = new Nip07Signer();
-  const present = await waitForExtension(4000);
-  const key = present ? await pubKeyWithRetry(4) : null;
+  const present = await waitForExtension(1500);
+  const key = present ? await pubKeyWithRetry(3) : null;
   if (key === null) {
     // The extension never showed up or the vault is locked: keep the
     // stored entry so the next reload can retry, and keep the relay set.
