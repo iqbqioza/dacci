@@ -1,0 +1,20 @@
+{
+	"name": "dacci-monorepo",
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
+	"remoteUser": "vscode",
+	"containerUser": "vscode",
+	"postCreateCommand": "npm --version",
+	"forwardPorts": [5173, 4173],
+	"portsAttributes": {
+		"5173": {
+			"label": "dacci-browser dev",
+			"onAutoForward": "notify"
+		},
+		"4173": {
+			"label": "dacci-browser preview",
+			"onAutoForward": "silent"
+		}
+	}
+}
