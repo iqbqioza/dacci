@@ -26,6 +26,7 @@ export function HomeTimeline(props: {
   // disappearing both shift the list by one bar height.
   let barRef: HTMLButtonElement | undefined;
   let wasBarVisible = false;
+  let wasLoadMoreVisible = false;
   const [paginator, setPaginator] = createSignal(
     createTimeline(relayUrls(), feedAuthors() ?? undefined),
   );
@@ -57,40 +58,56 @@ export function HomeTimeline(props: {
     });
   });
 
-  /**
-   * Pressing the bar inserts the new posts above the current first post
-   * and pins the viewport to the post the reader was looking at, so the
-   * view stays where it was instead of jumping to the newest event.
-   *
-   * The bar itself needs no compensation: it is a fixed height, so
-   * showing, clearing or counting it never moves the list.
-   */
-  function flushNew(): void {
-    const plan = planFlush(buffered(), events());
+  // The load-more control is in the flow as well, so it appearing (first
+  // page) or disappearing (history exhausted) has to be absorbed too.
+  createEffect(() => {
+    const shown = hasMore() && !loading();
+    untrack(() => {
+      if (shown === wasLoadMoreVisible) return;
+      wasLoadMoreVisible = shown;
+      preservingViewport(() => undefined);
+    });
+  });
 
-    // Measure before the bar leaves the flow: it pulls the list up by its
-    // own height, and that has to be part of the same correction as the
-    // prepend, otherwise the view drifts by one bar.
+  /**
+   * Runs `change` while holding the viewport on the post the reader is
+   * looking at. Any layout change inside - a control being added or
+   * removed, posts being inserted - is absorbed, so the visible post
+   * never moves.
+   */
+  function preservingViewport(change: () => void): void {
     const scrollBefore = window.scrollY;
     const anchor = topmostVisibleCard();
     const before = anchor === null ? null : anchor.getBoundingClientRect().top;
 
-    // flushNew accounts for the bar removal itself.
-    wasBarVisible = false;
-    clearBuffered();
-    if (plan.added.length > 0) {
-      setEvents(plan.events);
-    }
+    change();
 
     if (anchor === null || before === null || !anchor.isConnected) return;
-    // Solid applies both updates synchronously, so the DOM is already laid
-    // out here. Measuring in a later frame would let unrelated reflow
-    // (lazy images, a background page load) corrupt the correction.
+    // Solid applies updates synchronously, so the DOM is already laid out
+    // here. Measuring in a later frame would let unrelated reflow (lazy
+    // images, a background page load) corrupt the correction.
     const after = anchor.getBoundingClientRect().top;
     const target = Math.max(scrollBefore + (after - before), 0);
     if (target !== window.scrollY) {
       window.scrollTo({ top: target, behavior: "instant" });
     }
+  }
+
+  /**
+   * Pressing the bar inserts the new posts above the current first post
+   * and pins the viewport, so the reader keeps looking at the same post
+   * instead of being dropped on the newest one.
+   */
+  function flushNew(): void {
+    const plan = planFlush(buffered(), events());
+    preservingViewport(() => {
+      // flushNew accounts for the bar removal itself.
+      wasBarVisible = false;
+      clearBuffered();
+      if (plan.added.length > 0) {
+        setEvents(plan.events);
+      }
+    });
   }
 
   /** The post currently under the top edge of the viewport. */
@@ -199,16 +216,18 @@ export function HomeTimeline(props: {
             <EventCard event={event} onSelect={props.onSelect} />
           )}
         </For>
+        <Show when={hasMore() && !loading()}>
+          {/* Same block style as the new-arrivals bar, but at the end of
+              the feed where older posts continue. */}
+          <button
+            class="block w-full border-b border-(--dads-solid-gray-200) px-4 py-3 text-left hover:bg-(--dads-blue-50) disabled:opacity-50"
+            disabled={loadingMore()}
+            onClick={() => void loadMore()}
+          >
+            {loadingMore() ? "読み込み中…" : "さらに読み込む"}
+          </button>
+        </Show>
       </div>
-      <Show when={hasMore() && !loading()}>
-        <button
-          class="m-4 rounded-2xl bg-(--dads-blue-700) px-4 py-2 text-white disabled:opacity-50"
-          disabled={loadingMore()}
-          onClick={() => void loadMore()}
-        >
-          {loadingMore() ? "読み込み中…" : "さらに読み込む"}
-        </button>
-      </Show>
       <Show when={!hasMore() && events().length > 0}>
         <p class="px-4 py-4 text-sm text-(--dads-solid-gray-500)">
           {coverage() === "complete" ? "履歴の末尾です" : "取得可能な履歴の末尾です (一部未確定)"}
