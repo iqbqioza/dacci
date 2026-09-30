@@ -26,8 +26,8 @@ import {
 import { HomeTimeline } from "./components/HomeTimeline.jsx";
 import { ProfileAvatar, ProfileName } from "./components/ProfileAvatar.jsx";
 import { RelayDebugPanel } from "./components/RelayPanel.jsx";
+import { NetworkView } from "./components/NetworkView.jsx";
 import {
-  NetworkView,
   NotificationsView,
   ProfileView,
   SettingsView,
@@ -75,11 +75,11 @@ export function App() {
   const { menuRoute, eventRoute } = projectRoute(route);
   const [draft, setDraft] = createSignal("");
   const { pubkey } = useAuth();
-  const { relayUrls, relayVersion } = useRelays();
+  const { readRelays, relayVersion } = useRelays();
   const { feedAuthors } = useFeed();
   const selfPubkey = (): string | undefined => pubkey() ?? undefined;
   const liveDeps = {
-    relayUrls,
+    readRelays,
     feedAuthors,
     selfPubkey,
   };
@@ -186,7 +186,7 @@ export function App() {
           </Match>
           <Match when={eventRoute()}>
             {(detail) => (
-              <EventDetailView eventId={detail()} urls={relayUrls()} />
+              <EventDetailView eventId={detail()} urls={readRelays()} />
             )}
           </Match>
         </Switch>

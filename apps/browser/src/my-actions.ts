@@ -164,7 +164,7 @@ export function adoptMyActivity(next: string | null): void {
 export async function syncMyActivity(): Promise<void> {
   const key = pubkey();
   if (key === null) return;
-  const urls = useRelays().relayUrls();
+  const urls = useRelays().readRelays();
   const filter = {
     kinds: ACTIVITY_KINDS,
     authors: [key],

@@ -30,7 +30,8 @@ let wasBarVisible = false;
 let wasLoadMoreVisible = false;
 
 function relayUrlsValue(): string[] {
-  return useRelays().relayUrls();
+  // The timeline only ever reads, so write-only relays stay out of it.
+  return useRelays().readRelays();
 }
 
 function feedAuthorsValue(): string[] | undefined {

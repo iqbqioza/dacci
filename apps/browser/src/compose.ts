@@ -14,6 +14,10 @@ import { lookupEvent, rememberEvents } from "./event-cache.js";
 import { showNotice } from "./notice.js";
 import { getConnection } from "./nostr.js";
 import {
+  noteWriteResult,
+  type RelayInfo,
+} from "./relays.js";
+import {
   activityFor,
   clearReacted,
   clearReposted,
@@ -99,7 +103,12 @@ async function publish(template: {
     return null;
   }
   const event = await signer.signEvent(template);
-  const urls = useRelays().relayUrls();
+  // Only relays marked for writing receive what the reader publishes.
+  const urls = useRelays().writeRelays();
+  if (urls.length === 0) {
+    setError("書き込むリレーがありません (Network)");
+    return null;
+  }
   const settled = await Promise.allSettled(
     urls.map(async (url) => {
       // A relay that accepts the socket and never answers (relay.damus.io
@@ -113,10 +122,14 @@ async function publish(template: {
       return result;
     }),
   );
-  const accepted = settled.filter(
-    (result) =>
-      result.status === "fulfilled" && result.value?.accepted === true,
-  ).length;
+  let accepted = 0;
+  settled.forEach((result, index) => {
+    const url = urls[index];
+    const ok = result.status === "fulfilled" && result.value?.accepted === true;
+    if (ok) accepted += 1;
+    // Report the outcome per relay, so write-only relays show a real state.
+    noteWriteResult(url, ok);
+  });
   rememberEvents([event]);
   if (accepted === 0) {
     setError("リレーに拒否されました");

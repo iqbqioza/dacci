@@ -50,7 +50,10 @@ export function useNotifications() {
 async function loadPage(reset: boolean): Promise<void> {
   const pubkey = loadedFor;
   if (pubkey === null) return;
-  const paginator = createNotificationTimeline(useRelays().relayUrls(), pubkey);
+  const paginator = createNotificationTimeline(
+    useRelays().readRelays(),
+    pubkey,
+  );
   const gen = generation;
   if (reset) setLoading(true);
   else setLoadingMore(true);

@@ -9,7 +9,8 @@ const [version, setVersion] = createSignal(0);
 
 const store = new ProfileStore(
   async (authors: string[]): Promise<NostrEvent[]> => {
-    const urls = useRelays().relayUrls();
+    // Metadata is a read, so only read-capable relays are asked.
+    const urls = useRelays().readRelays();
     if (urls.length === 0) return [];
     // One REQ for the whole batch; relays answer kind 0 newest-first.
     const filter: Filter = {

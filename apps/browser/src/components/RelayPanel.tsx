@@ -3,7 +3,15 @@ import {
   refreshStatuses,
   useRelays,
   type RelayConnStatus,
+  type RelayMode,
 } from "../relays.js";
+
+/** A write-only relay is never probed, so say what it is for. */
+const MODE_MARK: Record<RelayMode, string> = {
+  both: "R/W",
+  read: "R",
+  write: "W",
+};
 
 const DOT: Record<RelayConnStatus, string> = {
   unknown: "background-color: var(--dads-solid-gray-400)",
@@ -23,7 +31,7 @@ const LABEL: Record<RelayConnStatus, string> = {
 
 /** Debug panel: connected relays and their connection state. */
 export function RelayDebugPanel() {
-  const { relayUrls, relayStatuses } = useRelays();
+  const { relayEntries, relayStatuses } = useRelays();
 
   return (
     <div>
@@ -37,16 +45,19 @@ export function RelayDebugPanel() {
         </button>
       </div>
       <ul class="mt-2">
-        <For each={relayUrls()}>
-          {(url) => (
+        <For each={relayEntries()}>
+          {(entry) => (
             <li class="flex items-center gap-2 py-1">
               <span
                 class="inline-block h-2 w-2 shrink-0 rounded-full"
-                style={DOT[relayStatuses()[url] ?? "unknown"]}
-                title={LABEL[relayStatuses()[url] ?? "unknown"]}
+                style={DOT[relayStatuses()[entry.url] ?? "unknown"]}
+                title={LABEL[relayStatuses()[entry.url] ?? "unknown"]}
               />
               <span class="min-w-0 flex-1 truncate font-mono text-xs">
-                {url.replace(/^wss:\/\//, "")}
+                {entry.url.replace(/^wss:\/\//, "")}
+              </span>
+              <span class="shrink-0 text-(--dads-solid-gray-500) text-[10px]">
+                {MODE_MARK[entry.mode]}
               </span>
             </li>
           )}

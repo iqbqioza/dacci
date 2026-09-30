@@ -2,12 +2,16 @@ import { computeEventId } from "dacci-nostr-nips";
 import type { NostrEvent } from "dacci-nostr-nips";
 import { describe, expect, it, vi } from "vitest";
 import {
+  addRelay,
   applyLoginFeed,
   applyLoginRelaySet,
   clearFeed,
   DEFAULT_RELAYS,
   initRelays,
+  refreshStatuses,
+  removeRelay,
   restoreDefaults,
+  setRelayMode,
   useFeed,
   useRelays,
 } from "./relays.js";
@@ -52,7 +56,7 @@ describe("applyLoginRelaySet", () => {
     expect(useRelays().relayUrls()).toEqual(DEFAULT_RELAYS);
   });
 
-  it("drops write-only relays", async () => {
+  it("keeps write-only relays out of reads and in writes", async () => {
     restoreDefaults();
     const base = {
       pubkey: PUBKEY,
@@ -71,7 +75,18 @@ describe("applyLoginRelaySet", () => {
       sig: "s".repeat(128),
     };
     await applyLoginRelaySet(PUBKEY, async () => [event]);
-    expect(useRelays().relayUrls()).toEqual(["wss://read.example"]);
+    const relays = useRelays();
+    expect(relays.relayUrls()).toEqual([
+      "wss://read.example",
+      "wss://write.example",
+    ]);
+    expect(relays.readRelays()).toEqual(["wss://read.example"]);
+    // A read-only relay never receives what the reader publishes.
+    expect(relays.writeRelays()).toEqual(["wss://write.example"]);
+    expect(relays.relayEntries()).toEqual([
+      { url: "wss://read.example", mode: "read" },
+      { url: "wss://write.example", mode: "write" },
+    ]);
     restoreDefaults();
   });
 });
@@ -142,8 +157,8 @@ describe("relay/feed persistence", () => {
         "wss://personal-b.example",
       ]);
       expect(JSON.parse(localStorage.getItem("dacci.relays") ?? "[]")).toEqual([
-        "wss://personal-a.example",
-        "wss://personal-b.example",
+        { url: "wss://personal-a.example", mode: "both" },
+        { url: "wss://personal-b.example", mode: "both" },
       ]);
     } finally {
       vi.unstubAllGlobals();
@@ -230,6 +245,107 @@ describe("relay/feed persistence", () => {
       localStorage.setItem("dacci.relays", "{broken");
       initRelays();
       expect(useRelays().relayUrls()).toEqual(DEFAULT_RELAYS);
+    } finally {
+      vi.unstubAllGlobals();
+      restoreDefaults();
+    }
+  });
+});
+
+describe("relay set editing", () => {
+  it("normalizes the URL and rejects duplicates and junk", () => {
+    restoreDefaults();
+    expect(addRelay("  wss://New.Example/  ")).toEqual({ ok: true });
+    expect(useRelays().relayUrls()).toContain("wss://New.Example");
+    expect(addRelay("wss://New.Example")).toEqual({
+      ok: false,
+      reason: "duplicate",
+    });
+    expect(addRelay("https://not-a-relay.example")).toEqual({
+      ok: false,
+      reason: "invalid",
+    });
+    expect(addRelay("")).toEqual({ ok: false, reason: "invalid" });
+    restoreDefaults();
+  });
+
+  it("adds a relay with a chosen mode", () => {
+    restoreDefaults();
+    addRelay("wss://write-only.example", "write");
+    const relays = useRelays();
+    expect(relays.readRelays()).not.toContain("wss://write-only.example");
+    expect(relays.writeRelays()).toContain("wss://write-only.example");
+    restoreDefaults();
+  });
+
+  it("switches a relay between read, write and both", () => {
+    restoreDefaults();
+    const url = DEFAULT_RELAYS[0];
+    setRelayMode(url, "read");
+    expect(useRelays().writeRelays()).not.toContain(url);
+    expect(useRelays().readRelays()).toContain(url);
+    setRelayMode(url, "write");
+    expect(useRelays().readRelays()).not.toContain(url);
+    expect(useRelays().writeRelays()).toContain(url);
+    setRelayMode(url, "both");
+    expect(useRelays().readRelays()).toContain(url);
+    expect(useRelays().writeRelays()).toContain(url);
+    restoreDefaults();
+  });
+
+  it("removes a relay from both roles", () => {
+    restoreDefaults();
+    const url = DEFAULT_RELAYS[0];
+    removeRelay(url);
+    const relays = useRelays();
+    expect(relays.relayUrls()).not.toContain(url);
+    expect(relays.readRelays()).not.toContain(url);
+    expect(relays.writeRelays()).not.toContain(url);
+    removeRelay(url);
+    expect(relays.relayUrls().length).toBe(DEFAULT_RELAYS.length - 1);
+    restoreDefaults();
+  });
+
+  it("never queries a write-only relay when checking statuses", async () => {
+    restoreDefaults();
+    addRelay("wss://write-only.example", "write");
+    const before = useRelays().relayStatuses()["wss://write-only.example"];
+    expect(before).toBe("unknown");
+    await refreshStatuses();
+    // The probe cannot reach a relay the reader marked write-only.
+    expect(useRelays().relayStatuses()["wss://write-only.example"]).toBe(
+      "unknown",
+    );
+    restoreDefaults();
+  });
+
+  it("restores modes from storage and still reads the old plain list", () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => void store.set(key, value),
+      removeItem: (key: string) => void store.delete(key),
+    });
+    try {
+      store.set(
+        "dacci.relays",
+        JSON.stringify([
+          { url: "wss://r.example", mode: "read" },
+          { url: "wss://w.example", mode: "write" },
+        ]),
+      );
+      initRelays();
+      expect(useRelays().readRelays()).toEqual(["wss://r.example"]);
+      expect(useRelays().writeRelays()).toEqual(["wss://w.example"]);
+
+      // A set stored before modes existed is read/write.
+      store.set(
+        "dacci.relays",
+        JSON.stringify(["wss://legacy.example"]),
+      );
+      initRelays();
+      expect(useRelays().readRelays()).toEqual(["wss://legacy.example"]);
+      expect(useRelays().writeRelays()).toEqual(["wss://legacy.example"]);
     } finally {
       vi.unstubAllGlobals();
       restoreDefaults();

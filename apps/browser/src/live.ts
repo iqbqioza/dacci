@@ -47,7 +47,8 @@ function push(buffer: (updater: (prev: NostrEvent[]) => NostrEvent[]) => void) {
 }
 
 export interface LiveFeedDeps {
-  relayUrls: () => string[];
+  /** Relays that may be queried; a write-only relay is never subscribed. */
+  readRelays: () => string[];
   /** Follows plus self while logged in; null means the global feed. */
   feedAuthors: () => string[] | null;
   /** Own pubkey while logged in; undefined means no notifications. */
@@ -71,7 +72,8 @@ export function startLiveFeeds(deps: LiveFeedDeps): () => void {
     const authors = deps.feedAuthors() ?? undefined;
     const self = deps.selfPubkey();
 
-    for (const url of deps.relayUrls()) {
+    const readable = deps.readRelays();
+    for (const url of readable) {
       const connection = getConnection(url);
       // `since` keeps the relay from replaying stored history.
       const feedFilter: Filter =
@@ -94,9 +96,7 @@ export function startLiveFeeds(deps: LiveFeedDeps): () => void {
       }
     }
     setLiveRelays(subs.length);
-    setNotificationRelays(
-      subs.length - deps.relayUrls().length,
-    );
+    setNotificationRelays(subs.length - readable.length);
   };
 
   build();
