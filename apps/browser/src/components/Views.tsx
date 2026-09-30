@@ -16,6 +16,7 @@ import {
 } from "../notifications-feed.js";
 import { useNotificationLive } from "../live.js";
 import { EventCard } from "./EventCard.jsx";
+import { ProfileAvatar, ProfileName } from "./ProfileAvatar.jsx";
 
 function newestFirst(a: NostrEvent, b: NostrEvent): number {
   return a.created_at !== b.created_at
@@ -201,14 +202,22 @@ export function ProfileView(props: { event: NostrEvent | null }) {
         }
       >
         {(event) => (
-          <div class="mt-2">
-            <p class="font-mono text-sm text-(--dads-solid-gray-700)">
-              {event().pubkey}
-            </p>
-            <p class="mt-1 text-sm text-(--dads-solid-gray-500)">
-              {formatTime(event().created_at)}
-            </p>
-            <p class="mt-2 whitespace-pre-wrap break-words">{event().content}</p>
+          <div class="mt-2 flex gap-3">
+            <ProfileAvatar pubkey={event().pubkey} size={48} />
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-baseline gap-x-2">
+                <ProfileName pubkey={event().pubkey} />
+                <span class="text-xs text-(--dads-solid-gray-500)">
+                  {formatTime(event().created_at)}
+                </span>
+              </div>
+              <p class="mt-0.5 font-mono text-xs break-all text-(--dads-solid-gray-500)">
+                {event().pubkey}
+              </p>
+              <p class="mt-1 whitespace-pre-wrap break-words">
+                {event().content}
+              </p>
+            </div>
           </div>
         )}
       </Show>

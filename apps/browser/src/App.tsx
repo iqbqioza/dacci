@@ -23,6 +23,7 @@ import {
 import { getConnection } from "./nostr.js";
 import { resetHomeFeed } from "./home-feed.js";
 import { resetNotifications } from "./notifications-feed.js";
+import { resetProfiles } from "./profile.js";
 import { startLiveFeeds } from "./live.js";
 import {
   initRelays,
@@ -85,6 +86,13 @@ export function App() {
       stopLive();
       unsubscribe();
     });
+  });
+
+  // A new relay set can answer metadata queries the old one could not, so
+  // the profile cache and its failed-user queue start over with it.
+  createEffect(() => {
+    relayVersion();
+    untrack(resetProfiles);
   });
 
   // Login, logout, a new relay set or a new feed filter: rebuild the

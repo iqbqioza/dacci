@@ -13,6 +13,7 @@
   "dependencies": {
     "dacci-nostr-nips": "workspace:*",
     "dacci-nostr-paginator": "workspace:*",
+    "dacci-nostr-profile": "workspace:*",
     "dacci-nostr-signer": "workspace:*",
     "dacci-nostr-ws": "workspace:*",
     "solid-js": "^1.9.3"
