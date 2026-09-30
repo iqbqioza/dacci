@@ -1,5 +1,5 @@
 import type { NostrEvent } from "dacci-nostr-nips";
-import { embeddedEventId, embeddedNote } from "dacci-nostr-nips";
+import { embeddedEventIdWithText, embeddedNote } from "dacci-nostr-nips";
 import { EmbedStore } from "dacci-nostr-quotes";
 import { createSignal } from "solid-js";
 import { lookupEvent } from "./event-cache.js";
@@ -53,7 +53,7 @@ export function createEmbeds(
     event: NostrEvent,
   ): { event: NostrEvent | null; loading: boolean } => {
     version();
-    const id = embeddedEventId(event);
+    const id = embeddedEventIdWithText(event);
     if (id === null) return { event: null, loading: false };
     // NIP-18 lets a repost carry the note inline; that needs no query.
     const inline = embeddedNote(event);
@@ -70,7 +70,7 @@ export function createEmbeds(
   const requestEmbeds = (events: Iterable<NostrEvent>): void => {
     const ids: string[] = [];
     for (const event of events) {
-      const id = embeddedEventId(event);
+      const id = embeddedEventIdWithText(event);
       if (id === null) continue;
       const inline = embeddedNote(event);
       if (inline !== null && inline.id === id) {

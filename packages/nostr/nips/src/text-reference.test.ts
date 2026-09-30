@@ -1,0 +1,105 @@
+import { describe, expect, it } from "vitest";
+import { computeEventId, type NostrEvent } from "./event.js";
+import { encodeNote } from "./nip19.js";
+import {
+  displayContent,
+  embeddedEventIdWithText,
+  stripReferences,
+  textReferences,
+} from "./text-reference.js";
+
+const QUOTED = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d";
+const OTHER = "7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e";
+
+/** A signed note, so its id follows from the content the test builds. */
+function note(content: string, tags: string[][] = []): NostrEvent {
+  const base = {
+    pubkey: "a".repeat(64),
+    created_at: 1_700_000_000,
+    kind: 1,
+    tags,
+    content,
+  };
+  return { ...base, id: computeEventId(base), sig: "s".repeat(128) };
+}
+
+const link = (id: string): string => `nostr:${encodeNote(id)}`;
+
+describe("textReferences", () => {
+  it("finds a note linked with the nostr scheme", () => {
+    const content = `look at this ${link(QUOTED)} please`;
+    expect(textReferences(content)).toEqual([
+      { id: QUOTED, start: 13, end: 13 + link(QUOTED).length },
+    ]);
+  });
+
+  it("finds a bare entity, since some clients omit the scheme", () => {
+    const note1 = encodeNote(QUOTED) as string;
+    expect(textReferences(`see ${note1}`)).toEqual([
+      { id: QUOTED, start: 4, end: 4 + note1.length },
+    ]);
+  });
+
+  it("reads every link in reading order", () => {
+    const refs = textReferences(`${link(QUOTED)} and ${link(OTHER)}`);
+    expect(refs.map((r) => r.id)).toEqual([QUOTED, OTHER]);
+  });
+
+  it("ignores prose and links to a person rather than a post", () => {
+    // A checksum failure means the word merely looks like a reference.
+    expect(textReferences("this is note1nonsense not a link at all")).toEqual([]);
+    expect(textReferences("follow nostr:npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7")).toEqual(
+      [],
+    );
+  });
+
+  it("does not cut a longer word in half", () => {
+    // The entity is followed by more word characters, so it is prose.
+    const text = `${encodeNote(QUOTED)}xyz`;
+    expect(textReferences(text)).toEqual([]);
+  });
+});
+
+describe("embeddedEventIdWithText", () => {
+  it("falls back to a link when the post carries no NIP-18 tag", () => {
+    expect(embeddedEventIdWithText(note(`read ${link(QUOTED)}`))).toBe(QUOTED);
+  });
+
+  it("prefers the NIP-18 tag over the text", () => {
+    const event = note(`read ${link(OTHER)}`, [["q", QUOTED]]);
+    expect(embeddedEventIdWithText(event)).toBe(QUOTED);
+  });
+
+  it("reports nothing for a post that quotes nothing", () => {
+    expect(embeddedEventIdWithText(note("just words"))).toBeNull();
+  });
+});
+
+describe("stripReferences", () => {
+  it("removes a link and tidies the whitespace it leaves", () => {
+    expect(stripReferences(`before\n${link(QUOTED)}\nafter`, textReferences(`before\n${link(QUOTED)}\nafter`)))
+      .toBe("before\nafter");
+  });
+
+  it("leaves the content untouched when there is nothing to remove", () => {
+    expect(stripReferences("plain text", [])).toBe("plain text");
+  });
+});
+
+describe("displayContent", () => {
+  it("hides the link behind the embed the card already shows", () => {
+    const content = `worth reading:\n${link(QUOTED)}`;
+    expect(displayContent(note(content))).toBe("worth reading:");
+  });
+
+  it("keeps a link to a note the card does not embed", () => {
+    // The tag names a different note, so dropping the link would lose it.
+    const content = `about ${link(OTHER)} but quoting ${QUOTED}`;
+    const event = note(content, [["q", QUOTED]]);
+    expect(displayContent(event)).toBe(content);
+  });
+
+  it("returns the content unchanged for a post with no links", () => {
+    expect(displayContent(note("no references here"))).toBe("no references here");
+  });
+});

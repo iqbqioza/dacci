@@ -1,4 +1,5 @@
 import type { NostrEvent } from "dacci-nostr-nips";
+import { displayContent } from "dacci-nostr-nips";
 import { Show } from "solid-js";
 import { useEmbed } from "../embeds.js";
 import { formatTime } from "../nostr.js";
@@ -39,7 +40,9 @@ export function EmbeddedCard(props: {
                 </span>
               </div>
               <p class="mt-0.5 line-clamp-4 text-sm break-words whitespace-pre-wrap text-(--dads-solid-gray-900)">
-                {note.content}
+                {/* The embed shows no note of its own, so a link to a post
+                    that is not rendered here stays in the quoted text. */}
+                {displayContent(note)}
               </p>
             </div>
           </div>

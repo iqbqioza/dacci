@@ -1,4 +1,5 @@
 import type { NostrEvent } from "dacci-nostr-nips";
+import { displayContent } from "dacci-nostr-nips";
 import {
   createEffect,
   createSignal,
@@ -248,7 +249,7 @@ export function App() {
                   <div class="min-w-0">
                     <ProfileName pubkey={event().pubkey} class="text-sm" />
                     <p class="line-clamp-3 text-xs break-words text-(--dads-solid-gray-700)">
-                      {event().content}
+                      {displayContent(event())}
                     </p>
                   </div>
                 </div>

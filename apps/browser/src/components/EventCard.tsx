@@ -1,5 +1,5 @@
 import type { NostrEvent } from "dacci-nostr-nips";
-import { encodeNpub } from "dacci-nostr-nips";
+import { displayContent, encodeNpub } from "dacci-nostr-nips";
 import { Show, createEffect, createMemo } from "solid-js";
 import { requestEmbeds } from "../embeds.js";
 import { formatTime } from "../nostr.js";
@@ -70,7 +70,9 @@ export function EventCard(props: {
           </div>
         </div>
         <p class="mt-1 whitespace-pre-wrap break-words text-(--dads-solid-gray-900)">
-          {props.event.content}
+          {/* The note shown as an embed below replaces its `nostr:` link, so
+              the text drops that link rather than printing it twice. */}
+          {displayContent(props.event)}
         </p>
         <EmbeddedCard event={props.event} onSelect={props.onSelect} />
         <EmbeddedPlaceholder event={props.event} />

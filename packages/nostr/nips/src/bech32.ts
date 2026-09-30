@@ -1,6 +1,9 @@
 const CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 const GENERATORS = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
 
+/** Longest entity NIP-19 accepts, well above any real note reference. */
+const MAX_LENGTH = 5000;
+
 function polymod(values: number[]): number {
   let chk = 1;
   for (const v of values) {
@@ -56,7 +59,9 @@ export function bech32Decode(
   if (input !== lower && input !== input.toUpperCase()) return null;
   const s = lower;
   const pos = s.lastIndexOf("1");
-  if (pos < 1 || pos + 7 > s.length || s.length > 90) return null;
+  // NIP-19 replaces the 90 character cap of BIP-173 with 5000, because an
+  // `nevent` carrying relay hints is longer than BIP-173 allows.
+  if (pos < 1 || pos + 7 > s.length || s.length > MAX_LENGTH) return null;
   const hrp = s.slice(0, pos);
   const payload: number[] = [];
   for (const c of s.slice(pos + 1)) {

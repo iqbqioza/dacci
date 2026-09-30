@@ -52,10 +52,20 @@ export {
 export type { MyActivity, MyActivityMap, ReplyInput } from "./activity.js";
 export { bech32Decode, bech32Encode } from "./bech32.js";
 export {
+  decodeEventReference,
   decodeNote,
+  decodeNevent,
   decodeNpub,
   decodeNsec,
   encodeNote,
   encodeNpub,
   encodeNsec,
 } from "./nip19.js";
+export type { Nevent } from "./nip19.js";
+export {
+  displayContent,
+  embeddedEventIdWithText,
+  stripReferences,
+  textReferences,
+} from "./text-reference.js";
+export type { TextReference } from "./text-reference.js";

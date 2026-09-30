@@ -1,4 +1,5 @@
 import type { NostrEvent } from "dacci-nostr-nips";
+import { encodeNote } from "dacci-nostr-nips";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearEventCache, rememberEvents } from "./event-cache.js";
 import { createEmbeds } from "./embeds.js";
@@ -6,6 +7,8 @@ import { createEmbeds } from "./embeds.js";
 const AUTHOR = "a".repeat(64);
 const NOTE_ID = "b".repeat(64);
 const OTHER_ID = "c".repeat(64);
+
+const link = (id: string): string => `nostr:${encodeNote(id)}`;
 
 function note(id: string, content: string): NostrEvent {
   return {
@@ -149,5 +152,54 @@ describe("embed wiring", () => {
     embeds.requestEmbeds([repost]);
     await tick(30);
     expect(embeds.useEmbed(repost).event).toEqual(inner);
+  });
+});
+
+describe("quoting by link", () => {
+  it("embeds a note the post links to without any NIP-18 tag", async () => {
+    const inner = note(NOTE_ID, "linked, not tagged");
+    const query = vi.fn(async () => [inner]);
+    const embeds = createEmbeds(query, FAST);
+    const post = note("f".repeat(64), `read this ${link(NOTE_ID)}`);
+
+    embeds.requestEmbeds([post]);
+    await tick(30);
+    expect(query).toHaveBeenCalledWith([NOTE_ID]);
+    expect(embeds.useEmbed(post).event).toEqual(inner);
+  });
+
+  it("reuses a linked note the feed already holds instead of querying", async () => {
+    const query = vi.fn(async () => []);
+    const embeds = createEmbeds(query, FAST);
+    const inner = note(NOTE_ID, "already in the cache");
+    rememberEvents([inner]);
+    const post = note("f".repeat(64), link(NOTE_ID));
+
+    embeds.requestEmbeds([post]);
+    await tick(20);
+    expect(query).not.toHaveBeenCalled();
+    expect(embeds.useEmbed(post).event).toEqual(inner);
+  });
+
+  it("keeps the q tag as the embed when a post both links and tags", async () => {
+    const inner = note(NOTE_ID, "the tagged note");
+    const embeds = createEmbeds(async () => [inner], FAST);
+    const post: NostrEvent = {
+      ...note("f".repeat(64), `see also ${link(OTHER_ID)}`),
+      tags: [["q", NOTE_ID]],
+    };
+
+    embeds.requestEmbeds([post]);
+    await tick(30);
+    expect(embeds.useEmbed(post).event).toEqual(inner);
+  });
+
+  it("shows no placeholder for a link no relay can resolve", async () => {
+    const embeds = createEmbeds(async () => [], FAST);
+    const post = note("f".repeat(64), link(NOTE_ID));
+
+    embeds.requestEmbeds([post]);
+    await tick(30);
+    expect(embeds.useEmbed(post)).toEqual({ event: null, loading: false });
   });
 });
