@@ -153,6 +153,89 @@ describe("RelayConnection.query", () => {
     expect(result).toEqual({ accepted: true, message: "" });
   });
 
+  it("streams live events after EOSE", async () => {
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket);
+    const received: string[] = [];
+    let eosed = false;
+    conn.subscribe({ kinds: [1] }, (event) => received.push(event.content), {
+      onEose: () => {
+        eosed = true;
+      },
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    const sent = vi.mocked(socket.send).mock.calls[0][0];
+    const subId = JSON.parse(sent)[1] as string;
+    socket.peer(["EOSE", subId]);
+    expect(eosed).toBe(true);
+    socket.peer([
+      "EVENT",
+      subId,
+      {
+        id: "e".repeat(64),
+        pubkey: "b".repeat(64),
+        created_at: 2000,
+        kind: 1,
+        tags: [],
+        content: "live",
+        sig: "f".repeat(128),
+      },
+    ]);
+    expect(received).toEqual(["live"]);
+  });
+
+  it("re-opens live subscriptions after a reconnect", async () => {
+    const sockets: Array<ReturnType<typeof makeSocket>> = [];
+    const factory = () => {
+      const socket = makeSocket();
+      sockets.push(socket);
+      return socket;
+    };
+    const conn = new RelayConnection("wss://example", factory, {
+      baseReconnectMs: 5,
+      maxReconnectMs: 10,
+    });
+    conn.subscribe({ kinds: [1] }, () => {});
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sockets).toHaveLength(1);
+    sockets[0].onclose?.();
+    await new Promise((r) => setTimeout(r, 60));
+    expect(sockets).toHaveLength(2);
+    const resent = vi.mocked(sockets[1].send).mock.calls.map((c) => c[0]);
+    expect(resent).toHaveLength(1);
+    expect(JSON.parse(resent[0])[0]).toBe("REQ");
+    conn.close();
+  });
+
+  it("unsubscribe stops delivery and sends CLOSE", async () => {
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket);
+    const received: string[] = [];
+    const sub = conn.subscribe({ kinds: [1] }, (e) => received.push(e.content));
+    await new Promise((r) => setTimeout(r, 0));
+    const subId = JSON.parse(
+      vi.mocked(socket.send).mock.calls[0][0],
+    )[1] as string;
+    sub.unsubscribe();
+    expect(JSON.parse(
+      vi.mocked(socket.send).mock.calls[1][0],
+    )).toEqual(["CLOSE", subId]);
+    socket.peer([
+      "EVENT",
+      subId,
+      {
+        id: "d".repeat(64),
+        pubkey: "b".repeat(64),
+        created_at: 1,
+        kind: 1,
+        tags: [],
+        content: "after",
+        sig: "f".repeat(128),
+      },
+    ]);
+    expect(received).toEqual([]);
+  });
+
   it("reconnects after an unexpected close", async () => {
     const sockets: Array<ReturnType<typeof makeSocket>> = [];
     const factory = () => {

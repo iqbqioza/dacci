@@ -90,6 +90,22 @@ interface PendingPublish {
   resolve: (result: PublishResult) => void;
 }
 
+export interface LiveSubscription {
+  /** Stable across reconnects so callers can identify it. */
+  id: string;
+  unsubscribe(): void;
+}
+
+interface LiveSubEntry {
+  id: string;
+  filter: Filter;
+  /** Events received after EOSE (live phase). */
+  onEvent: (event: NostrEvent) => void;
+  /** Fired once the stored-event phase completes. */
+  onEose?: () => void;
+  onAuthRequired?: () => void;
+}
+
 /**
  * One persistent connection per relay URL. Subscriptions multiplex over
  * the single socket and route by subscription id, so concurrent queries
@@ -102,6 +118,7 @@ export class RelayConnection {
   private failWaiters: Array<() => void> = [];
   private readonly pendingSubs = new Map<string, PendingSub>();
   private readonly pendingPublishes = new Map<string, PendingPublish>();
+  private readonly liveSubs = new Map<string, LiveSubEntry>();
   private readonly answeredChallenges = new Set<string>();
   private isOpen = false;
   private connStatus: RelayConnState = "closed";
@@ -179,6 +196,8 @@ export class RelayConnection {
       }
       this.setStatus("open");
       this.openWaiters.splice(0).forEach((run) => run());
+      // Live subscriptions do not survive a drop; re-open them.
+      this.resubscribeLive(socket);
     };
     const fail = () => {
       this.failWaiters.splice(0).forEach((run) => run());
@@ -188,6 +207,12 @@ export class RelayConnection {
     socket.onclose = fail;
     socket.onmessage = (data) => this.dispatch(data);
     return socket;
+  }
+
+  private resubscribeLive(socket: Socket): void {
+    for (const entry of this.liveSubs.values()) {
+      this.safeSend(socket, JSON.stringify(["REQ", entry.id, entry.filter]));
+    }
   }
 
   private waitOpen(timeoutMs: number): Promise<boolean> {
@@ -229,14 +254,31 @@ export class RelayConnection {
     if (!isRelayMessage(msg)) return;
     if (msg[0] === "EVENT" && typeof msg[1] === "string") {
       const sub = this.pendingSubs.get(msg[1]);
+      const live = this.liveSubs.get(msg[1]);
       if (sub && isValidEventStructure(msg[2])) {
         sub.events.push(msg[2] as NostrEvent);
+      } else if (live && isValidEventStructure(msg[2])) {
+        live.onEvent(msg[2] as NostrEvent);
       }
     } else if (msg[0] === "EOSE" && typeof msg[1] === "string") {
-      this.finishSub(msg[1], "eose");
+      // A live subscription stays open past EOSE; a one-shot query ends.
+      const live = this.liveSubs.get(msg[1]);
+      if (live !== undefined) {
+        live.onEose?.();
+      } else {
+        this.finishSub(msg[1], "eose");
+      }
     } else if (msg[0] === "CLOSED" && typeof msg[1] === "string") {
       const sub = this.pendingSubs.get(msg[1]);
-      if (sub && isAuthRequiredMessage(msg[2])) sub.authRequired = true;
+      const live = this.liveSubs.get(msg[1]);
+      if (sub !== undefined && isAuthRequiredMessage(msg[2])) {
+        sub.authRequired = true;
+      }
+      if (live !== undefined) {
+        // Relay refused the live stream (often auth); surface and drop it.
+        if (isAuthRequiredMessage(msg[2])) live.onAuthRequired?.();
+        this.liveSubs.delete(msg[1]);
+      }
       this.finishSub(msg[1], "failed");
     } else if (msg[0] === "OK" && typeof msg[1] === "string") {
       const pending = this.pendingPublishes.get(msg[1]);
@@ -322,6 +364,42 @@ export class RelayConnection {
   }
 
   /**
+   * Open a long-lived subscription. Events received before EOSE are also
+   * delivered to onEvent, so callers can render immediately and dedupe
+   * against whatever historical pagination already loaded.
+   */
+  subscribe(
+    filter: Filter,
+    onEvent: (event: NostrEvent) => void,
+    hooks: { onEose?: () => void; onAuthRequired?: () => void } = {},
+  ): LiveSubscription {
+    this.ensureSocket();
+    const id = newSubscriptionId();
+    const entry: LiveSubEntry = {
+      id,
+      filter,
+      onEvent,
+      onEose: hooks.onEose,
+      onAuthRequired: hooks.onAuthRequired,
+    };
+    this.liveSubs.set(id, entry);
+    const socket = this.socket;
+    if (socket !== null && this.isOpen) {
+      this.safeSend(socket, JSON.stringify(["REQ", id, filter]));
+    }
+    return {
+      id,
+      unsubscribe: () => {
+        this.liveSubs.delete(id);
+        const current = this.socket;
+        if (current !== null) {
+          this.safeSend(current, JSON.stringify(["CLOSE", id]));
+        }
+      },
+    };
+  }
+
+  /**
    * Publish an event and wait for the relay OK response.
    * NIP-42 challenges encountered mid-publish are answered when a
    * signer is configured.
@@ -346,6 +424,7 @@ export class RelayConnection {
 
   close(): void {
     this.explicitClose = true;
+    this.liveSubs.clear();
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

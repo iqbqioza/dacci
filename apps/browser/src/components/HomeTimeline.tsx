@@ -1,7 +1,16 @@
 import type { NostrEvent } from "dacci-nostr-nips";
-import { createEffect, createSignal, For, onCleanup, Show, untrack } from "solid-js";
+import {
+  createEffect,
+  createSignal,
+  For,
+  onCleanup,
+  Show,
+  untrack,
+} from "solid-js";
 import { createTimeline } from "../nostr.js";
 import { rememberEvents } from "../event-cache.js";
+import { planFlush } from "../flush.js";
+import { clearBuffered, startLiveFeed, useLiveFeed } from "../live.js";
 import { useFeed, useRelays } from "../relays.js";
 import { EventCard } from "./EventCard.jsx";
 
@@ -10,6 +19,13 @@ export function HomeTimeline(props: {
 }) {
   const { relayUrls, relayVersion } = useRelays();
   const { feedAuthors } = useFeed();
+  const { buffered } = useLiveFeed();
+  // Scoped to the list so the viewport anchor can be found on flush.
+  let listRef: HTMLDivElement | undefined;
+  // The bar only exists while there are new posts, so appearing and
+  // disappearing both shift the list by one bar height.
+  let barRef: HTMLButtonElement | undefined;
+  let wasBarVisible = false;
   const [paginator, setPaginator] = createSignal(
     createTimeline(relayUrls(), feedAuthors() ?? undefined),
   );
@@ -22,6 +38,77 @@ export function HomeTimeline(props: {
   const [authRelays, setAuthRelays] = createSignal<string[]>([]);
   const [pendingRelays, setPendingRelays] = createSignal<string[]>([]);
   const [hasMore, setHasMore] = createSignal(true);
+
+  // Live subscriptions feed a buffer; the list is never mutated by them.
+  onCleanup(startLiveFeed());
+
+  // The bar is only rendered while there are new posts, so appearing
+  // pushes the whole list down by one bar height. Undo that for a reader
+  // who has scrolled; at the top the bar is what should be visible.
+  // Removal is corrected inside flushNew, together with the prepend.
+  createEffect(() => {
+    const visible = buffered().length > 0;
+    untrack(() => {
+      if (!visible || wasBarVisible) return;
+      wasBarVisible = true;
+      const height = barRef?.offsetHeight ?? 0;
+      if (height <= 0 || window.scrollY <= 0) return;
+      window.scrollBy({ top: height, behavior: "instant" });
+    });
+  });
+
+  /**
+   * Pressing the bar inserts the new posts above the current first post
+   * and pins the viewport to the post the reader was looking at, so the
+   * view stays where it was instead of jumping to the newest event.
+   *
+   * The bar itself needs no compensation: it is a fixed height, so
+   * showing, clearing or counting it never moves the list.
+   */
+  function flushNew(): void {
+    const plan = planFlush(buffered(), events());
+
+    // Measure before the bar leaves the flow: it pulls the list up by its
+    // own height, and that has to be part of the same correction as the
+    // prepend, otherwise the view drifts by one bar.
+    const scrollBefore = window.scrollY;
+    const anchor = topmostVisibleCard();
+    const before = anchor === null ? null : anchor.getBoundingClientRect().top;
+
+    // flushNew accounts for the bar removal itself.
+    wasBarVisible = false;
+    clearBuffered();
+    if (plan.added.length > 0) {
+      setEvents(plan.events);
+    }
+
+    if (anchor === null || before === null || !anchor.isConnected) return;
+    // Solid applies both updates synchronously, so the DOM is already laid
+    // out here. Measuring in a later frame would let unrelated reflow
+    // (lazy images, a background page load) corrupt the correction.
+    const after = anchor.getBoundingClientRect().top;
+    const target = Math.max(scrollBefore + (after - before), 0);
+    if (target !== window.scrollY) {
+      window.scrollTo({ top: target, behavior: "instant" });
+    }
+  }
+
+  /** The post currently under the top edge of the viewport. */
+  function topmostVisibleCard(): HTMLElement | null {
+    if (listRef === undefined) return null;
+    const cards = listRef.querySelectorAll<HTMLElement>("article");
+    if (cards.length === 0) return null;
+    const probeY = 8;
+    for (const card of cards) {
+      const rect = card.getBoundingClientRect();
+      if (rect.top > probeY) break;
+      if (rect.bottom > probeY) return card;
+    }
+    for (const card of cards) {
+      if (card.getBoundingClientRect().bottom > 0) return card;
+    }
+    return cards[0];
+  }
 
   async function loadMore() {
     const active = paginator();
@@ -94,7 +181,25 @@ export function HomeTimeline(props: {
           認証が必要なリレー: {authRelays().join(", ")}
         </p>
       </Show>
-      <For each={events()}>{(event) => <EventCard event={event} onSelect={props.onSelect} />}</For>
+      <div ref={listRef}>
+        <Show when={buffered().length > 0}>
+          {/* Pinned to the top of the viewport and removed entirely on
+              click. The corrections in flushNew and the effect above
+              absorb the layout shift that causes. */}
+          <button
+            ref={barRef}
+            class="sticky top-0 z-10 block w-full border-b border-(--dads-solid-gray-200) bg-white px-4 py-3 text-left hover:bg-(--dads-blue-50)"
+            onClick={flushNew}
+          >
+            新着 {buffered().length} 件
+          </button>
+        </Show>
+        <For each={events()}>
+          {(event) => (
+            <EventCard event={event} onSelect={props.onSelect} />
+          )}
+        </For>
+      </div>
       <Show when={hasMore() && !loading()}>
         <button
           class="m-4 rounded-2xl bg-(--dads-blue-700) px-4 py-2 text-white disabled:opacity-50"

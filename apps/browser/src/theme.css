@@ -173,3 +173,16 @@ html {
 .scroll-stable {
   scrollbar-gutter: stable;
 }
+
+/*
+ * The timeline restores scroll position itself when prepending live
+ * events, so native scroll anchoring must not also try to correct it.
+ */
+/*
+ * The timeline restores scroll position itself when prepending live
+ * events, so native scroll anchoring must not also try to correct it.
+ * The scroller here is the viewport, so the opt-out goes on html.
+ */
+html {
+  overflow-anchor: none;
+}

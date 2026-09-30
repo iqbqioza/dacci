@@ -1,6 +1,7 @@
 export { RelayConnection } from "./relay.js";
 export type {
   AuthSigner,
+  LiveSubscription,
   PublishResult,
   QueryResult,
   RelayConnState,
