@@ -76,8 +76,10 @@ export function ProfileName(props: { pubkey: string; class?: string }) {
       shortId(props.pubkey),
   );
   return (
+    // Block level so the ellipsis applies: a long name must stop before
+    // the time, not run underneath it.
     <span
-      class={`truncate font-medium text-(--dads-solid-gray-900) ${
+      class={`block truncate font-medium text-(--dads-solid-gray-900) ${
         props.class ?? ""
       }`}
     >

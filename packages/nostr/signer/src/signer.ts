@@ -1,13 +1,13 @@
 import { schnorr } from "@noble/curves/secp256k1";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
 import {
+  decodeNsec as decodeNsecEntity,
   isHex64,
   signAuthEvent,
   signEvent,
   type NostrEvent,
   type UnsignedEvent,
 } from "dacci-nostr-nips";
-import { bech32Decode } from "./bech32.js";
 
 /** Unified signing capability: NIP-07 extension or local nsec key. */
 export interface Signer {
@@ -18,12 +18,8 @@ export interface Signer {
 
 /** Decode an nsec1 string to 32-byte secret key hex. Null when invalid. */
 export function decodeNsec(nsec: string): string | null {
-  const trimmed = nsec.trim();
-  if (!trimmed.startsWith("nsec1")) return null;
-  const decoded = bech32Decode(trimmed);
-  if (decoded === null || decoded.hrp !== "nsec") return null;
-  if (decoded.data.length !== 32) return null;
-  return bytesToHex(decoded.data);
+  if (!nsec.trim().startsWith("nsec1")) return null;
+  return decodeNsecEntity(nsec);
 }
 
 /** Signer backed by a local secret key. The key never leaves memory. */

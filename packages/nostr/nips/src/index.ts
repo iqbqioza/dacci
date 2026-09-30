@@ -25,3 +25,12 @@ export {
   signEvent,
 } from "./auth.js";
 export type { AuthSecret, UnsignedEvent } from "./auth.js";
+export { bech32Decode, bech32Encode } from "./bech32.js";
+export {
+  decodeNote,
+  decodeNpub,
+  decodeNsec,
+  encodeNote,
+  encodeNpub,
+  encodeNsec,
+} from "./nip19.js";

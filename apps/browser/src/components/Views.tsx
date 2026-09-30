@@ -7,6 +7,7 @@ import {
   logout,
   useAuth,
 } from "../auth.jsx";
+import { encodeNpub } from "dacci-nostr-nips";
 import { formatTime, getConnection } from "../nostr.js";
 import {
   ensureNotifications,
@@ -205,15 +206,20 @@ export function ProfileView(props: { event: NostrEvent | null }) {
           <div class="mt-2 flex gap-3">
             <ProfileAvatar pubkey={event().pubkey} size={48} />
             <div class="min-w-0 flex-1">
-              <div class="flex flex-wrap items-baseline gap-x-2">
-                <ProfileName pubkey={event().pubkey} />
-                <span class="text-xs text-(--dads-solid-gray-500)">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <ProfileName pubkey={event().pubkey} />
+                  <p
+                    class="truncate font-mono text-xs text-(--dads-solid-gray-500)"
+                    title={encodeNpub(event().pubkey) ?? event().pubkey}
+                  >
+                    {encodeNpub(event().pubkey) ?? event().pubkey}
+                  </p>
+                </div>
+                <span class="shrink-0 text-xs whitespace-nowrap text-(--dads-solid-gray-500)">
                   {formatTime(event().created_at)}
                 </span>
               </div>
-              <p class="mt-0.5 font-mono text-xs break-all text-(--dads-solid-gray-500)">
-                {event().pubkey}
-              </p>
               <p class="mt-1 whitespace-pre-wrap break-words">
                 {event().content}
               </p>

@@ -1,7 +1,7 @@
 import { schnorr } from "@noble/curves/secp256k1";
 import { hexToBytes } from "@noble/hashes/utils";
 import { describe, expect, it, vi } from "vitest";
-import { bech32Decode, bech32Encode } from "./bech32.js";
+import { bech32Decode, bech32Encode } from "dacci-nostr-nips";
 import {
   decodeNsec,
   hasNip07Extension,
