@@ -7,6 +7,9 @@ import type { RelayConnection } from "dacci-nostr-ws";
 
 export type PageCoverage = "complete" | "partial";
 
+/** Sentinel for "the relay did not answer within the round deadline". */
+const TIMEOUT = Symbol("relay-timeout");
+
 export interface TimelinePage {
   events: NostrEvent[];
   coverage: PageCoverage;
@@ -23,6 +26,12 @@ export interface PaginatorOptions {
   baseBackoffMs?: number;
   maxBackoffMs?: number;
   queryTimeoutMs?: number;
+  /**
+   * Per-relay deadline for one page round. A relay that misses it is marked
+   * offline for this round so the page can render without it; its cursor is
+   * untouched, so nothing is skipped when it is retried.
+   */
+  roundTimeoutMs?: number;
 }
 
 interface RelayCursor {
@@ -75,6 +84,7 @@ export class TimelinePaginator {
   private readonly baseBackoffMs: number;
   private readonly maxBackoffMs: number;
   private readonly queryTimeoutMs: number;
+  private readonly roundTimeoutMs: number;
   private readonly nowMs: () => number;
 
   constructor(
@@ -90,6 +100,7 @@ export class TimelinePaginator {
     this.baseBackoffMs = options.baseBackoffMs ?? 1000;
     this.maxBackoffMs = options.maxBackoffMs ?? 30000;
     this.queryTimeoutMs = options.queryTimeoutMs ?? 10000;
+    this.roundTimeoutMs = options.roundTimeoutMs ?? 3500;
     this.nowMs = nowMs;
     const now = Math.floor(this.nowMs() / 1000);
     for (const connection of connections) {
@@ -172,6 +183,14 @@ export class TimelinePaginator {
 
   private getActiveRelays(): RelayState[] {
     const now = this.nowMs();
+    for (const state of this.relays.values()) {
+      // A relay parked for auth becomes usable as soon as a signer exists,
+      // which is exactly what happens when the session is restored after a
+      // reload. NIP-42 is per connection, so the retry can answer it.
+      if (state.needsAuth && state.connection.hasSigner) {
+        state.needsAuth = false;
+      }
+    }
     return [...this.relays.values()].filter(
       (r) =>
         !r.exhausted &&
@@ -184,10 +203,39 @@ export class TimelinePaginator {
   private async fetchRelay(state: RelayState): Promise<RelayBatch> {
     const queriedUntil = state.cursor.until;
     const queriedLimit = state.cursor.limit;
-    const result = await state.connection.query(
-      { ...this.baseFilter, until: queriedUntil, limit: queriedLimit },
-      this.queryTimeoutMs,
-    );
+    const timeoutMs = Math.min(this.roundTimeoutMs, this.queryTimeoutMs);
+    // The deadline is enforced here rather than trusted to the transport:
+    // a relay that accepts the socket and then goes quiet must not hold the
+    // whole page hostage. It is marked offline for this round (Section 23)
+    // and retried later; its cursor is untouched, so nothing is skipped.
+    const result = await Promise.race([
+      state.connection.query(
+        { ...this.baseFilter, until: queriedUntil, limit: queriedLimit },
+        timeoutMs,
+      ),
+      new Promise<typeof TIMEOUT>((resolve) => {
+        const timer = setTimeout(() => resolve(TIMEOUT), timeoutMs);
+        // Do not keep the process alive for the deadline.
+        (timer as unknown as { unref?: () => void }).unref?.();
+      }),
+    ]).catch(() => ({
+      events: [],
+      eose: false,
+      failed: true,
+      authRequired: false,
+    }));
+    if (result === TIMEOUT) {
+      return {
+        relay: state.url,
+        events: [],
+        eose: false,
+        failed: true,
+        receivedCount: 0,
+        queriedUntil,
+        queriedLimit,
+        authRequired: false,
+      };
+    }
     let oldestTimestamp: number | undefined;
     for (const event of result.events) {
       if (oldestTimestamp === undefined || event.created_at < oldestTimestamp) {
@@ -221,6 +269,14 @@ export class TimelinePaginator {
 
     if (batch.failed) {
       if (batch.authRequired) {
+        if (state.connection.hasSigner) {
+          // The signer is attached, so the challenge was answered late (for
+          // example right after a reload). Retry on the next round instead
+          // of backing off: AUTH is per connection, not a transport fault.
+          state.offline = false;
+          state.nextRetryAt = 0;
+          return;
+        }
         // NIP-42 gate: retrying without a signer spins forever, so park
         // the relay until credentials exist. Cursor unchanged.
         state.needsAuth = true;
@@ -276,17 +332,16 @@ export class TimelinePaginator {
   }
 
   private globalWatermark(): number {
+    // Only relays that actually took part in this pass can raise the bar.
+    // An exhausted, offline or auth-gated relay would otherwise pin the
+    // watermark at "now" and commit nothing, which is the opposite of what
+    // Section 13 wants. With no blocking relay left, everything gathered is
+    // committable; coverage is reported as partial whenever that happens.
     const blocking = [...this.relays.values()].filter(
       (r) => !r.exhausted && !r.needsSplit && !r.needsAuth && !r.offline,
     );
-    if (blocking.length > 0) {
-      return Math.min(...blocking.map((r) => r.cursor.until));
-    }
-    const remaining = [...this.relays.values()].filter((r) => !r.exhausted);
-    if (remaining.length > 0) {
-      return Math.min(...remaining.map((r) => r.cursor.until));
-    }
-    return -Infinity;
+    if (blocking.length === 0) return -Infinity;
+    return Math.min(...blocking.map((r) => r.cursor.until));
   }
 
   private countCommittable(): number {

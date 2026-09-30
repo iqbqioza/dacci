@@ -23,7 +23,7 @@ export function createTimeline(
   return new TimelinePaginator(
     relayUrls.map(getConnection),
     authors === undefined ? { kinds: [1] } : { kinds: [1], authors },
-    { pageSize: 30, baseLimit: 100, maxLimit: 500 },
+    { pageSize: 30, baseLimit: 100, maxLimit: 500, roundTimeoutMs: 2500 },
   );
 }
 

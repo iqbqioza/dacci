@@ -48,6 +48,18 @@ export interface RelayOptions {
   autoReconnect?: boolean;
   baseReconnectMs?: number;
   maxReconnectMs?: number;
+  /**
+   * Grace window before the first REQ, waiting for a NIP-42 challenge.
+   * A REQ is never sent inside it, so an auth-required relay cannot see a
+   * query before AUTH. It costs one window per connection, not per query,
+   * because the gate stays open afterwards.
+   */
+  authGateProbeMs?: number;
+  /**
+   * Window used once the relay has actually demanded auth: there the gate
+   * stays closed until AUTH is answered. A REQ is never sent before that.
+   */
+  authGateMs?: number;
   onStatusChange?: (status: RelayConnState) => void;
 }
 
@@ -119,6 +131,22 @@ export class RelayConnection {
   private readonly pendingSubs = new Map<string, PendingSub>();
   private readonly pendingPublishes = new Map<string, PendingPublish>();
   private readonly liveSubs = new Map<string, LiveSubEntry>();
+  /**
+   * Last NIP-42 challenge seen while no signer was configured. After a
+   * reload the extension signer is attached only once the session is
+   * restored, so the challenge that arrived with the first REQ would
+   * otherwise be dropped and the relay would stay unauthorized forever.
+   */
+  private pendingChallenge: string | null = null;
+  /**
+   * NIP-42 gate. A relay may demand auth on connect, so no REQ goes out
+   * until the challenge has been answered (or the gate window closes for a
+   * relay that does not require auth). Re-armed on every new socket.
+   */
+  private authGateOpen = false;
+  private authGateWaiters: Array<() => void> = [];
+  /** Set once the relay rejected us for auth, to re-arm the gate. */
+  private authRequiredOnConnection = false;
   private readonly answeredChallenges = new Set<string>();
   private isOpen = false;
   private connStatus: RelayConnState = "closed";
@@ -136,8 +164,19 @@ export class RelayConnection {
     return this.connStatus;
   }
 
+  /** True once a NIP-42 signer has been attached to this connection. */
+  get hasSigner(): boolean {
+    return this.options.signer !== undefined;
+  }
+
   setSigner(signer: AuthSigner | undefined): void {
     this.options.signer = signer;
+    // A challenge may have arrived before the session was restored.
+    if (signer !== undefined && this.pendingChallenge !== null) {
+      const challenge = this.pendingChallenge;
+      this.pendingChallenge = null;
+      void this.answerChallenge(challenge).finally(() => this.openAuthGate());
+    }
   }
 
   private setStatus(status: RelayConnState): void {
@@ -186,6 +225,9 @@ export class RelayConnection {
     if (this.socket) return this.socket;
     const socket = this.factory(this.url);
     this.socket = socket;
+    // A fresh connection gets a fresh challenge, so the gate closes again.
+    this.authGateOpen = false;
+    this.authRequiredOnConnection = false;
     this.setStatus("connecting");
     socket.onopen = () => {
       this.isOpen = true;
@@ -211,8 +253,67 @@ export class RelayConnection {
 
   private resubscribeLive(socket: Socket): void {
     for (const entry of this.liveSubs.values()) {
-      this.safeSend(socket, JSON.stringify(["REQ", entry.id, entry.filter]));
+      void this.sendLiveReq(entry);
     }
+  }
+
+  /**
+   * Opens a live subscription, but only after the NIP-42 gate is open: a
+   * REQ must never reach an auth-required relay before AUTH.
+   */
+  private async sendLiveReq(entry: LiveSubEntry): Promise<void> {
+    const opened = await this.waitOpen(10000);
+    if (!opened) return;
+    await this.waitAuthGate(10000);
+    // Unsubscribed while the gate was closed: never open it afterwards.
+    if (this.liveSubs.get(entry.id) !== entry) return;
+    const socket = this.socket;
+    if (socket === null) return;
+    this.safeSend(socket, JSON.stringify(["REQ", entry.id, entry.filter]));
+  }
+
+  /**
+   * NIP-42 gate: resolves once the relay's challenge has been answered, or
+   * after `authGateMs` when the relay never asks for auth. When a challenge
+   * did arrive but cannot be signed yet, the window still has to expire, so
+   * a logged-out client is not blocked forever.
+   */
+  private waitAuthGate(timeoutMs: number): Promise<void> {
+    if (this.authGateOpen) return Promise.resolve();
+    const budget = this.authRequiredOnConnection
+      ? (this.options.authGateMs ?? timeoutMs)
+      : (this.options.authGateProbeMs ?? Math.min(timeoutMs, 1200));
+    if (budget <= 0) {
+      this.openAuthGate();
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.authGateWaiters = this.authGateWaiters.filter((w) => w !== done);
+        this.openAuthGate();
+        resolve();
+      }, budget);
+      const done = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      this.authGateWaiters.push(done);
+    });
+  }
+
+  private openAuthGate(): void {
+    if (this.authGateOpen) return;
+    this.authGateOpen = true;
+    this.authGateWaiters.splice(0).forEach((run) => run());
+  }
+
+  /**
+   * Called after a fresh login: the session can sign challenges, so the
+   * gate no longer has to hold REQs back.
+   */
+  resetAuthGate(): void {
+    this.authGateOpen = true;
+    this.authGateWaiters.splice(0).forEach((run) => run());
   }
 
   private waitOpen(timeoutMs: number): Promise<boolean> {
@@ -274,6 +375,12 @@ export class RelayConnection {
       if (sub !== undefined && isAuthRequiredMessage(msg[2])) {
         sub.authRequired = true;
       }
+      if (isAuthRequiredMessage(msg[2])) {
+        // Rejected for auth: close the gate again so the next attempt waits
+        // for a fresh challenge instead of firing another doomed REQ.
+        this.authRequiredOnConnection = true;
+        this.authGateOpen = false;
+      }
       if (live !== undefined) {
         // Relay refused the live stream (often auth); surface and drop it.
         if (isAuthRequiredMessage(msg[2])) live.onAuthRequired?.();
@@ -288,11 +395,15 @@ export class RelayConnection {
         pending.resolve({ accepted: msg[2], message: msg[3] });
       }
     } else if (msg[0] === "AUTH" && typeof msg[1] === "string") {
-      // Connection-level challenge: flag every pending query, then answer.
+      // Connection-level challenge: flag every pending query, then answer
+      // and only then release the gate so no REQ races ahead of AUTH.
       for (const sub of this.pendingSubs.values()) {
         sub.authRequired = true;
       }
-      void this.answerChallenge(msg[1]);
+      this.authRequiredOnConnection = true;
+      void this.answerChallenge(msg[1]).finally(() => {
+        if (this.options.signer !== undefined) this.openAuthGate();
+      });
     }
   }
 
@@ -318,7 +429,11 @@ export class RelayConnection {
   }
 
   private async answerChallenge(challenge: string): Promise<void> {
-    if (this.options.signer === undefined) return;
+    if (this.options.signer === undefined) {
+      // Hold on to it: setSigner() answers as soon as the session exists.
+      this.pendingChallenge = challenge;
+      return;
+    }
     if (this.answeredChallenges.has(challenge)) return;
     this.answeredChallenges.add(challenge);
     try {
@@ -338,6 +453,8 @@ export class RelayConnection {
     if (!opened) {
       return { events: [], eose: false, failed: true, authRequired: false };
     }
+    // Never send a REQ before the NIP-42 challenge has been answered.
+    await this.waitAuthGate(timeoutMs);
     // The socket may have been replaced while waiting; use the live one.
     const socket = this.ensureSocket();
     const subId = newSubscriptionId();
@@ -383,10 +500,9 @@ export class RelayConnection {
       onAuthRequired: hooks.onAuthRequired,
     };
     this.liveSubs.set(id, entry);
-    const socket = this.socket;
-    if (socket !== null && this.isOpen) {
-      this.safeSend(socket, JSON.stringify(["REQ", id, filter]));
-    }
+    // While the socket is still opening, onopen -> resubscribeLive sends it.
+    // Sending from both paths would open the subscription twice.
+    if (this.isOpen) void this.sendLiveReq(entry);
     return {
       id,
       unsubscribe: () => {
@@ -410,6 +526,7 @@ export class RelayConnection {
     if (!opened) {
       return { accepted: false, message: "connection failed" };
     }
+    await this.waitAuthGate(timeoutMs);
     const socket = this.ensureSocket();
     const outcome = await new Promise<PublishResult>((resolve) => {
       const timer = setTimeout(() => {

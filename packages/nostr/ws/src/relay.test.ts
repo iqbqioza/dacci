@@ -18,7 +18,9 @@ function makeSocket(): Socket & { peer: (msg: unknown) => void } {
 describe("RelayConnection.query", () => {
   it("collects events until EOSE", async () => {
     const socket = makeSocket();
-    const conn = new RelayConnection("wss://example", () => socket);
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+    });
     const event = {
       id: "a".repeat(64),
       pubkey: "b".repeat(64),
@@ -42,7 +44,9 @@ describe("RelayConnection.query", () => {
 
   it("marks CLOSED as failed", async () => {
     const socket = makeSocket();
-    const conn = new RelayConnection("wss://example", () => socket);
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+    });
     const pending = conn.query({ kinds: [1] });
     await new Promise((r) => setTimeout(r, 0));
     const sent = vi.mocked(socket.send).mock.calls[0][0];
@@ -67,7 +71,7 @@ describe("RelayConnection.query", () => {
     const conn = new RelayConnection(
       "wss://example",
       () => socket,
-      { signer: () => authEvent },
+      { signer: () => authEvent, authGateProbeMs: 0 },
     );
     const pending = conn.query({ kinds: [1] });
     await new Promise((r) => setTimeout(r, 0));
@@ -86,7 +90,9 @@ describe("RelayConnection.query", () => {
 
   it("flags auth-required CLOSED when no signer is configured", async () => {
     const socket = makeSocket();
-    const conn = new RelayConnection("wss://example", () => socket);
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+    });
     const pending = conn.query({ kinds: [1] });
     await new Promise((r) => setTimeout(r, 0));
     const sent = vi.mocked(socket.send).mock.calls[0][0];
@@ -99,7 +105,9 @@ describe("RelayConnection.query", () => {
 
   it("serves concurrent queries without clobbering", async () => {
     const socket = makeSocket();
-    const conn = new RelayConnection("wss://example", () => socket);
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+    });
     const eventA = {
       id: "a".repeat(64),
       pubkey: "b".repeat(64),
@@ -132,7 +140,9 @@ describe("RelayConnection.query", () => {
 
   it("publishes an event and resolves on OK", async () => {
     const socket = makeSocket();
-    const conn = new RelayConnection("wss://example", () => socket);
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+    });
     const event = {
       id: "a".repeat(64),
       pubkey: "b".repeat(64),
@@ -155,7 +165,9 @@ describe("RelayConnection.query", () => {
 
   it("streams live events after EOSE", async () => {
     const socket = makeSocket();
-    const conn = new RelayConnection("wss://example", () => socket);
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+    });
     const received: string[] = [];
     let eosed = false;
     conn.subscribe({ kinds: [1] }, (event) => received.push(event.content), {
@@ -194,6 +206,7 @@ describe("RelayConnection.query", () => {
     const conn = new RelayConnection("wss://example", factory, {
       baseReconnectMs: 5,
       maxReconnectMs: 10,
+      authGateProbeMs: 0,
     });
     conn.subscribe({ kinds: [1] }, () => {});
     await new Promise((r) => setTimeout(r, 0));
@@ -209,10 +222,12 @@ describe("RelayConnection.query", () => {
 
   it("unsubscribe stops delivery and sends CLOSE", async () => {
     const socket = makeSocket();
-    const conn = new RelayConnection("wss://example", () => socket);
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+    });
     const received: string[] = [];
     const sub = conn.subscribe({ kinds: [1] }, (e) => received.push(e.content));
-    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 5));
     const subId = JSON.parse(
       vi.mocked(socket.send).mock.calls[0][0],
     )[1] as string;
@@ -236,6 +251,80 @@ describe("RelayConnection.query", () => {
     expect(received).toEqual([]);
   });
 
+  it("answers a challenge that arrived before the signer was attached", async () => {
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+    });
+    // No signer yet: the first REQ is challenged.
+    const pending = conn.query({ kinds: [1] });
+    await new Promise((r) => setTimeout(r, 0));
+    const calls = vi.mocked(socket.send).mock.calls.map((c) => c[0]);
+    const subId = JSON.parse(calls[0])[1] as string;
+    socket.peer(["AUTH", "challenge-late"]);
+    await new Promise((r) => setTimeout(r, 0));
+    // Nothing answered yet, but the challenge was not lost.
+    expect(calls).toHaveLength(1);
+
+    const authEvent = {
+      id: "a".repeat(64),
+      pubkey: "b".repeat(64),
+      created_at: 1,
+      kind: 22242,
+      tags: [["relay", "wss://example"]],
+      content: "",
+      sig: "c".repeat(128),
+    };
+    conn.setSigner(() => authEvent);
+    await new Promise((r) => setTimeout(r, 0));
+    const after = vi.mocked(socket.send).mock.calls.map((c) => c[0]);
+    expect(after).toHaveLength(2);
+    expect(JSON.parse(after[1])).toEqual(["AUTH", authEvent]);
+
+    socket.peer(["EOSE", subId]);
+    const result = await pending;
+    expect(result.eose).toBe(true);
+    expect(result.authRequired).toBe(true);
+  });
+
+  it("never sends a REQ before answering the challenge", async () => {
+    const socket = makeSocket();
+    const authEvent = {
+      id: "a".repeat(64),
+      pubkey: "b".repeat(64),
+      created_at: 1,
+      kind: 22242,
+      tags: [],
+      content: "",
+      sig: "c".repeat(128),
+    };
+    const conn = new RelayConnection(
+      "wss://example",
+      () => socket,
+      { signer: () => authEvent, authGateProbeMs: 300 },
+    );
+    const pending = conn.query({ kinds: [1] });
+    await new Promise((r) => setTimeout(r, 0));
+    // Relay challenges as soon as the socket opens.
+    socket.peer(["AUTH", "challenge-gate"]);
+    await new Promise((r) => setTimeout(r, 20));
+    const frames = vi.mocked(socket.send).mock.calls.map(
+      (c) => JSON.parse(c[0])[0] as string,
+    );
+    // The invariant: AUTH is on the wire before any REQ, never after.
+    expect(frames[0]).toBe("AUTH");
+    expect(frames.filter((f) => f === "AUTH")).toHaveLength(1);
+    await new Promise((r) => setTimeout(r, 20));
+    const after = vi.mocked(socket.send).mock.calls.map((c) => c[0]);
+    const kinds = after.map((raw) => JSON.parse(raw)[0] as string);
+    expect(kinds.indexOf("AUTH")).toBeLessThan(kinds.indexOf("REQ"));
+    const subId = JSON.parse(
+      after[kinds.indexOf("REQ")] as string,
+    )[1] as string;
+    socket.peer(["EOSE", subId]);
+    expect((await pending).eose).toBe(true);
+  });
+
   it("reconnects after an unexpected close", async () => {
     const sockets: Array<ReturnType<typeof makeSocket>> = [];
     const factory = () => {
@@ -246,6 +335,7 @@ describe("RelayConnection.query", () => {
     const conn = new RelayConnection("wss://example", factory, {
       baseReconnectMs: 5,
       maxReconnectMs: 10,
+      authGateProbeMs: 0,
     });
     expect(conn.status).toBe("closed");
     const pending = conn.query({ kinds: [1] });
@@ -275,6 +365,7 @@ describe("RelayConnection.query", () => {
     const conn = new RelayConnection("wss://example", factory, {
       baseReconnectMs: 5,
       maxReconnectMs: 10,
+      authGateProbeMs: 0,
     });
     const pending = conn.query({ kinds: [1] });
     await new Promise((r) => setTimeout(r, 0));

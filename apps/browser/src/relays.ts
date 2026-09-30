@@ -165,7 +165,7 @@ function setStatus(url: string, status: RelayConnStatus): void {
 async function checkOne(url: string): Promise<void> {
   setStatus(url, "checking");
   try {
-    const result = await getConnection(url).query({ limit: 0 }, 8000);
+    const result = await getConnection(url).query({ limit: 0 }, 3000);
     setStatus(
       url,
       result.failed ? (result.authRequired ? "auth" : "offline") : "online",

@@ -85,7 +85,29 @@ describe("TimelinePaginator", () => {
     expect(seen.size).toBe(200);
   });
 
-  it("parks auth-gated relays in needsAuth without spinning", async () => {
+  it("does not wait for a relay that never answers", async () => {
+    const good = stubConnection("wss://fast", makeStore(40, 2000));
+    // Accepts the connection but never resolves.
+    const dead = new RelayConnection("wss://dead", () => {
+      throw new Error("no socket in unit test");
+    });
+    vi.spyOn(dead, "query").mockImplementation(
+      () => new Promise(() => {}),
+    );
+    const started = Date.now();
+    const paginator = new TimelinePaginator([good, dead], { kinds: [1] }, {
+      pageSize: 30,
+      roundTimeoutMs: 300,
+      maxRounds: 2,
+    });
+    const page = await paginator.loadNextPage();
+    expect(Date.now() - started).toBeLessThan(2500);
+    expect(page.events.length).toBeGreaterThan(0);
+    expect(page.coverage).toBe("partial");
+    expect(page.pendingRelays).toContain("wss://dead");
+  });
+
+  it("retries an auth-gated relay as soon as a signer is attached", async () => {
     const conn = new RelayConnection("wss://auth", () => {
       throw new Error("no socket in unit test");
     });
@@ -95,15 +117,32 @@ describe("TimelinePaginator", () => {
       failed: true,
       authRequired: true,
     });
-    const paginator = new TimelinePaginator([conn], { kinds: [1] });
-    const first = await paginator.loadNextPage();
-    expect(first.coverage).toBe("partial");
-    expect(first.authRequiredRelays).toEqual(["wss://auth"]);
-    expect(first.pendingRelays).toEqual(["wss://auth"]);
-    const callsAfterFirst = query.mock.calls.length;
-    const second = await paginator.loadNextPage();
-    expect(second.authRequiredRelays).toEqual(["wss://auth"]);
-    // Parked relay is not re-queried.
-    expect(query.mock.calls.length).toBe(callsAfterFirst);
+    const paginator = new TimelinePaginator([conn], { kinds: [1] }, {
+      pageSize: 1,
+      maxRounds: 3,
+    });
+    await paginator.loadNextPage();
+    const parked = query.mock.calls.length;
+
+    // Session restored: the signer can now answer the challenge.
+    conn.setSigner(() => ({
+      id: "a".repeat(64),
+      pubkey: "b".repeat(64),
+      created_at: 1,
+      kind: 22242,
+      tags: [],
+      content: "",
+      sig: "c".repeat(128),
+    }));
+    query.mockResolvedValue({
+      events: [makeEvent(1000, "e")],
+      eose: true,
+      failed: false,
+      authRequired: false,
+    });
+    const page = await paginator.loadNextPage();
+    expect(query.mock.calls.length).toBeGreaterThan(parked);
+    expect(page.events).toHaveLength(1);
+    expect(page.authRequiredRelays).toEqual([]);
   });
 });
