@@ -14,7 +14,12 @@ import { shortId } from "../nostr.js";
  */
 
 /** Round avatar, with the first initial as fallback. */
-export function ProfileAvatar(props: { pubkey: string; size?: number }) {
+export function ProfileAvatar(props: {
+  pubkey: string;
+  size?: number;
+  /** Extra classes, e.g. a ring where it overlaps a banner. */
+  class?: string;
+}) {
   const [broken, setBroken] = createSignal(false);
   createEffect(() => {
     setBroken(false);
@@ -32,8 +37,10 @@ export function ProfileAvatar(props: { pubkey: string; size?: number }) {
   const size = () => props.size ?? 40;
 
   return (
+    // `block` matters: an inline box ignores overflow, so the image would
+    // not be clipped into a circle outside a flex row.
     <span
-      class="shrink-0 overflow-hidden rounded-full bg-(--dads-solid-gray-200)"
+      class={`block shrink-0 overflow-hidden rounded-full bg-(--dads-solid-gray-200) ${props.class ?? ""}`}
       style={{ width: `${size()}px`, height: `${size()}px` }}
     >
       <Show

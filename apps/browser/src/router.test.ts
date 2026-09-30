@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseHash } from "./router.js";
+import { parseHash, profileHash, toHash } from "./router.js";
 
 describe("parseHash", () => {
   it("parses menu routes", () => {
@@ -9,6 +9,54 @@ describe("parseHash", () => {
       name: "menu",
       menu: "settings",
     });
+  });
+
+  it("parses profile routes with and without a pubkey", () => {
+    expect(parseHash("#/profile")).toEqual({
+      name: "profile",
+      pubkey: null,
+      invalid: false,
+    });
+    expect(parseHash("#/profile/")).toEqual({
+      name: "profile",
+      pubkey: null,
+      invalid: false,
+    });
+    expect(parseHash(`#/profile/${"A".repeat(64)}`)).toEqual({
+      name: "profile",
+      pubkey: "a".repeat(64),
+      invalid: false,
+    });
+  });
+
+  it("flags a broken profile link instead of showing the home feed", () => {
+    // Falling back to home here would quietly show someone else's feed.
+    expect(parseHash("#/profile/short")).toEqual({
+      name: "profile",
+      pubkey: null,
+      invalid: true,
+    });
+    expect(parseHash(`#/profile/${"a".repeat(65)}`)).toEqual({
+      name: "profile",
+      pubkey: null,
+      invalid: true,
+    });
+    expect(parseHash("#/profile/zz")).toEqual({
+      name: "profile",
+      pubkey: null,
+      invalid: true,
+    });
+  });
+
+  it("builds profile links", () => {
+    expect(profileHash("b".repeat(64))).toBe(`#/profile/${"b".repeat(64)}`);
+  });
+
+  it("never writes a doubled hash", () => {
+    // A leading # is already there; adding another breaks every route.
+    expect(toHash("#/home")).toBe("#/home");
+    expect(toHash("/home")).toBe("#/home");
+    expect(profileHash("c".repeat(64)).startsWith("#/")).toBe(true);
   });
 
   it("parses event routes case-insensitively", () => {

@@ -7,8 +7,6 @@ import {
   logout,
   useAuth,
 } from "../auth.jsx";
-import { encodeNpub } from "dacci-nostr-nips";
-import { formatTime } from "../nostr.js";
 import {
   ensureNotifications,
   flushNotificationArrivals,
@@ -17,7 +15,6 @@ import {
 } from "../notifications-feed.js";
 import { useNotificationLive } from "../live.js";
 import { EventCard } from "./EventCard.jsx";
-import { ProfileAvatar, ProfileName } from "./ProfileAvatar.jsx";
 
 function newestFirst(a: NostrEvent, b: NostrEvent): number {
   return a.created_at !== b.created_at
@@ -96,47 +93,6 @@ export function NotificationsView(props: {
               : "取得可能な通知の末尾です (一部未確定)"}
           </p>
         </Show>
-      </Show>
-    </div>
-  );
-}
-
-export function ProfileView(props: { event: NostrEvent | null }) {
-  return (
-    <div class="px-4 py-3">
-      <h2 class="text-lg font-bold">Profile</h2>
-      <Show
-        when={props.event}
-        fallback={
-          <p class="mt-2 text-(--dads-solid-gray-500)">
-            タイムラインの投稿を選択すると、ここに詳細を表示します。
-          </p>
-        }
-      >
-        {(event) => (
-          <div class="mt-2 flex gap-3">
-            <ProfileAvatar pubkey={event().pubkey} size={48} />
-            <div class="min-w-0 flex-1">
-              <div class="flex items-start justify-between gap-2">
-                <div class="min-w-0">
-                  <ProfileName pubkey={event().pubkey} />
-                  <p
-                    class="truncate font-mono text-xs text-(--dads-solid-gray-500)"
-                    title={encodeNpub(event().pubkey) ?? event().pubkey}
-                  >
-                    {encodeNpub(event().pubkey) ?? event().pubkey}
-                  </p>
-                </div>
-                <span class="shrink-0 text-xs whitespace-nowrap text-(--dads-solid-gray-500)">
-                  {formatTime(event().created_at)}
-                </span>
-              </div>
-              <p class="mt-1 whitespace-pre-wrap break-words">
-                {event().content}
-              </p>
-            </div>
-          </div>
-        )}
       </Show>
     </div>
   );

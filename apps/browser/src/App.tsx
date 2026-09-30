@@ -27,18 +27,18 @@ import { HomeTimeline } from "./components/HomeTimeline.jsx";
 import { ProfileAvatar, ProfileName } from "./components/ProfileAvatar.jsx";
 import { RelayDebugPanel } from "./components/RelayPanel.jsx";
 import { NetworkView } from "./components/NetworkView.jsx";
-import {
-  NotificationsView,
-  ProfileView,
-  SettingsView,
-} from "./components/Views.jsx";
+import { EventCard } from "./components/EventCard.jsx";
+import { ProfileHeader, ProfilePage } from "./components/ProfilePage.jsx";
+import { NotificationsView, SettingsView } from "./components/Views.jsx";
 import { getConnection } from "./nostr.js";
 import { noticeMessage } from "./notice.js";
 import { resetHomeFeed } from "./home-feed.js";
+import { resetFollowCounts } from "./follows.js";
+import { startLiveFeeds, watchProfileSubject } from "./live.js";
 import { adoptMyActivity, syncMyActivity } from "./my-actions.js";
 import { resetNotifications } from "./notifications-feed.js";
+import { resetProfileFeed, openProfile } from "./profile-feed.js";
 import { resetProfiles } from "./profile.js";
-import { startLiveFeeds } from "./live.js";
 import {
   initRelays,
   startAutoRefresh,
@@ -56,6 +56,12 @@ import {
   type Route,
 } from "./router.js";
 
+/** What the profile page should show: a pubkey, or the reader's own. */
+interface ProfileTarget {
+  pubkey: string | null;
+  invalid: boolean;
+}
+
 const COMPOSE_TITLES: Record<ComposeMode, string> = {
   new: "新規投稿",
   reply: "リプライ",
@@ -66,13 +72,13 @@ const MENU_LABELS: Array<{ menu: Menu; label: string }> = [
   { menu: "home", label: "Home" },
   { menu: "notifications", label: "Notification" },
   { menu: "network", label: "Network" },
-  { menu: "profile", label: "Profile" },
   { menu: "settings", label: "Settings" },
 ];
 
 export function App() {
   const [route, setRoute] = createSignal<Route>(parseHash(currentHash()));
-  const { menuRoute, eventRoute } = projectRoute(route);
+  const { menuRoute, eventRoute, profileRoute, profileTarget } =
+    projectRoute(route);
   const [draft, setDraft] = createSignal("");
   const { pubkey } = useAuth();
   const { readRelays, relayVersion } = useRelays();
@@ -109,7 +115,27 @@ export function App() {
   // the profile cache and its failed-user queue start over with it.
   createEffect(() => {
     relayVersion();
-    untrack(resetProfiles);
+    untrack(() => {
+      resetProfiles();
+      resetFollowCounts();
+      resetProfileFeed();
+    });
+  });
+
+  // The profile page follows whoever it is showing, live. Leaving the page
+  // only stops the stream: the loaded posts stay for the next visit.
+  createEffect(() => {
+    const target = profileTarget();
+    if (target === undefined || target.invalid) {
+      // Off the profile page, or a broken link: stop the stream and keep
+      // whatever was already loaded.
+      watchProfileSubject(null);
+      return;
+    }
+    // The reader's own profile page carries no pubkey in the URL.
+    const subject = target.pubkey ?? pubkey() ?? null;
+    watchProfileSubject(subject);
+    untrack(() => openProfile(subject));
   });
 
   // Login, logout, a new relay set or a new feed filter: rebuild the
@@ -183,6 +209,16 @@ export function App() {
         <Switch>
           <Match when={menuRoute()}>
             {(menu) => <MenuContent menu={menu()} onSelect={openDetail} />}
+          </Match>
+          {/* Match needs an accessor to hand the target to the page. */}
+          <Match when={profileTarget()}>
+            {(target) => (
+              <ProfilePage
+                pubkey={target().pubkey}
+                invalid={target().invalid}
+                onSelect={openDetail}
+              />
+            )}
           </Match>
           <Match when={eventRoute()}>
             {(detail) => (
@@ -279,6 +315,10 @@ function isMenuActive(route: Route, menu: Menu): boolean {
 function projectRoute(route: () => Route): {
   menuRoute: () => Menu | undefined;
   eventRoute: () => string | undefined;
+  /** Pubkey of the profile being shown; null means the reader's own. */
+  profileRoute: () => string | null | undefined;
+  /** The whole profile target, or undefined off the profile page. */
+  profileTarget: () => ProfileTarget | undefined;
 } {
   return {
     menuRoute: () => {
@@ -288,6 +328,16 @@ function projectRoute(route: () => Route): {
     eventRoute: () => {
       const current = route();
       return current.name === "event" ? current.eventId : undefined;
+    },
+    profileRoute: () => {
+      const current = route();
+      return current.name === "profile" ? current.pubkey : undefined;
+    },
+    profileTarget: () => {
+      const current = route();
+      return current.name === "profile"
+        ? { pubkey: current.pubkey, invalid: current.invalid }
+        : undefined;
     },
   };
 }
@@ -306,9 +356,6 @@ function MenuContent(props: {
       </Match>
       <Match when={props.menu === "network"}>
         <NetworkView />
-      </Match>
-      <Match when={props.menu === "profile"}>
-        <ProfileView event={null} />
       </Match>
       <Match when={props.menu === "settings"}>
         <SettingsView />
@@ -367,7 +414,13 @@ function EventDetailView(props: { eventId: string; urls: string[] }) {
           </p>
         }
       >
-        {(found) => <ProfileView event={found()} />}
+        {(found) => (
+          <div>
+            {/* The author's header, so a deep link reads like a profile. */}
+            <ProfileHeader pubkey={found().pubkey} compact />
+            <EventCard event={found()} onSelect={() => undefined} />
+          </div>
+        )}
       </Show>
     </div>
   );

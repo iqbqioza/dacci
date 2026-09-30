@@ -7,6 +7,7 @@ import { createSignal } from "solid-js";
 import type { LiveSubscription } from "dacci-nostr-ws";
 import { rememberEvents } from "./event-cache.js";
 import { getConnection } from "./nostr.js";
+import { useRelays } from "./relays.js";
 
 const MAX_BUFFERED = 200;
 
@@ -17,6 +18,9 @@ const [feedBuffer, setFeedBuffer] = createSignal<NostrEvent[]>([]);
 const [notificationBuffer, setNotificationBuffer] = createSignal<NostrEvent[]>(
   [],
 );
+const [profileBuffer, setProfileBuffer] = createSignal<NostrEvent[]>([]);
+/** The profile feed follows whoever the reader is looking at. */
+const [profileSubject, setProfileSubject] = createSignal<string | null>(null);
 const [liveRelays, setLiveRelays] = createSignal(0);
 const [notificationRelays, setNotificationRelays] = createSignal(0);
 
@@ -28,12 +32,45 @@ export function useNotificationLive() {
   return { buffered: notificationBuffer, liveRelays: notificationRelays };
 }
 
+export function useProfileLive() {
+  return { buffered: profileBuffer, subject: profileSubject };
+}
+
 export function clearFeedBuffer(): void {
   setFeedBuffer([]);
 }
 
 export function clearNotificationBuffer(): void {
   setNotificationBuffer([]);
+}
+
+export function clearProfileBuffer(): void {
+  setProfileBuffer([]);
+}
+
+/**
+ * Points the profile stream at a subject. The subscription is left in
+ * place across navigation and only re-filtered when the subject changes,
+ * so opening a profile is instant.
+ */
+export function watchProfileSubject(pubkey: string | null): void {
+  if (profileSubject() === pubkey) return;
+  setProfileSubject(pubkey);
+  setProfileBuffer([]);
+  for (const sub of profileSubs) sub.unsubscribe();
+  profileSubs.length = 0;
+  const [url] = readRelaysValue();
+  if (pubkey === null || url === undefined) return;
+  profileSubs.push(
+    getConnection(url).subscribe(
+      {
+        kinds: [1],
+        authors: [pubkey],
+        since: Math.floor(Date.now() / 1000),
+      },
+      push(setProfileBuffer),
+    ),
+  );
 }
 
 function push(buffer: (updater: (prev: NostrEvent[]) => NostrEvent[]) => void) {
@@ -44,6 +81,13 @@ function push(buffer: (updater: (prev: NostrEvent[]) => NostrEvent[]) => void) {
       return [...prev, event].sort(compareEvents).slice(0, MAX_BUFFERED);
     });
   };
+}
+
+/** Subscriptions that follow the profile page's subject. */
+const profileSubs: LiveSubscription[] = [];
+
+function readRelaysValue(): string[] {
+  return useRelays().readRelays();
 }
 
 export interface LiveFeedDeps {
@@ -104,6 +148,8 @@ export function startLiveFeeds(deps: LiveFeedDeps): () => void {
   return () => {
     for (const sub of subs) sub.unsubscribe();
     subs.length = 0;
+    for (const sub of profileSubs) sub.unsubscribe();
+    profileSubs.length = 0;
     setLiveRelays(0);
     setNotificationRelays(0);
   };

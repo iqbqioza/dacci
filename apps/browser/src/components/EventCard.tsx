@@ -2,6 +2,7 @@ import type { NostrEvent } from "dacci-nostr-nips";
 import { encodeNpub } from "dacci-nostr-nips";
 import { createMemo } from "solid-js";
 import { formatTime } from "../nostr.js";
+import { navigate, profileHash } from "../router.js";
 import { ActionBar } from "./ActionBar.jsx";
 import { ProfileAvatar, ProfileName } from "./ProfileAvatar.jsx";
 import { PostMenu } from "./PostMenu.jsx";
@@ -27,7 +28,17 @@ export function EventCard(props: {
       <div class="min-w-0 flex-1">
         <div class="flex items-start justify-between gap-2">
           <div class="min-w-0">
-            <ProfileName pubkey={props.event.pubkey} />
+            <button
+              class="block max-w-full text-left hover:underline"
+              title="プロフィールを開く"
+              onClick={(e) => {
+                // Opening the profile must not open the post as well.
+                e.stopPropagation();
+                navigate(profileHash(props.event.pubkey));
+              }}
+            >
+              <ProfileName pubkey={props.event.pubkey} />
+            </button>
             <p
               class="truncate font-mono text-xs text-(--dads-solid-gray-500)"
               title={npub() ?? props.event.pubkey}

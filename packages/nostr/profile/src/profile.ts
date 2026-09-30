@@ -3,6 +3,8 @@ import { isValidEventStructure, type NostrEvent } from "dacci-nostr-nips";
 /** NIP-01 kind 0 metadata, parsed from the JSON content. */
 export interface Profile {
   pubkey: string;
+  /** When the metadata was published, for a joined date. */
+  createdAt?: number;
   name?: string;
   displayName?: string;
   about?: string;
@@ -51,6 +53,7 @@ export function parseProfile(event: NostrEvent): Profile | null {
       : undefined;
   return {
     pubkey: event.pubkey,
+    createdAt: event.created_at,
     name: text("name"),
     displayName: text("display_name"),
     about: text("about"),
