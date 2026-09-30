@@ -1,5 +1,5 @@
 import type { NostrEvent } from "dacci-nostr-nips";
-import { createSignal, For, onMount, Show } from "solid-js";
+import { createEffect, createSignal, For, onMount, Show } from "solid-js";
 import {
   extensionAvailable,
   loginWithExtension,
@@ -8,11 +8,13 @@ import {
   useAuth,
 } from "../auth.jsx";
 import { formatTime, getConnection } from "../nostr.js";
-import { rememberEvents } from "../event-cache.js";
-import { planFlush } from "../flush.js";
-import { clearNotificationBuffer, useNotificationLive } from "../live.js";
-import { useRelays } from "../relays.js";
-import { preservingViewport } from "../viewport.js";
+import {
+  ensureNotifications,
+  flushNotificationArrivals,
+  loadMoreNotifications,
+  useNotifications,
+} from "../notifications-feed.js";
+import { useNotificationLive } from "../live.js";
 import { EventCard } from "./EventCard.jsx";
 
 function newestFirst(a: NostrEvent, b: NostrEvent): number {
@@ -116,47 +118,16 @@ export function NotificationsView(props: {
   onSelect: (event: NostrEvent) => void;
 }) {
   const { pubkey } = useAuth();
-  const { relayUrls } = useRelays();
   const { buffered } = useNotificationLive();
-  const [events, setEvents] = createSignal<NostrEvent[]>([]);
-  const [loading, setLoading] = createSignal(false);
-  const [loadedFor, setLoadedFor] = createSignal<string | null>(null);
-  let listRef: HTMLDivElement | undefined;
+  const feed = useNotifications();
 
-  async function load(key: string) {
-    setLoading(true);
-    try {
-      const result = await getConnection(relayUrls()[0]).query(
-        { kinds: [1, 6, 7], "#p": [key], limit: 20 },
-        10000,
-      );
-      const incoming = result.events.filter(
-        (event) => !events().some((existing) => existing.id === event.id),
-      );
-      if (incoming.length > 0) {
-        setEvents((prev) => [...incoming, ...prev].sort(newestFirst));
-      }
-      rememberEvents(result.events);
-      setLoadedFor(key);
-    } finally {
-      setLoading(false);
-    }
-  }
-
+  // Live subscriptions run app-wide; this only seeds history the first time.
   onMount(() => {
-    const key = pubkey();
-    // Only the first visit fetches history; later visits reuse the list,
-    // and live arrivals keep arriving in the app-wide buffer.
-    if (key !== null && loadedFor() !== key) void load(key);
+    ensureNotifications(pubkey());
   });
-
-  function flushNew(): void {
-    const plan = planFlush(buffered(), events());
-    preservingViewport(listRef, () => {
-      clearNotificationBuffer();
-      if (plan.added.length > 0) setEvents(plan.events);
-    });
-  }
+  createEffect(() => {
+    ensureNotifications(pubkey());
+  });
 
   return (
     <div>
@@ -171,26 +142,47 @@ export function NotificationsView(props: {
         <Show when={buffered().length > 0}>
           <button
             class="sticky top-0 z-10 block w-full border-b border-(--dads-solid-gray-200) bg-white px-4 py-3 text-left hover:bg-(--dads-blue-50)"
-            onClick={flushNew}
+            onClick={flushNotificationArrivals}
           >
             新着 {buffered().length} 件
           </button>
         </Show>
-        <Show when={loading() && events().length === 0}>
+        <Show when={feed.loading() && feed.events().length === 0}>
           <p class="px-4 py-6 text-(--dads-solid-gray-500)">読み込み中…</p>
         </Show>
-        <Show when={!loading() && events().length === 0}>
+        <Show when={!feed.loading() && feed.events().length === 0}>
           <p class="px-4 py-6 text-(--dads-solid-gray-500)">
             自分へのメンション・リアクションはまだありません。
           </p>
         </Show>
-        <div ref={listRef}>
-          <For each={events()}>
+        <Show when={feed.authRelays().length > 0}>
+          <p class="border-b border-(--dads-yellow-600) bg-(--dads-yellow-50) px-4 py-2 text-sm text-(--dads-solid-gray-800)">
+            認証が必要なリレー: {feed.authRelays().join(", ")}
+          </p>
+        </Show>
+        <div ref={feed.setListRef}>
+          <For each={feed.events()}>
             {(event) => (
               <EventCard event={event} onSelect={props.onSelect} />
             )}
           </For>
+          <Show when={feed.hasMore() && !feed.loading()}>
+            <button
+              class="block w-full border-b border-(--dads-solid-gray-200) px-4 py-3 text-left hover:bg-(--dads-blue-50) disabled:opacity-50"
+              disabled={feed.loadingMore()}
+              onClick={loadMoreNotifications}
+            >
+              {feed.loadingMore() ? "読み込み中…" : "さらに読み込む"}
+            </button>
+          </Show>
         </div>
+        <Show when={!feed.hasMore() && feed.events().length > 0}>
+          <p class="px-4 py-4 text-sm text-(--dads-solid-gray-500)">
+            {feed.coverage() === "complete"
+              ? "通知の末尾です"
+              : "取得可能な通知の末尾です (一部未確定)"}
+          </p>
+        </Show>
       </Show>
     </div>
   );

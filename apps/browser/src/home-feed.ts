@@ -3,7 +3,7 @@ import { createSignal } from "solid-js";
 import { rememberEvents } from "./event-cache.js";
 import { planFlush } from "./flush.js";
 import { clearFeedBuffer, useFeedLive } from "./live.js";
-import { createTimeline } from "./nostr.js";
+import { createHomeTimeline } from "./nostr.js";
 import { useFeed, useRelays } from "./relays.js";
 import { preservingViewport } from "./viewport.js";
 
@@ -22,7 +22,7 @@ const [pendingRelays, setPendingRelays] = createSignal<string[]>([]);
 const [hasMore, setHasMore] = createSignal(true);
 
 // Guards late async completions from a discarded paginator generation.
-let paginator = createTimeline(relayUrlsValue(), feedAuthorsValue());
+let paginator = createHomeTimeline(relayUrlsValue(), feedAuthorsValue());
 let generation = 0;
 let listRef: HTMLDivElement | undefined;
 let barRef: HTMLButtonElement | undefined;
@@ -85,7 +85,7 @@ export async function loadMoreHome(): Promise<void> {
 
 /** Rebuilds the timeline for a new relay set or feed filter. */
 export function resetHomeFeed(): void {
-  const next = createTimeline(relayUrlsValue(), feedAuthorsValue());
+  const next = createHomeTimeline(relayUrlsValue(), feedAuthorsValue());
   paginator = next;
   generation += 1;
   setEvents([]);

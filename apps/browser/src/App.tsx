@@ -22,6 +22,7 @@ import {
 } from "./components/Views.jsx";
 import { getConnection } from "./nostr.js";
 import { resetHomeFeed } from "./home-feed.js";
+import { resetNotifications } from "./notifications-feed.js";
 import { startLiveFeeds } from "./live.js";
 import {
   initRelays,
@@ -95,9 +96,10 @@ export function App() {
     untrack(() => {
       stopLiveFeeds();
       stopLiveFeeds = startLiveFeeds(liveDeps);
-      // The paginated list belongs to the same identity: reset it only
+      // The paginated lists belong to the same identity: reset them only
       // when it really changed, never just because the view remounted.
       resetHomeFeed();
+      resetNotifications();
     });
   });
 
