@@ -1,7 +1,8 @@
 import type { NostrEvent } from "dacci-nostr-nips";
 import { encodeNpub } from "dacci-nostr-nips";
-import { createMemo } from "solid-js";
+import { Show, createMemo } from "solid-js";
 import { formatTime } from "../nostr.js";
+import { showsCommentLabel } from "../profile-feed.js";
 import { navigate, profileHash } from "../router.js";
 import { ActionBar } from "./ActionBar.jsx";
 import { ProfileAvatar, ProfileName } from "./ProfileAvatar.jsx";
@@ -47,6 +48,13 @@ export function EventCard(props: {
             </p>
           </div>
           <div class="flex shrink-0 items-center gap-1">
+            {/* A post that answers another one is labelled コメント, so a
+                conversation is told apart from a standalone note. */}
+            <Show when={showsCommentLabel(props.event)}>
+              <span class="rounded-md bg-(--dads-solid-gray-100) px-1.5 py-0.5 text-xs text-(--dads-solid-gray-600)">
+                コメント
+              </span>
+            </Show>
             <span class="text-xs whitespace-nowrap text-(--dads-solid-gray-500)">
               {formatTime(props.event.created_at)}
             </span>

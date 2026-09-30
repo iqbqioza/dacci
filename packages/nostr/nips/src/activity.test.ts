@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { computeEventId, type NostrEvent } from "./event.js";
 import {
   buildDeletion,
+  commentParent,
+  isComment,
   buildQuoteRepost,
   buildReaction,
   buildReply,
@@ -22,6 +24,12 @@ function note(
 ): NostrEvent {
   const base = { pubkey, created_at: AT, kind: 1, tags, content: "x" };
   return { ...base, id, sig: "s".repeat(128) };
+}
+
+/** An unsigned event of any kind, for tag-shape tests. */
+function buildComment(kind: number, tags: string[][]): NostrEvent {
+  const base = { pubkey: ME, created_at: AT, kind, tags, content: "" };
+  return { ...base, id: computeEventId(base), sig: "s".repeat(128) };
 }
 
 /** A signed event whose id follows from its own content. */
@@ -155,6 +163,60 @@ describe("mentionedPubkeys", () => {
     expect(mentionedPubkeys(`nostr:${AUTHOR}`, [AUTHOR])).toEqual([AUTHOR]);
     expect(mentionedPubkeys("nothing here", [AUTHOR])).toEqual([]);
     expect(mentionedPubkeys(AUTHOR, ["short"])).toEqual([]);
+  });
+});
+
+describe("isComment", () => {
+  it("recognises the dedicated NIP-22 kind", () => {
+    expect(isComment(buildComment(1111, [["e", "f".repeat(64)]]))).toBe(true);
+  });
+
+  it("recognises a kind 1 comment that carries an I tag", () => {
+    // Clients before the dedicated kind posted comments as kind 1 with
+    // the uppercase I tag; those are comments all the same.
+    expect(isComment(buildComment(1, [["I", "30023", AUTHOR, "post"]]))).toBe(
+      true,
+    );
+    expect(isComment(buildComment(1, [["i", "30023", AUTHOR, "post"]]))).toBe(
+      true,
+    );
+  });
+
+  it("leaves ordinary notes and replies alone", () => {
+    expect(isComment(buildComment(1, []))).toBe(false);
+    expect(isComment(buildComment(1, [["e", "f".repeat(64)], ["p", AUTHOR]]))).toBe(
+      false,
+    );
+  });
+});
+
+describe("commentParent", () => {
+  it("reads the NIP-22 I tag of a comment", () => {
+    const event = buildComment(1111, [
+      ["I", "30023", AUTHOR, "my-article"],
+      ["p", ME],
+    ]);
+    expect(commentParent(event)).toBe(`30023:${AUTHOR}:my-article`);
+  });
+
+  it("accepts the lowercase tag some clients still send", () => {
+    const event = buildComment(1111, [["i", "1", AUTHOR, "d"]]);
+    expect(commentParent(event)).toBe(`1:${AUTHOR}:d`);
+  });
+
+  it("falls back to the legacy e tag", () => {
+    const event = buildComment(1111, [["e", "f".repeat(64)]]);
+    expect(commentParent(event)).toBe("f".repeat(64));
+  });
+
+  it("returns null for a non-comment or a parentless comment", () => {
+    expect(commentParent(buildComment(1, [["e", "f".repeat(64)]]))).toBeNull();
+    expect(commentParent(buildComment(1111, []))).toBeNull();
+  });
+
+  it("finds the parent of a kind 1 comment too", () => {
+    const event = buildComment(1, [["I", "30023", AUTHOR, "my-article"]]);
+    expect(commentParent(event)).toBe(`30023:${AUTHOR}:my-article`);
   });
 });
 

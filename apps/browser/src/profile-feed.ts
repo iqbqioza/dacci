@@ -1,5 +1,5 @@
 import type { NostrEvent } from "dacci-nostr-nips";
-import { compareEvents, isHex64 } from "dacci-nostr-nips";
+import { compareEvents, isComment, isHex64 } from "dacci-nostr-nips";
 import { createSignal } from "solid-js";
 import { rememberEvents } from "./event-cache.js";
 import { planFlush } from "./flush.js";
@@ -11,15 +11,40 @@ import { preservingViewport } from "./viewport.js";
 /** The two tabs a profile feed offers, as Twitter does. */
 export type ProfileTab = "notes" | "replies";
 
+/** What kind of post a profile entry is, for the tab split. */
+export type ProfilePostKind = "note" | "reply" | "comment";
+
 /**
- * A reply references another event. NIP-10 lets a client tag its own
- * thread root with an `e` tag, so a tag pointing at the event itself does
- * not make a note a reply.
+ * Posts that belong to a conversation are labelled コメント, which is what
+ * separates them from a standalone note everywhere cards are rendered.
+ * That covers NIP-22 comments and plain NIP-10 replies alike.
+ */
+export function showsCommentLabel(event: NostrEvent): boolean {
+  return isReply(event);
+}
+
+/**
+ * A post that answers or addresses someone is a reply: an `e` tag pointing
+ * at another event, a `p` tag naming an author, or a NIP-22 comment. NIP-10
+ * lets a client tag its own thread root with an `e` tag, so a tag pointing
+ * at the event itself does not count.
  */
 export function isReply(event: NostrEvent): boolean {
+  if (isComment(event)) return true;
   return event.tags.some(
-    (tag) => tag[0] === "e" && tag[1] !== event.id,
+    (tag) => (tag[0] === "e" && tag[1] !== event.id) || tag[0] === "p",
   );
+}
+
+/**
+ * Splits a profile post the way the tabs do: a note is a top-level kind 1,
+ * a reply is a kind 1 answering another event, and a comment is NIP-22
+ * kind 1111, which belongs with the replies.
+ */
+export function classifyProfilePost(event: NostrEvent): ProfilePostKind {
+  if (isComment(event)) return "comment";
+  if (isReply(event)) return "reply";
+  return "note";
 }
 
 /**
@@ -38,18 +63,24 @@ const [authRelays, setAuthRelays] = createSignal<string[]>([]);
 const [pendingRelays, setPendingRelays] = createSignal<string[]>([]);
 const [hasMore, setHasMore] = createSignal(true);
 
-let paginator = createTimeline(useRelays().readRelays(), { kinds: [1] });
+/** Kinds a profile shows: text notes and NIP-22 comments. */
+const PROFILE_KINDS = [1, 1111];
+
+let paginator = createTimeline(useRelays().readRelays(), {
+  kinds: PROFILE_KINDS,
+});
 let generation = 0;
 let listRef: HTMLDivElement | undefined;
 
 /**
  * The tab is a view over the loaded list, not a separate query: no relay
- * can filter "has no e tag", so both tabs read the same events.
+ * can filter "has no e tag", so both tabs read the same events. Comments
+ * (NIP-22 kind 1111) only ever belong to the replies tab.
  */
 function visible(): NostrEvent[] {
   const events = all();
   return tab() === "notes"
-    ? events.filter((event) => !isReply(event))
+    ? events.filter((event) => classifyProfilePost(event) === "note")
     : events;
 }
 
@@ -99,7 +130,8 @@ export function openProfile(pubkey: string | null): void {
 /** New paginator for a subject, and an empty list to fill. */
 function rebuild(pubkey: string | null): void {
   paginator = createTimeline(useRelays().readRelays(), {
-    kinds: [1],
+    // Notes and NIP-22 comments in one query; the tabs split them.
+    kinds: PROFILE_KINDS,
     ...(pubkey === null ? {} : { authors: [pubkey] }),
   });
   // Any page still in flight belongs to the previous paginator.

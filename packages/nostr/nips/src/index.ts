@@ -30,10 +30,13 @@ export type { AuthSecret, UnsignedEvent } from "./auth.js";
 export {
   buildDeletion,
   buildQuoteRepost,
+  commentParent,
   buildReaction,
   buildReply,
   buildRepost,
+  COMMENT_KIND,
   DELETION_KIND,
+  isComment,
   mentionedPubkeys,
   REACTION_KIND,
   REACTION_PLUS,

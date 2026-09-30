@@ -1,21 +1,30 @@
-import { computeEventId, type NostrEvent } from "dacci-nostr-nips";
+import { COMMENT_KIND, computeEventId, type NostrEvent } from "dacci-nostr-nips";
 import { describe, expect, it } from "vitest";
-import { isReply, selectProfileTab, useProfileFeed } from "./profile-feed.js";
+import {
+  classifyProfilePost,
+  isReply,
+  selectProfileTab,
+  showsCommentLabel,
+  useProfileFeed,
+} from "./profile-feed.js";
 
 function note(
   id: string,
   pubkey: string,
   tags: string[][] = [],
   createdAt = 1000,
+  kind = 1,
 ): NostrEvent {
-  const base = { pubkey, created_at: createdAt, kind: 1, tags, content: "x" };
+  const base = { pubkey, created_at: createdAt, kind, tags, content: "x" };
   return { ...base, id, sig: "s".repeat(128) };
 }
 
 const ME = "1".repeat(64);
+const AUTHOR = "9".repeat(64);
 const TOP = "a".repeat(64);
 const PARENT = "b".repeat(64);
 const REPLY = "c".repeat(64);
+const COMMENT = "d".repeat(64);
 
 describe("isReply", () => {
   it("treats a note with no e tag as a top-level note", () => {
@@ -33,10 +42,75 @@ describe("isReply", () => {
     expect(isReply(note(TOP, ME, [["e", TOP, "", ME, "root"]]))).toBe(false);
   });
 
-  it("ignores tags that are not e tags", () => {
-    expect(
-      isReply(note(TOP, ME, [["p", PARENT], ["t", PARENT]])),
-    ).toBe(false);
+  it("ignores tags that name neither an event nor an author", () => {
+    expect(isReply(note(TOP, ME, [["t", PARENT], ["r", "wss://x"]]))).toBe(
+      false,
+    );
+  });
+});
+
+describe("classifyProfilePost", () => {
+  const comment = note(COMMENT, ME, [["I", "30023", AUTHOR, "my-article"]], 1000, COMMENT_KIND);
+  const legacyComment = note(COMMENT, ME, [["e", PARENT]], 1000, COMMENT_KIND);
+  const reply = note(REPLY, ME, [["e", PARENT, "", AUTHOR, "root"], ["p", AUTHOR]]);
+  const top = note(TOP, ME);
+  const ownRoot = note(TOP, ME, [["e", TOP, "", ME, "root"]]);
+
+  it("calls a top-level kind 1 a note", () => {
+    expect(classifyProfilePost(top)).toBe("note");
+    // An e tag pointing at the event itself is the thread's own root.
+    expect(classifyProfilePost(ownRoot)).toBe("note");
+  });
+
+  it("calls a kind 1 that answers another event a reply", () => {
+    expect(classifyProfilePost(reply)).toBe("reply");
+    expect(isReply(reply)).toBe(true);
+  });
+
+  it("counts a p tag as addressing someone, so a reply", () => {
+    // A mention names its author, so the post is not a plain note.
+    const mention = note(TOP, ME, [["p", AUTHOR]]);
+    expect(classifyProfilePost(mention)).toBe("reply");
+    expect(isReply(mention)).toBe(true);
+    // Even when the author points at themselves.
+    expect(isReply(note(TOP, ME, [["p", ME]]))).toBe(true);
+  });
+
+  it("keeps a note with no e or p tag a note", () => {
+    expect(classifyProfilePost(note(TOP, ME, [["t", "nostr"]]))).toBe("note");
+  });
+
+  it("treats NIP-22 comments as replies whichever tag they use", () => {
+    expect(classifyProfilePost(comment)).toBe("comment");
+    expect(classifyProfilePost(legacyComment)).toBe("comment");
+    expect(isReply(comment)).toBe(true);
+  });
+
+  it("treats a kind 1 with an I tag as a comment", () => {
+    // Before the dedicated kind, comments were kind 1 with an I tag.
+    const kind1Comment = note(TOP, ME, [["I", "30023", AUTHOR, "post"]]);
+    expect(classifyProfilePost(kind1Comment)).toBe("comment");
+    expect(isReply(kind1Comment)).toBe(true);
+  });
+});
+
+describe("showsCommentLabel", () => {
+  const reply = note(REPLY, ME, [
+    ["e", PARENT, "", AUTHOR, "root"],
+    ["p", AUTHOR],
+  ]);
+  const legacyComment = note(COMMENT, ME, [["e", PARENT]], 1000, COMMENT_KIND);
+  const top = note(TOP, ME);
+
+  it("labels replies and comments", () => {
+    // A NIP-10 reply carries no I tag, yet it is still a comment on
+    // someone else's post.
+    expect(showsCommentLabel(reply)).toBe(true);
+    expect(showsCommentLabel(legacyComment)).toBe(true);
+  });
+
+  it("leaves a standalone note unlabelled", () => {
+    expect(showsCommentLabel(top)).toBe(false);
   });
 });
 

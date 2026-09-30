@@ -15,6 +15,8 @@ export const REPLY_KIND = 1;
 export const REPOST_KIND = 6;
 export const REACTION_KIND = 7;
 export const DELETION_KIND = 5;
+/** NIP-22 comment. */
+export const COMMENT_KIND = 1111;
 export const REACTION_PLUS = "+";
 
 /** Long-form address from a `d` tag, as NIP-18 `a` tags want it. */
@@ -129,6 +131,32 @@ export function buildReaction(input: {
     ],
     content: symbol,
   };
+}
+
+/**
+ * A NIP-22 comment, which is either the dedicated kind or, from clients
+ * that predate it, a kind 1 post carrying the uppercase `I` tag.
+ */
+export function isComment(event: NostrEvent): boolean {
+  return (
+    event.kind === COMMENT_KIND ||
+    event.tags.some((tag) => tag[0] === "I" || tag[0] === "i")
+  );
+}
+
+/**
+ * NIP-22 parent reference of a comment: the uppercase `I` tag carrying the
+ * addressable event being replied to. Clients that predate the tag used a
+ * plain `e` tag, so that is still accepted.
+ */
+export function commentParent(event: NostrEvent): string | null {
+  if (!isComment(event)) return null;
+  const tagged = event.tags.find(
+    (tag) => (tag[0] === "I" || tag[0] === "i") && tag.length >= 4,
+  );
+  if (tagged !== undefined) return tagged.slice(1, 4).join(":");
+  const legacy = event.tags.find((tag) => tag[0] === "e");
+  return legacy === undefined ? null : (legacy[1] ?? null);
 }
 
 /**
