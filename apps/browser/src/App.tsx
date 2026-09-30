@@ -21,10 +21,13 @@ import {
   SettingsView,
 } from "./components/Views.jsx";
 import { getConnection } from "./nostr.js";
+import { resetHomeFeed } from "./home-feed.js";
+import { startLiveFeeds } from "./live.js";
 import {
   initRelays,
   startAutoRefresh,
   stopAutoRefresh,
+  useFeed,
   useRelays,
 } from "./relays.js";
 import {
@@ -53,7 +56,16 @@ export function App() {
   const [publishing, setPublishing] = createSignal(false);
   const [publishError, setPublishError] = createSignal<string | null>(null);
   const { pubkey } = useAuth();
-  const { relayUrls } = useRelays();
+  const { relayUrls, relayVersion } = useRelays();
+  const { feedAuthors } = useFeed();
+  const selfPubkey = (): string | undefined => pubkey() ?? undefined;
+  const liveDeps = {
+    relayUrls,
+    feedAuthors,
+    selfPubkey,
+  };
+  let stopLiveFeeds: () => void = () => {};
+  let liveKey = "";
 
   // Restore the persisted set first so personal relays survive reloads,
   // then restore the login session on top. Live status refresh runs on.
@@ -61,12 +73,31 @@ export function App() {
     initRelays();
     void restoreSession();
     const stopRefresh = startAutoRefresh();
+    // Live feeds live at app level: switching pages must not stop them.
+    const stopLive = startLiveFeeds(liveDeps);
+    stopLiveFeeds = stopLive;
     // A missing hash lands on home so the URL always reflects the view.
     if (currentHash() === "") navigate("#/home");
     const unsubscribe = subscribeRoute(() => setRoute(parseHash(currentHash())));
     onCleanup(() => {
       stopRefresh();
+      stopLive();
       unsubscribe();
+    });
+  });
+
+  // Login, logout, a new relay set or a new feed filter: rebuild the
+  // streams so the buffers always match what is on screen.
+  createEffect(() => {
+    const key = `${pubkey() ?? ""}|${relayVersion()}|${JSON.stringify(feedAuthors() ?? [])}`;
+    if (key === liveKey) return;
+    liveKey = key;
+    untrack(() => {
+      stopLiveFeeds();
+      stopLiveFeeds = startLiveFeeds(liveDeps);
+      // The paginated list belongs to the same identity: reset it only
+      // when it really changed, never just because the view remounted.
+      resetHomeFeed();
     });
   });
 

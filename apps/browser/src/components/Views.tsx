@@ -9,8 +9,19 @@ import {
 } from "../auth.jsx";
 import { formatTime, getConnection } from "../nostr.js";
 import { rememberEvents } from "../event-cache.js";
+import { planFlush } from "../flush.js";
+import { clearNotificationBuffer, useNotificationLive } from "../live.js";
 import { useRelays } from "../relays.js";
+import { preservingViewport } from "../viewport.js";
 import { EventCard } from "./EventCard.jsx";
+
+function newestFirst(a: NostrEvent, b: NostrEvent): number {
+  return a.created_at !== b.created_at
+    ? b.created_at - a.created_at
+    : a.id < b.id
+      ? -1
+      : 1;
+}
 
 interface RelayRow {
   url: string;
@@ -101,11 +112,16 @@ export function NetworkView() {
   );
 }
 
-export function NotificationsView(props: { onSelect: (event: NostrEvent) => void }) {
+export function NotificationsView(props: {
+  onSelect: (event: NostrEvent) => void;
+}) {
   const { pubkey } = useAuth();
   const { relayUrls } = useRelays();
+  const { buffered } = useNotificationLive();
   const [events, setEvents] = createSignal<NostrEvent[]>([]);
   const [loading, setLoading] = createSignal(false);
+  const [loadedFor, setLoadedFor] = createSignal<string | null>(null);
+  let listRef: HTMLDivElement | undefined;
 
   async function load(key: string) {
     setLoading(true);
@@ -114,16 +130,14 @@ export function NotificationsView(props: { onSelect: (event: NostrEvent) => void
         { kinds: [1, 6, 7], "#p": [key], limit: 20 },
         10000,
       );
-      setEvents(
-        [...result.events].sort((a, b) =>
-          a.created_at !== b.created_at
-            ? b.created_at - a.created_at
-            : a.id < b.id
-              ? -1
-              : 1,
-        ),
+      const incoming = result.events.filter(
+        (event) => !events().some((existing) => existing.id === event.id),
       );
+      if (incoming.length > 0) {
+        setEvents((prev) => [...incoming, ...prev].sort(newestFirst));
+      }
       rememberEvents(result.events);
+      setLoadedFor(key);
     } finally {
       setLoading(false);
     }
@@ -131,8 +145,18 @@ export function NotificationsView(props: { onSelect: (event: NostrEvent) => void
 
   onMount(() => {
     const key = pubkey();
-    if (key !== null) void load(key);
+    // Only the first visit fetches history; later visits reuse the list,
+    // and live arrivals keep arriving in the app-wide buffer.
+    if (key !== null && loadedFor() !== key) void load(key);
   });
+
+  function flushNew(): void {
+    const plan = planFlush(buffered(), events());
+    preservingViewport(listRef, () => {
+      clearNotificationBuffer();
+      if (plan.added.length > 0) setEvents(plan.events);
+    });
+  }
 
   return (
     <div>
@@ -144,7 +168,15 @@ export function NotificationsView(props: { onSelect: (event: NostrEvent) => void
           </p>
         }
       >
-        <Show when={loading()}>
+        <Show when={buffered().length > 0}>
+          <button
+            class="sticky top-0 z-10 block w-full border-b border-(--dads-solid-gray-200) bg-white px-4 py-3 text-left hover:bg-(--dads-blue-50)"
+            onClick={flushNew}
+          >
+            新着 {buffered().length} 件
+          </button>
+        </Show>
+        <Show when={loading() && events().length === 0}>
           <p class="px-4 py-6 text-(--dads-solid-gray-500)">読み込み中…</p>
         </Show>
         <Show when={!loading() && events().length === 0}>
@@ -152,9 +184,13 @@ export function NotificationsView(props: { onSelect: (event: NostrEvent) => void
             自分へのメンション・リアクションはまだありません。
           </p>
         </Show>
-        <For each={events()}>
-          {(event) => <EventCard event={event} onSelect={props.onSelect} />}
-        </For>
+        <div ref={listRef}>
+          <For each={events()}>
+            {(event) => (
+              <EventCard event={event} onSelect={props.onSelect} />
+            )}
+          </For>
+        </div>
       </Show>
     </div>
   );

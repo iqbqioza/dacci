@@ -3,72 +3,113 @@ import {
   type Filter,
   type NostrEvent,
 } from "dacci-nostr-nips";
-import { createEffect, createSignal, onCleanup } from "solid-js";
+import { createSignal } from "solid-js";
 import type { LiveSubscription } from "dacci-nostr-ws";
 import { rememberEvents } from "./event-cache.js";
 import { getConnection } from "./nostr.js";
-import { useFeed, useRelays } from "./relays.js";
 
 const MAX_BUFFERED = 200;
 
-const [buffered, setBuffered] = createSignal<NostrEvent[]>([]);
+// Live events never touch a rendered list. They are buffered per purpose
+// and only merged when the matching view asks for it, so switching pages
+// does not interrupt reception.
+const [feedBuffer, setFeedBuffer] = createSignal<NostrEvent[]>([]);
+const [notificationBuffer, setNotificationBuffer] = createSignal<NostrEvent[]>(
+  [],
+);
 const [liveRelays, setLiveRelays] = createSignal(0);
+const [notificationRelays, setNotificationRelays] = createSignal(0);
 
-export function useLiveFeed() {
-  return { buffered, liveRelays };
+export function useFeedLive() {
+  return { buffered: feedBuffer, liveRelays };
+}
+
+export function useNotificationLive() {
+  return { buffered: notificationBuffer, liveRelays: notificationRelays };
+}
+
+export function clearFeedBuffer(): void {
+  setFeedBuffer([]);
+}
+
+export function clearNotificationBuffer(): void {
+  setNotificationBuffer([]);
+}
+
+function push(buffer: (updater: (prev: NostrEvent[]) => NostrEvent[]) => void) {
+  return (event: NostrEvent): void => {
+    rememberEvents([event]);
+    buffer((prev) => {
+      if (prev.some((existing) => existing.id === event.id)) return prev;
+      return [...prev, event].sort(compareEvents).slice(0, MAX_BUFFERED);
+    });
+  };
+}
+
+export interface LiveFeedDeps {
+  relayUrls: () => string[];
+  /** Follows plus self while logged in; null means the global feed. */
+  feedAuthors: () => string[] | null;
+  /** Own pubkey while logged in; undefined means no notifications. */
+  selfPubkey: () => string | undefined;
 }
 
 /**
- * Buffers live arrivals per relay instead of mutating the rendered list.
- * The UI shows a "new posts" affordance and flushes on click, which keeps
- * scroll position stable. Call inside a reactive root; the returned
- * function is a manual teardown, but cleanup is registered automatically.
+ * Opens (and keeps) one live subscription per relay for the home feed and,
+ * when signed in, for notifications. Lives at app level so navigation
+ * between pages does not drop the streams.
  */
-export function startLiveFeed(): () => void {
-  const { relayUrls, relayVersion } = useRelays();
-  const { feedAuthors } = useFeed();
+export function startLiveFeeds(deps: LiveFeedDeps): () => void {
   const subs: LiveSubscription[] = [];
 
-  function teardown(): void {
-    while (subs.length > 0) subs.pop()?.unsubscribe();
-    setLiveRelays(0);
-  }
+  const build = (): void => {
+    for (const sub of subs) sub.unsubscribe();
+    subs.length = 0;
+    setFeedBuffer([]);
+    setNotificationBuffer([]);
 
-  createEffect(() => {
-    // Re-subscribe whenever the relay set or feed filter changes.
-    relayVersion();
-    feedAuthors();
-    teardown();
-    const authors = feedAuthors() ?? undefined;
-    // `since` keeps the relay from replaying stored history: a live
-    // subscription without it re-sends everything the relay has.
-    const since = Math.floor(Date.now() / 1000);
-    const filter: Filter =
-      authors === undefined
-        ? { kinds: [1], since }
-        : { kinds: [1], authors, since };
-    for (const url of relayUrls()) {
-      subs.push(
-        getConnection(url).subscribe(filter, (event) => {
-          // Some relays replay stored events despite `since`; those are
-          // already covered by pagination, so drop them here.
-          if (event.created_at < since) return;
-          rememberEvents([event]);
-          setBuffered((prev) => {
-            if (prev.some((existing) => existing.id === event.id)) return prev;
-            return [...prev, event].sort(compareEvents).slice(0, MAX_BUFFERED);
-          });
-        }),
-      );
+    const authors = deps.feedAuthors() ?? undefined;
+    const self = deps.selfPubkey();
+
+    for (const url of deps.relayUrls()) {
+      const connection = getConnection(url);
+      // `since` keeps the relay from replaying stored history.
+      const feedFilter: Filter =
+        authors === undefined
+          ? { kinds: [1], since: Math.floor(Date.now() / 1000) }
+          : { kinds: [1], authors, since: Math.floor(Date.now() / 1000) };
+      subs.push(connection.subscribe(feedFilter, push(setFeedBuffer)));
+
+      if (self !== undefined) {
+        subs.push(
+          connection.subscribe(
+            {
+              kinds: [1, 6, 7],
+              "#p": [self],
+              since: Math.floor(Date.now() / 1000),
+            },
+            push(setNotificationBuffer),
+          ),
+        );
+      }
     }
     setLiveRelays(subs.length);
-    onCleanup(teardown);
-  });
+    setNotificationRelays(
+      subs.length - deps.relayUrls().length,
+    );
+  };
 
-  return teardown;
+  build();
+
+  return () => {
+    for (const sub of subs) sub.unsubscribe();
+    subs.length = 0;
+    setLiveRelays(0);
+    setNotificationRelays(0);
+  };
 }
 
-/** Drop buffered events once they are merged into the rendered list. */
-export function clearBuffered(): void {
-  setBuffered([]);
+/** Keep the stream count honest for the debug panel. */
+export function setNotificationRelayCount(count: number): void {
+  setNotificationRelays(count);
 }
