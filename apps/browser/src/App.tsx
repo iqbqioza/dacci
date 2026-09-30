@@ -11,6 +11,7 @@ import {
   untrack,
 } from "solid-js";
 import { restoreSession, useAuth } from "./auth.jsx";
+import { resetEmbeds } from "./embeds.js";
 import { fetchEventById, lookupEvent } from "./event-cache.js";
 import {
   closeCompose,
@@ -112,13 +113,15 @@ export function App() {
   });
 
   // A new relay set can answer metadata queries the old one could not, so
-  // the profile cache and its failed-user queue start over with it.
+  // the profile cache and its failed-user queue start over with it. The
+  // embedded notes come from the same relays, so they start over too.
   createEffect(() => {
     relayVersion();
     untrack(() => {
       resetProfiles();
       resetFollowCounts();
       resetProfileFeed();
+      resetEmbeds();
     });
   });
 

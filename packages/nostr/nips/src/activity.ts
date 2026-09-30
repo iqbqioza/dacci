@@ -1,5 +1,5 @@
 import type { UnsignedEvent } from "./auth.js";
-import type { NostrEvent } from "./event.js";
+import { isHex64, isValidEventStructure, type NostrEvent } from "./event.js";
 
 /**
  * Builders for the four post actions. Tag layouts follow the NIPs exactly,
@@ -131,6 +131,66 @@ export function buildReaction(input: {
     ],
     content: symbol,
   };
+}
+
+/**
+ * NIP-18 quote repost marker: `["q", <event-id>, <relay>, <pubkey>]`. Any
+ * event may carry it, not only kind 6, so it is read from the tags alone.
+ */
+export function quoteTag(event: NostrEvent): string[] | undefined {
+  return event.tags.find((tag) => tag[0] === "q");
+}
+
+/**
+ * The event a post quotes, as a bare id. A `q` tag may instead hold an
+ * address (`<kind>:<pubkey>:<d>`) for a replaceable event, which is not an
+ * event id and cannot be looked up by `ids`, so it is reported as absent.
+ */
+export function quotedEventId(event: NostrEvent): string | null {
+  const tag = quoteTag(event);
+  const value = tag?.[1];
+  return isHex64(value) ? value : null;
+}
+
+/**
+ * The event a post reposts, taken from the NIP-18 `e` tag. Used for a plain
+ * repost, whose content is empty by convention, so the quoted note has to be
+ * fetched by id.
+ */
+export function repostedEventId(event: NostrEvent): string | null {
+  if (event.kind !== REPOST_KIND) return null;
+  const tag = event.tags.find((t) => t[0] === "e" && isHex64(t[1]));
+  return tag === undefined ? null : tag[1];
+}
+
+/**
+ * The event a post embeds, whichever way it points at it: a `q` tag for a
+ * quote repost, the `e` tag for a plain repost. A kind 1 that quotes carries
+ * `q` as well, so this covers quote notes as well as kind 6.
+ */
+export function embeddedEventId(event: NostrEvent): string | null {
+  if (event.kind === REPOST_KIND) {
+    // A kind 6 quotes with `q` and also carries the reposted id in `e`;
+    // both name the same note, so either answer is correct.
+    return quotedEventId(event) ?? repostedEventId(event);
+  }
+  return quotedEventId(event);
+}
+
+/**
+ * NIP-18 allows a repost to carry the reposted note as JSON in its content,
+ * which lets a client render the embed without a query. Returns the embedded
+ * event only when it is structurally a valid event.
+ */
+export function embeddedNote(event: NostrEvent): NostrEvent | null {
+  if (event.content.length === 0) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(event.content);
+  } catch {
+    return null;
+  }
+  return isValidEventStructure(parsed) ? parsed : null;
 }
 
 /**

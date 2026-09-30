@@ -3,12 +3,17 @@ import { computeEventId, type NostrEvent } from "./event.js";
 import {
   buildDeletion,
   commentParent,
+  embeddedEventId,
+  embeddedNote,
   isComment,
   buildQuoteRepost,
   buildReaction,
   buildReply,
   buildRepost,
   mentionedPubkeys,
+  quotedEventId,
+  quoteTag,
+  repostedEventId,
   summarizeMyActivity,
 } from "./activity.js";
 
@@ -303,6 +308,94 @@ describe("summarizeMyActivity", () => {
     const map = summarizeMyActivity([reply]);
     expect(map.get(targetId)?.replied).toBe(true);
     expect(map.get(targetId)?.react).toBeUndefined();
+  });
+});
+
+describe("quote and repost references", () => {
+  const quoted = "9".repeat(64);
+  const reposted = "8".repeat(64);
+
+  it("reads the NIP-18 q tag of a quote repost", () => {
+    const event = buildComment(6, [["q", quoted, "wss://relay", AUTHOR]]);
+    expect(quoteTag(event)).toEqual(["q", quoted, "wss://relay", AUTHOR]);
+    expect(quotedEventId(event)).toBe(quoted);
+  });
+
+  it("reads the e tag of a plain repost", () => {
+    const event = buildComment(6, [["e", reposted, "wss://relay"], ["p", AUTHOR]]);
+    expect(repostedEventId(event)).toBe(reposted);
+    // A plain repost quotes nothing.
+    expect(quotedEventId(event)).toBeNull();
+  });
+
+  it("resolves the embed of both repost shapes", () => {
+    expect(embeddedEventId(buildComment(6, [["e", reposted]]))).toBe(reposted);
+    expect(
+      embeddedEventId(buildComment(6, [["q", quoted], ["e", quoted], ["p", AUTHOR]])),
+    ).toBe(quoted);
+  });
+
+  it("embeds a quote note, which is a kind 1 carrying only q", () => {
+    expect(embeddedEventId(buildComment(1, [["q", quoted]]))).toBe(quoted);
+  });
+
+  it("reports nothing for a post that embeds no other post", () => {
+    expect(embeddedEventId(buildComment(1, []))).toBeNull();
+    expect(embeddedEventId(buildComment(1, [["e", "7".repeat(64)]]))).toBeNull();
+    expect(repostedEventId(buildComment(1, [["e", reposted]]))).toBeNull();
+  });
+
+  it("ignores a q tag holding an address, which is not an event id", () => {
+    const event = buildComment(6, [["q", "30023:" + AUTHOR + ":my-article"]]);
+    expect(quotedEventId(event)).toBeNull();
+    // The e tag still names the reposted note, so the embed resolves.
+    expect(embeddedEventId(buildComment(6, [["q", "30023:" + AUTHOR + ":a"], ["e", reposted]]))).toBe(
+      reposted,
+    );
+  });
+
+  it("ignores a malformed e tag on a repost", () => {
+    expect(repostedEventId(buildComment(6, [["e", "not-an-id"]]))).toBeNull();
+  });
+
+  it("unwraps the note a repost embeds in its content", () => {
+    const inner = note(quoted, AUTHOR, [["t", "nostr"]]);
+    const repost: NostrEvent = {
+      id: "c".repeat(64),
+      pubkey: ME,
+      created_at: AT,
+      kind: 6,
+      tags: [["e", quoted], ["p", AUTHOR]],
+      content: JSON.stringify(inner),
+      sig: "s".repeat(128),
+    };
+    expect(embeddedNote(repost)).toEqual(inner);
+  });
+
+  it("has no embedded note when the content is prose or broken JSON", () => {
+    expect(embeddedNote(buildComment(6, []))).toBeNull();
+    const prose = { ...buildComment(6, [["e", quoted]]), content: "just words" };
+    expect(embeddedNote(prose)).toBeNull();
+    const broken = { ...buildComment(6, [["e", quoted]]), content: "{not json" };
+    expect(embeddedNote(broken)).toBeNull();
+  });
+
+  it("rejects a content blob that is JSON but not an event", () => {
+    const blob = { ...buildComment(6, [["e", quoted]]), content: '{"hello":"world"}' };
+    expect(embeddedNote(blob)).toBeNull();
+  });
+
+  it("never treats a quote repost as an ordinary note", () => {
+    const quote = buildQuoteRepost({
+      pubkey: ME,
+      target: note(reposted, AUTHOR),
+      text: "worth reading",
+      createdAt: AT,
+    });
+    expect(quote.content).toBe("worth reading");
+    expect(embeddedEventId({ ...quote, id: "d".repeat(64), sig: "s".repeat(128) })).toBe(
+      reposted,
+    );
   });
 });
 

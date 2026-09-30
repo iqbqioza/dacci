@@ -1,10 +1,12 @@
 import type { NostrEvent } from "dacci-nostr-nips";
 import { encodeNpub } from "dacci-nostr-nips";
-import { Show, createMemo } from "solid-js";
+import { Show, createEffect, createMemo } from "solid-js";
+import { requestEmbeds } from "../embeds.js";
 import { formatTime } from "../nostr.js";
 import { showsCommentLabel } from "../profile-feed.js";
 import { navigate, profileHash } from "../router.js";
 import { ActionBar } from "./ActionBar.jsx";
+import { EmbeddedCard, EmbeddedPlaceholder } from "./EmbeddedCard.jsx";
 import { ProfileAvatar, ProfileName } from "./ProfileAvatar.jsx";
 import { PostMenu } from "./PostMenu.jsx";
 
@@ -19,6 +21,12 @@ export function EventCard(props: {
   onSelect: (event: NostrEvent) => void;
 }) {
   const npub = createMemo(() => encodeNpub(props.event.pubkey));
+
+  // A repost or a quote repost shows the note it points at. The store
+  // coalesces every card on screen into one batched query.
+  createEffect(() => {
+    requestEmbeds([props.event]);
+  });
 
   return (
     <article
@@ -64,6 +72,8 @@ export function EventCard(props: {
         <p class="mt-1 whitespace-pre-wrap break-words text-(--dads-solid-gray-900)">
           {props.event.content}
         </p>
+        <EmbeddedCard event={props.event} onSelect={props.onSelect} />
+        <EmbeddedPlaceholder event={props.event} />
         <ActionBar event={props.event} />
       </div>
     </article>

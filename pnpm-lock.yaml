@@ -180,6 +180,9 @@ importers:
       dacci-nostr-profile:
         specifier: workspace:*
         version: link:../../packages/nostr/profile
+      dacci-nostr-quotes:
+        specifier: workspace:*
+        version: link:../../packages/nostr/quotes
       dacci-nostr-signer:
         specifier: workspace:*
         version: link:../../packages/nostr/signer
@@ -251,6 +254,19 @@ importers:
         version: 3.2.7(jiti@2.7.0)(lightningcss@1.32.0)
 
   packages/nostr/profile:
+    dependencies:
+      dacci-nostr-nips:
+        specifier: workspace:*
+        version: link:../nips
+    devDependencies:
+      typescript:
+        specifier: ~5.7.2
+        version: 5.7.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(jiti@2.7.0)(lightningcss@1.32.0)
+
+  packages/nostr/quotes:
     dependencies:
       dacci-nostr-nips:
         specifier: workspace:*
