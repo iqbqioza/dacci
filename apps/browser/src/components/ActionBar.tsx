@@ -1,15 +1,16 @@
+import type { MyActivity } from "dacci-nostr-nips";
 import type { NostrEvent } from "dacci-nostr-nips";
 import { For, Show } from "solid-js";
-import { openQuote, openReply, react, repost } from "../compose.js";
+import { openQuote, openReply, toggleReaction, toggleRepost } from "../compose.js";
 import { hasDone } from "../my-actions.js";
 import { Icon, type IconName } from "./Icon.jsx";
 
 interface Action {
-  kind: "reply" | "repost" | "quote" | "react";
+  kind: keyof MyActivity;
   icon: IconName;
   /** Shown when the action has not been taken yet. */
   label: string;
-  /** Shown once the reader has taken it. */
+  /** Shown once the reader has taken it: the next press undoes it. */
   doneLabel: string;
   /** Colour of the glyph after the action. */
   doneClass: string;
@@ -18,7 +19,7 @@ interface Action {
 
 const ACTIONS: Action[] = [
   {
-    kind: "reply",
+    kind: "replied",
     icon: "reply",
     label: "リプライ",
     doneLabel: "リプライ済み",
@@ -29,15 +30,15 @@ const ACTIONS: Action[] = [
     kind: "repost",
     icon: "repost",
     label: "リポスト",
-    doneLabel: "リポスト済み",
+    doneLabel: "リポストを取り消す",
     doneClass: "text-(--dads-blue-700)",
-    run: (event) => void repost(event),
+    run: (event) => void toggleRepost(event),
   },
   {
     kind: "quote",
     icon: "quote-repost",
     label: "引用付きリポスト",
-    doneLabel: "引用済み",
+    doneLabel: "引用済み (取り消し不可)",
     doneClass: "text-(--dads-blue-700)",
     run: (event) => openQuote(event),
   },
@@ -45,9 +46,9 @@ const ACTIONS: Action[] = [
     kind: "react",
     icon: "react",
     label: "リアクション",
-    doneLabel: "リアクション済み",
+    doneLabel: "リアクションを取り消す",
     doneClass: "text-(--dads-red-600)",
-    run: (event) => void react(event),
+    run: (event) => void toggleReaction(event),
   },
 ];
 

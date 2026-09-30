@@ -1,9 +1,12 @@
 import type { NostrEvent } from "dacci-nostr-nips";
 import {
+  buildDeletion,
   buildQuoteRepost,
   buildReaction,
   buildReply,
   buildRepost,
+  REACTION_KIND,
+  REPOST_KIND,
 } from "dacci-nostr-nips";
 import { createSignal } from "solid-js";
 import { getSigner, useAuth } from "./auth.jsx";
@@ -11,11 +14,13 @@ import { lookupEvent, rememberEvents } from "./event-cache.js";
 import { showNotice } from "./notice.js";
 import { getConnection } from "./nostr.js";
 import {
+  activityFor,
+  clearReacted,
+  clearReposted,
   markQuoted,
   markReacted,
   markReposted,
   markReplied,
-  resetMyActions,
 } from "./my-actions.js";
 import { useRelays } from "./relays.js";
 
@@ -61,11 +66,6 @@ export function closeCompose(): void {
   setError(null);
 }
 
-/** Highlights belong to one key, so a logout clears them. */
-export function forgetMyActions(): void {
-  resetMyActions();
-}
-
 /**
  * The thread root of a post, when the relay told us (NIP-10 marker) and the
  * event is cached. Replies need it to keep the thread intact for others.
@@ -92,11 +92,11 @@ async function publish(template: {
   kind: number;
   tags: string[][];
   content: string;
-}): Promise<boolean> {
+}): Promise<NostrEvent | null> {
   const signer = getSigner();
   if (signer === null) {
     setError("ログインが必要です (Settings)");
-    return false;
+    return null;
   }
   const event = await signer.signEvent(template);
   const urls = useRelays().relayUrls();
@@ -120,9 +120,9 @@ async function publish(template: {
   rememberEvents([event]);
   if (accepted === 0) {
     setError("リレーに拒否されました");
-    return false;
+    return null;
   }
-  return true;
+  return event;
 }
 
 function now(): number {
@@ -160,10 +160,11 @@ export async function submitCompose(text: string): Promise<boolean> {
                 createdAt: created_at,
               }),
             );
-    if (sent) {
-      // Remember the action on the post, so its row shows it was taken.
+    if (sent !== null) {
+      // Remember the action on the post, so its row shows it was taken and
+      // can be undone from another tab or after a reload.
       if (current !== null) {
-        if (mode() === "quote") markQuoted(current.id);
+        if (mode() === "quote") markQuoted(current.id, sent.id);
         else markReplied(current.id);
       }
       showNotice(
@@ -175,7 +176,7 @@ export async function submitCompose(text: string): Promise<boolean> {
       );
       closeCompose();
     }
-    return sent;
+    return sent !== null;
   } catch (caught) {
     setError(caught instanceof Error ? caught.message : "投稿に失敗しました");
     return false;
@@ -184,8 +185,11 @@ export async function submitCompose(text: string): Promise<boolean> {
   }
 }
 
-/** NIP-18 repost of someone else's post. */
-export async function repost(event: NostrEvent): Promise<boolean> {
+/**
+ * NIP-18 repost, as a toggle: a second press publishes a NIP-09 deletion for
+ * the repost, so the row and every other client agree it is gone.
+ */
+export async function toggleRepost(event: NostrEvent): Promise<boolean> {
   const pubkey = useAuth().pubkey();
   if (pubkey === null) {
     showNotice("リポストするにはログインしてください");
@@ -195,34 +199,72 @@ export async function repost(event: NostrEvent): Promise<boolean> {
     showNotice("自分の投稿はリポストできません");
     return false;
   }
+  const existing = activityFor(event.id).repost;
   setBusy(true);
   try {
-    const sent = await publish(
-      buildRepost({ pubkey, target: event, createdAt: now() }),
-    );
-    if (sent) markReposted(event.id);
-    showNotice(sent ? "リポストしました" : "リポストに失敗しました");
-    return sent;
+    const sent =
+      existing === undefined
+        ? await publish(buildRepost({ pubkey, target: event, createdAt: now() }))
+        : await publish(
+            buildDeletion({
+              pubkey,
+              eventIds: [existing],
+              kinds: [REPOST_KIND],
+              createdAt: now(),
+            }),
+          );
+    if (sent === null) {
+      showNotice(
+        existing === undefined ? "リポストに失敗しました" : "リポストを取り消せませんでした",
+      );
+      return false;
+    }
+    if (existing === undefined) markReposted(event.id, sent.id);
+    else clearReposted(event.id);
+    showNotice(existing === undefined ? "リポストしました" : "リポストを取り消しました");
+    return true;
   } finally {
     setBusy(false);
   }
 }
 
-/** NIP-25 like. */
-export async function react(event: NostrEvent): Promise<boolean> {
+/** NIP-25 like, as a toggle: undoing it is a NIP-09 deletion. */
+export async function toggleReaction(event: NostrEvent): Promise<boolean> {
   const pubkey = useAuth().pubkey();
   if (pubkey === null) {
     showNotice("リアクションするにはログインしてください");
     return false;
   }
+  const existing = activityFor(event.id).react;
   setBusy(true);
   try {
-    const sent = await publish(
-      buildReaction({ pubkey, target: event, createdAt: now() }),
+    const sent =
+      existing === undefined
+        ? await publish(
+            buildReaction({ pubkey, target: event, createdAt: now() }),
+          )
+        : await publish(
+            buildDeletion({
+              pubkey,
+              eventIds: [existing],
+              kinds: [REACTION_KIND],
+              createdAt: now(),
+            }),
+          );
+    if (sent === null) {
+      showNotice(
+        existing === undefined
+          ? "リアクションに失敗しました"
+          : "リアクションを取り消せませんでした",
+      );
+      return false;
+    }
+    if (existing === undefined) markReacted(event.id, sent.id);
+    else clearReacted(event.id);
+    showNotice(
+      existing === undefined ? "リアクションしました" : "リアクションを取り消しました",
     );
-    if (sent) markReacted(event.id);
-    showNotice(sent ? "リアクションしました" : "リアクションに失敗しました");
-    return sent;
+    return true;
   } finally {
     setBusy(false);
   }

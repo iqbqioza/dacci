@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { computeEventId, type NostrEvent } from "./event.js";
 import {
+  buildDeletion,
   buildQuoteRepost,
   buildReaction,
   buildReply,
   buildRepost,
   mentionedPubkeys,
+  summarizeMyActivity,
 } from "./activity.js";
 
 const ME = "1".repeat(64);
@@ -20,6 +22,17 @@ function note(
 ): NostrEvent {
   const base = { pubkey, created_at: AT, kind: 1, tags, content: "x" };
   return { ...base, id, sig: "s".repeat(128) };
+}
+
+/** A signed event whose id follows from its own content. */
+function signed(
+  kind: number,
+  pubkey: string,
+  tags: string[][],
+  created_at: number,
+): NostrEvent {
+  const base = { pubkey, created_at, kind, tags, content: "" };
+  return { ...base, id: computeEventId(base), sig: "s".repeat(128) };
 }
 
 const target = note("a".repeat(64), AUTHOR);
@@ -142,6 +155,92 @@ describe("mentionedPubkeys", () => {
     expect(mentionedPubkeys(`nostr:${AUTHOR}`, [AUTHOR])).toEqual([AUTHOR]);
     expect(mentionedPubkeys("nothing here", [AUTHOR])).toEqual([]);
     expect(mentionedPubkeys(AUTHOR, ["short"])).toEqual([]);
+  });
+});
+
+describe("buildDeletion", () => {
+  it("references the deleted events and their kinds", () => {
+    const event = buildDeletion({
+      pubkey: ME,
+      eventIds: ["d".repeat(64)],
+      kinds: [7],
+      createdAt: AT,
+    });
+    expect(event.kind).toBe(5);
+    expect(event.content).toBe("");
+    expect(event.tags).toEqual([
+      ["k", "7"],
+      ["e", "d".repeat(64)],
+    ]);
+  });
+
+  it("omits k when the deletion covers every kind", () => {
+    const event = buildDeletion({
+      pubkey: ME,
+      eventIds: ["d".repeat(64)],
+      createdAt: AT,
+    });
+    expect(event.tags).toEqual([["e", "d".repeat(64)]]);
+  });
+});
+
+describe("summarizeMyActivity", () => {
+  const targetId = "1".repeat(64);
+  const otherId = "2".repeat(64);
+  const at = (n: number) => 1000 + n;
+
+  const reaction = signed(7, ME, [
+    ["e", targetId],
+    ["k", "+"],
+  ], at(1));
+  const repost = signed(6, ME, [["e", targetId]], at(2));
+  const quote = signed(6, ME, [["e", targetId], ["q", targetId]], at(3));
+  const reply = signed(1, ME, [
+    ["e", targetId, "", AUTHOR, "root"],
+    ["p", AUTHOR],
+  ], at(4));
+
+  it("records each action against its post", () => {
+    const map = summarizeMyActivity([reaction, repost, quote, reply]);
+    expect(map.get(targetId)).toEqual({
+      react: reaction.id,
+      repost: repost.id,
+      quote: quote.id,
+      replied: true,
+    });
+    expect(map.size).toBe(1);
+  });
+
+  it("a NIP-09 deletion removes the action it targets", () => {
+    const deletion = signed(5, ME, [["k", "7"], ["e", reaction.id]], at(5));
+    const map = summarizeMyActivity([reaction, repost, deletion]);
+    expect(map.get(targetId)?.react).toBeUndefined();
+    // The repost survives: only the reaction was deleted.
+    expect(map.get(targetId)?.repost).toBe(repost.id);
+  });
+
+  it("keeps the newest reaction when several exist", () => {
+    const older = signed(7, ME, [["e", targetId]], at(1));
+    const newer = signed(7, ME, [["e", targetId]], at(9));
+    expect(summarizeMyActivity([older, newer]).get(targetId)?.react).toBe(
+      newer.id,
+    );
+    expect(summarizeMyActivity([newer, older]).get(targetId)?.react).toBe(
+      newer.id,
+    );
+  });
+
+  it("separates posts so one card never shows another's state", () => {
+    const other = signed(7, ME, [["e", otherId]], at(1));
+    const map = summarizeMyActivity([reaction, other]);
+    expect(map.get(targetId)?.react).toBe(reaction.id);
+    expect(map.get(otherId)?.react).toBe(other.id);
+  });
+
+  it("marks replies from the thread tags", () => {
+    const map = summarizeMyActivity([reply]);
+    expect(map.get(targetId)?.replied).toBe(true);
+    expect(map.get(targetId)?.react).toBeUndefined();
   });
 });
 

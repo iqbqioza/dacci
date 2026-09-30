@@ -19,7 +19,6 @@ import {
   composeMode,
   composeOpen,
   composeTarget,
-  forgetMyActions,
   openNewPost,
   submitCompose,
   type ComposeMode,
@@ -36,6 +35,7 @@ import {
 import { getConnection } from "./nostr.js";
 import { noticeMessage } from "./notice.js";
 import { resetHomeFeed } from "./home-feed.js";
+import { adoptMyActivity, syncMyActivity } from "./my-actions.js";
 import { resetNotifications } from "./notifications-feed.js";
 import { resetProfiles } from "./profile.js";
 import { startLiveFeeds } from "./live.js";
@@ -125,9 +125,10 @@ export function App() {
       // when it really changed, never just because the view remounted.
       resetHomeFeed();
       resetNotifications();
-      // Highlights on the action rows are personal: a different key must
-      // not inherit them.
-      if (pubkey() === null) forgetMyActions();
+      // Action highlights are personal, and the relays are the source of
+      // truth for what this key has already done.
+      adoptMyActivity(pubkey());
+      if (pubkey() !== null) void syncMyActivity();
     });
   });
 

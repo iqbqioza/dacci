@@ -14,6 +14,7 @@ import type { NostrEvent } from "./event.js";
 export const REPLY_KIND = 1;
 export const REPOST_KIND = 6;
 export const REACTION_KIND = 7;
+export const DELETION_KIND = 5;
 export const REACTION_PLUS = "+";
 
 /** Long-form address from a `d` tag, as NIP-18 `a` tags want it. */
@@ -128,4 +129,107 @@ export function buildReaction(input: {
     ],
     content: symbol,
   };
+}
+
+/**
+ * NIP-09 deletion request, used to undo a reaction or a repost. `kinds` names
+ * the kinds being deleted; without it a deletion applies to every kind.
+ */
+export function buildDeletion(input: {
+  pubkey: string;
+  eventIds: string[];
+  kinds?: number[];
+  createdAt: number;
+  reason?: string;
+}): UnsignedEvent {
+  const tags: string[][] = [];
+  for (const kind of input.kinds ?? []) tags.push(["k", String(kind)]);
+  for (const id of input.eventIds) tags.push(["e", id]);
+  return {
+    pubkey: input.pubkey,
+    created_at: input.createdAt,
+    kind: DELETION_KIND,
+    tags,
+    content: input.reason ?? "",
+  };
+}
+
+/** One post, and what the reader has done to it, keyed by post id. */
+export interface MyActivity {
+  /** Event id of the reader's kind 7, so the reaction can be undone. */
+  react?: string;
+  /** Event id of the reader's kind 6 repost. */
+  repost?: string;
+  /** Event id of the reader's kind 6 quote repost. */
+  quote?: string;
+  replied?: true;
+}
+
+export type MyActivityMap = Map<string, MyActivity>;
+
+/** Target event id of a repost, reaction or reply. */
+function targets(event: NostrEvent): string[] {
+  return event.tags.filter((tag) => tag[0] === "e").map((tag) => tag[1]);
+}
+
+/**
+ * Folds one author's own events (kinds 1, 5, 6, 7) into per-post state, so a
+ * reload can rebuild exactly what the reader has already done. NIP-09
+ * deletions win over the actions they delete.
+ */
+export function summarizeMyActivity(events: NostrEvent[]): MyActivityMap {
+  const deleted = new Set<string>();
+  for (const event of events) {
+    if (event.kind !== DELETION_KIND) continue;
+    // `k` narrows the kinds a deletion covers, but relays only index the `e`
+    // tags, so every referenced id counts as removed.
+    for (const id of targets(event)) deleted.add(id);
+  }
+
+  const map: MyActivityMap = new Map();
+  const entry = (target: string): MyActivity => {
+    let current = map.get(target);
+    if (current === undefined) {
+      current = {};
+      map.set(target, current);
+    }
+    return current;
+  };
+
+  // Newest first, so the last write for a post wins.
+  const ordered = [...events].sort((a, b) =>
+    a.created_at !== b.created_at
+      ? b.created_at - a.created_at
+      : a.id < b.id
+        ? 1
+        : -1,
+  );
+
+  for (const event of ordered) {
+    if (deleted.has(event.id)) continue;
+    if (event.kind === REACTION_KIND) {
+      for (const target of targets(event)) {
+        entry(target).react ??= event.id;
+      }
+      continue;
+    }
+    if (event.kind === REPOST_KIND) {
+      const quoted = event.tags.some((tag) => tag[0] === "q");
+      for (const target of targets(event)) {
+        const current = entry(target);
+        if (quoted) {
+          current.quote ??= event.id;
+        } else {
+          current.repost ??= event.id;
+        }
+      }
+      continue;
+    }
+    if (event.kind === REPLY_KIND) {
+      for (const target of targets(event)) {
+        entry(target).replied = true;
+      }
+    }
+  }
+  return map;
 }

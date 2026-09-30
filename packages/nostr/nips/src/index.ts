@@ -26,17 +26,20 @@ export {
 } from "./auth.js";
 export type { AuthSecret, UnsignedEvent } from "./auth.js";
 export {
+  buildDeletion,
   buildQuoteRepost,
   buildReaction,
   buildReply,
   buildRepost,
+  DELETION_KIND,
   mentionedPubkeys,
   REACTION_KIND,
   REACTION_PLUS,
   REPOST_KIND,
   REPLY_KIND,
+  summarizeMyActivity,
 } from "./activity.js";
-export type { ReplyInput } from "./activity.js";
+export type { MyActivity, MyActivityMap, ReplyInput } from "./activity.js";
 export { bech32Decode, bech32Encode } from "./bech32.js";
 export {
   decodeNote,
