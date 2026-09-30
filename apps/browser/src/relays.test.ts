@@ -120,6 +120,11 @@ describe("relay/feed persistence", () => {
       setItem: (key: string, value: string) => void store.set(key, value),
       removeItem: (key: string) => void store.delete(key),
     });
+    vi.stubGlobal("sessionStorage", {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {},
+    });
     return store;
   }
 
@@ -162,6 +167,23 @@ describe("relay/feed persistence", () => {
         "wss://personal-a.example",
         "wss://personal-b.example",
       ]);
+    } finally {
+      vi.unstubAllGlobals();
+      clearFeed();
+      restoreDefaults();
+    }
+  });
+
+  it("restores the persisted feed as well", () => {
+    stubStorage();
+    try {
+      // The stored feed is validated, so it has to hold real hex keys.
+      const self = "1".repeat(64);
+      const followed = "2".repeat(64);
+      localStorage.setItem("dacci.relays", JSON.stringify(["wss://personal.example"]));
+      localStorage.setItem("dacci.feed", JSON.stringify([self, followed]));
+      initRelays();
+      expect(useFeed().feedAuthors()).toEqual([self, followed]);
     } finally {
       vi.unstubAllGlobals();
       clearFeed();

@@ -107,9 +107,41 @@ function loadPersistedFeed(): string[] | null {
   }
 }
 
+/**
+ * Metadata lookups (kind 3 / kind 10002) must not stall the UI, so they
+ * use a short timeout and race the first answer instead of waiting for
+ * every relay. Whatever has not arrived yet simply stays as it was.
+ */
+const METADATA_TIMEOUT_MS = 4000;
+
 async function defaultQuery(url: string, filter: Filter): Promise<NostrEvent[]> {
-  const result = await getConnection(url).query(filter, 10000);
+  const result = await getConnection(url).query(
+    filter,
+    METADATA_TIMEOUT_MS,
+  );
   return result.failed ? [] : result.events;
+}
+
+/**
+ * Runs `queryFn` against the current relays and resolves with the first
+ * non-empty answer. Bounded by `METADATA_TIMEOUT_MS` so login and reload
+ * are never blocked by a dead relay.
+ */
+async function firstAnswer(
+  filter: Filter,
+  queryFn: RelayQueryFn,
+): Promise<NostrEvent[]> {
+  let found: NostrEvent[] = [];
+  await Promise.race([
+    Promise.allSettled(
+      relayUrls().map(async (url) => {
+        const events = await queryFn(url, filter);
+        if (events.length > 0 && found.length === 0) found = events;
+      }),
+    ),
+    new Promise((resolve) => setTimeout(resolve, METADATA_TIMEOUT_MS)),
+  ]);
+  return found;
 }
 
 function setStatus(url: string, status: RelayConnStatus): void {
@@ -203,13 +235,9 @@ export async function applyLoginFeed(
   pubkey: string,
   queryFn: RelayQueryFn = defaultQuery,
 ): Promise<void> {
-  const settled = await Promise.allSettled(
-    relayUrls().map((url) =>
-      queryFn(url, { kinds: [CONTACTS_KIND], authors: [pubkey], limit: 5 }),
-    ),
-  );
-  const candidates = settled.flatMap((r) =>
-    r.status === "fulfilled" ? r.value : [],
+  const candidates = await firstAnswer(
+    { kinds: [CONTACTS_KIND], authors: [pubkey], limit: 5 },
+    queryFn,
   );
   let authors = [pubkey];
   if (candidates.length > 0) {
@@ -223,6 +251,25 @@ export async function applyLoginFeed(
 }
 
 /**
+ * Logged-in state: resolve the NIP-65 relay list (kind 10002) and the
+ * NIP-02 follow list (kind 3) from the connected relays, then reconnect to
+ * the read relays and switch the feed to the follows.
+ *
+ * Both lookups run in parallel and each falls back to whatever was already
+ * known, so the login is never blocked by a slow or dead relay. Both
+ * results are persisted, so a reload keeps the login and the resolved
+ * relay set instead of resetting to the defaults.
+ */
+export async function applyLoginProfile(
+  pubkey: string,
+  queryFn: RelayQueryFn = defaultQuery,
+): Promise<void> {
+  await Promise.all([
+    applyLoginRelaySet(pubkey, queryFn),
+    applyLoginFeed(pubkey, queryFn),
+  ]);
+}
+/**
  * Logged-in state: fetch the NIP-65 relay list (kind 10002) from the
  * currently connected relays and reconnect to its read relays.
  * Keeps the current set when no list is found.
@@ -231,22 +278,12 @@ export async function applyLoginRelaySet(
   pubkey: string,
   queryFn: RelayQueryFn = defaultQuery,
 ): Promise<void> {
-  const settled = await Promise.allSettled(
-    relayUrls().map((url) =>
-      queryFn(url, { kinds: [RELAY_LIST_KIND], authors: [pubkey], limit: 5 }),
-    ),
-  );
-  const candidates = settled.flatMap((r) =>
-    r.status === "fulfilled" ? r.value : [],
+  const candidates = await firstAnswer(
+    { kinds: [RELAY_LIST_KIND], authors: [pubkey], limit: 5 },
+    queryFn,
   );
   if (candidates.length === 0) return;
-  candidates.sort((a, b) =>
-    a.created_at !== b.created_at
-      ? b.created_at - a.created_at
-      : a.id < b.id
-        ? -1
-        : 1,
-  );
+  candidates.sort(newestFirst);
   const readUrls = parseRelayList(candidates[0])
     .filter((entry) => entry.read)
     .map((entry) => entry.url);

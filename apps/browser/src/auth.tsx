@@ -8,16 +8,22 @@ import {
 import type { AuthSigner } from "dacci-nostr-ws";
 import { createSignal } from "solid-js";
 import { eachConnection } from "./nostr.js";
-import { applyLoginFeed, applyLoginRelaySet, restoreDefaults } from "./relays.js";
+import { applyLoginProfile, restoreDefaults } from "./relays.js";
 import type { RelayQueryFn } from "./relays.js";
 
 export type LoginMethod = "nip07" | "nsec";
 
 const STORAGE_KEY = "dacci.auth";
+// Session scope: survives a reload, dies with the tab. The nsec secret is
+// never written to localStorage, so it cannot outlive the browser session.
+const SECRET_KEY = "dacci.nsec";
 
 const [pubkey, setPubkey] = createSignal<string | null>(null);
 const [method, setMethod] = createSignal<LoginMethod | null>(null);
 const [authError, setAuthError] = createSignal<string | null>(null);
+// "restoring" until the startup restore has decided, so the UI never
+// flashes the login form while the extension is still being injected.
+const [restoring, setRestoring] = createSignal(true);
 
 let activeSigner: Signer | null = null;
 
@@ -29,11 +35,46 @@ function applySignerToConnections(signer: Signer | null): void {
 }
 
 export function useAuth() {
-  return { pubkey, method, authError };
+  return { pubkey, method, authError, restoring };
+}
+
+/**
+ * NIP-07 extensions inject `window.nostr` asynchronously, so it is usually
+ * absent right after a reload. Wait for it instead of concluding that the
+ * session is gone.
+ */
+async function waitForExtension(timeoutMs: number): Promise<boolean> {
+  if (hasNip07Extension()) return true;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    if (hasNip07Extension()) return true;
+  }
+  return false;
+}
+
+/** The extension can also refuse while the vault is locked: retry briefly. */
+async function pubKeyWithRetry(attempts: number): Promise<string | null> {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await new Nip07Signer().getPublicKey();
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+  return null;
 }
 
 export function extensionAvailable(): boolean {
   return hasNip07Extension();
+}
+
+function sessionStore(): Storage | null {
+  try {
+    return (globalThis as { sessionStorage?: Storage }).sessionStorage ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function loginWithExtension(): Promise<boolean> {
@@ -45,9 +86,10 @@ export async function loginWithExtension(): Promise<boolean> {
     setPubkey(key);
     setMethod("nip07");
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ pubkey: key, method: "nip07" }));
+    // The extension owns the key, so nothing secret is kept here.
+    sessionStore()?.removeItem(SECRET_KEY);
     applySignerToConnections(signer);
-    await applyLoginRelaySet(key);
-    await applyLoginFeed(key);
+    await applyLoginProfile(key);
     return true;
   } catch (error) {
     setAuthError(
@@ -82,9 +124,11 @@ export async function loginWithNsec(input: string): Promise<boolean> {
     setPubkey(key);
     setMethod("nsec");
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ pubkey: key, method: "nsec-session" }));
+    // Session-scoped so a reload keeps the login, but the secret never
+    // leaves the tab and is never written to localStorage.
+    sessionStore()?.setItem(SECRET_KEY, secretHex);
     applySignerToConnections(signer);
-    await applyLoginRelaySet(key);
-    await applyLoginFeed(key);
+    await applyLoginProfile(key);
     return true;
   } catch (error) {
     setAuthError(
@@ -94,14 +138,30 @@ export async function loginWithNsec(input: string): Promise<boolean> {
   }
 }
 
+/**
+ * Explicit logout: drops the session *and* the persisted profile, so the
+ * app goes back to the default relay set and the global feed.
+ */
 export function logout(): void {
+  clearSession();
+  restoreDefaults();
+}
+
+/**
+ * Drops only the session. Used when restoring on reload: a failure here
+ * (extension missing, key locked) must not wipe the resolved relay set,
+ * otherwise every reload would reset the profile.
+ */
+function clearSession(options: { keepStoredEntry?: boolean } = {}): void {
   activeSigner = null;
   setPubkey(null);
   setMethod(null);
   setAuthError(null);
-  localStorage.removeItem(STORAGE_KEY);
+  if (options.keepStoredEntry !== true) {
+    localStorage.removeItem(STORAGE_KEY);
+    sessionStore()?.removeItem(SECRET_KEY);
+  }
   applySignerToConnections(null);
-  restoreDefaults();
 }
 
 export function getSigner(): Signer | null {
@@ -116,13 +176,25 @@ async function establishSession(signer: Signer, key: string): Promise<void> {
 
 /**
  * Restore a persisted session after reload. NIP-07 logins restore
- * silently (the extension still holds the key). nsec sessions cannot
- * be restored by design (the secret was memory-only), so the stale
- * entry is dropped and the user logs in again.
+ * silently (the extension still holds the key); nsec logins restore from
+ * sessionStorage, which survives a reload but not the tab.
+ *
+ * The persisted relay set and feed are left untouched in both cases: only
+ * an explicit logout resets those.
  */
 export async function restoreSession(deps: {
   queryFn?: RelayQueryFn;
 } = {}): Promise<boolean> {
+  try {
+    return await restoreSessionInner(deps);
+  } finally {
+    setRestoring(false);
+  }
+}
+
+async function restoreSessionInner(deps: {
+  queryFn?: RelayQueryFn;
+}): Promise<boolean> {
   let stored: unknown;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -132,28 +204,52 @@ export async function restoreSession(deps: {
     localStorage.removeItem(STORAGE_KEY);
     return false;
   }
-  if (
-    typeof stored !== "object" ||
-    stored === null ||
-    (stored as { method?: unknown }).method !== "nip07"
-  ) {
+  if (typeof stored !== "object" || stored === null) {
     localStorage.removeItem(STORAGE_KEY);
     return false;
   }
-  try {
-    const signer = new Nip07Signer();
-    const key = await signer.getPublicKey();
-    await establishSession(signer, key);
-    setMethod("nip07");
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ pubkey: key, method: "nip07" }),
-    );
-    await applyLoginRelaySet(key, deps.queryFn);
-    await applyLoginFeed(key, deps.queryFn);
-    return true;
-  } catch {
-    logout();
+  const method = (stored as { method?: unknown }).method;
+
+  // nsec: the secret lives in sessionStorage, so a reload can pick the
+  // login back up without ever persisting it beyond the tab.
+  if (method === "nsec-session") {
+    const secret = sessionStore()?.getItem(SECRET_KEY) ?? null;
+    if (secret === null) {
+      localStorage.removeItem(STORAGE_KEY);
+      return false;
+    }
+    try {
+      const signer = new NsecSigner(secret);
+      const key = await signer.getPublicKey();
+      await establishSession(signer, key);
+      setMethod("nsec");
+      await applyLoginProfile(key, deps.queryFn);
+      return true;
+    } catch {
+      clearSession();
+      return false;
+    }
+  }
+
+  if (method !== "nip07") {
+    localStorage.removeItem(STORAGE_KEY);
     return false;
   }
+  const signer = new Nip07Signer();
+  const present = await waitForExtension(4000);
+  const key = present ? await pubKeyWithRetry(4) : null;
+  if (key === null) {
+    // The extension never showed up or the vault is locked: keep the
+    // stored entry so the next reload can retry, and keep the relay set.
+    clearSession({ keepStoredEntry: true });
+    return false;
+  }
+  await establishSession(signer, key);
+  setMethod("nip07");
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({ pubkey: key, method: "nip07" }),
+  );
+  await applyLoginProfile(key, deps.queryFn);
+  return true;
 }

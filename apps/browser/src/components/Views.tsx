@@ -189,7 +189,7 @@ export function ProfileView(props: { event: NostrEvent | null }) {
 }
 
 export function SettingsView() {
-  const { pubkey, method, authError } = useAuth();
+  const { pubkey, method, authError, restoring } = useAuth();
   const [nsec, setNsec] = createSignal("");
   const [busy, setBusy] = createSignal(false);
 
@@ -219,47 +219,54 @@ export function SettingsView() {
       </p>
 
       <h3 class="mt-6 font-bold">ログイン</h3>
+      <Show when={restoring()}>
+        <p class="mt-2 text-(--dads-solid-gray-500)">
+          ログイン状態を確認中…
+        </p>
+      </Show>
       <Show
         when={pubkey()}
         fallback={
-          <div class="mt-2">
-            <button
-              class="rounded-2xl bg-(--dads-blue-700) px-4 py-2 text-white disabled:opacity-50"
-              disabled={busy() || !extensionAvailable()}
-              onClick={() => void doExtensionLogin()}
-              title={
-                extensionAvailable()
-                  ? "NIP-07拡張でログイン"
-                  : "NIP-07拡張が見つかりません"
-              }
-            >
-              ブラウザ拡張でログイン (NIP-07)
-            </button>
-            <Show when={!extensionAvailable()}>
-              <p class="mt-1 text-sm text-(--dads-solid-gray-500)">
-                拡張が検出できません。対応拡張を導入するか、nsecでログインしてください。
-              </p>
-            </Show>
-            <div class="mt-3 flex gap-2">
-              <input
-                class="min-w-0 flex-1 rounded-2xl border border-(--dads-solid-gray-300) px-3 py-2"
-                type="password"
-                placeholder="nsec1… または64桁hex"
-                value={nsec()}
-                onInput={(e) => setNsec(e.currentTarget.value)}
-              />
+          <Show when={!restoring()}>
+            <div class="mt-2">
               <button
-                class="rounded-2xl border border-(--dads-solid-gray-300) px-4 py-2 disabled:opacity-50"
-                disabled={busy() || nsec().trim() === ""}
-                onClick={() => void doNsecLogin()}
+                class="rounded-2xl bg-(--dads-blue-700) px-4 py-2 text-white disabled:opacity-50"
+                disabled={busy() || !extensionAvailable()}
+                onClick={() => void doExtensionLogin()}
+                title={
+                  extensionAvailable()
+                    ? "NIP-07拡張でログイン"
+                    : "NIP-07拡張が見つかりません"
+                }
               >
-                nsecでログイン
+                ブラウザ拡張でログイン (NIP-07)
               </button>
+              <Show when={!extensionAvailable()}>
+                <p class="mt-1 text-sm text-(--dads-solid-gray-500)">
+                  拡張が検出できません。対応拡張を導入するか、nsecでログインしてください。
+                </p>
+              </Show>
+              <div class="mt-3 flex gap-2">
+                <input
+                  class="min-w-0 flex-1 rounded-2xl border border-(--dads-solid-gray-300) px-3 py-2"
+                  type="password"
+                  placeholder="nsec1… または64桁hex"
+                  value={nsec()}
+                  onInput={(e) => setNsec(e.currentTarget.value)}
+                />
+                <button
+                  class="rounded-2xl border border-(--dads-solid-gray-300) px-4 py-2 disabled:opacity-50"
+                  disabled={busy() || nsec().trim() === ""}
+                  onClick={() => void doNsecLogin()}
+                >
+                  nsecでログイン
+                </button>
+              </div>
+              <p class="mt-1 text-sm text-(--dads-solid-gray-500)">
+                秘密鍵はセッション内 (タブを閉じるまで) のみ保持します。
+              </p>
             </div>
-            <p class="mt-1 text-sm text-(--dads-solid-gray-500)">
-              秘密鍵はメモリ上でのみ保持し、保存しません。
-            </p>
-          </div>
+          </Show>
         }
       >
         <div class="mt-2">
