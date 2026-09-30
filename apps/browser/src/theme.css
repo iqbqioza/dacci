@@ -161,3 +161,15 @@ body {
   background-color: var(--dads-white);
   color: var(--dads-solid-gray-900);
 }
+
+/*
+ * Scrollbar gutter: reserve space for the scrollbar on every scroll
+ * container so showing/hiding it never shifts the layout.
+ */
+html {
+  scrollbar-gutter: stable;
+}
+
+.scroll-stable {
+  scrollbar-gutter: stable;
+}

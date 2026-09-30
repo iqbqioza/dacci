@@ -11,8 +11,9 @@
     "paths": {
       "dacci-nostr-nips": ["../../packages/nostr/nips/src/index.ts"],
       "dacci-nostr-ws": ["../../packages/nostr/ws/src/index.ts"],
-      "dacci-nostr-paginator": ["../../packages/nostr/paginator/src/index.ts"]
+      "dacci-nostr-paginator": ["../../packages/nostr/paginator/src/index.ts"],
+      "dacci-nostr-signer": ["../../packages/nostr/signer/src/index.ts"]
     }
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "vite.config.ts", "vitest.config.ts"]
 }

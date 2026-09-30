@@ -1,8 +1,6 @@
 import { RelayConnection } from "dacci-nostr-ws";
 import { TimelinePaginator } from "dacci-nostr-paginator";
 
-export const DEFAULT_RELAYS = ["wss://relay.nostrfy.org"];
-
 const connections = new Map<string, RelayConnection>();
 
 export function getConnection(url: string): RelayConnection {
@@ -14,10 +12,17 @@ export function getConnection(url: string): RelayConnection {
   return conn;
 }
 
-export function createTimeline(relayUrls: string[]): TimelinePaginator {
+export function eachConnection(run: (conn: RelayConnection) => void): void {
+  for (const conn of connections.values()) run(conn);
+}
+
+export function createTimeline(
+  relayUrls: string[],
+  authors?: string[],
+): TimelinePaginator {
   return new TimelinePaginator(
     relayUrls.map(getConnection),
-    { kinds: [1] },
+    authors === undefined ? { kinds: [1] } : { kinds: [1], authors },
     { pageSize: 30, baseLimit: 100, maxLimit: 500 },
   );
 }

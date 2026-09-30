@@ -96,4 +96,114 @@ describe("RelayConnection.query", () => {
     expect(result.failed).toBe(true);
     expect(result.authRequired).toBe(true);
   });
+
+  it("serves concurrent queries without clobbering", async () => {
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket);
+    const eventA = {
+      id: "a".repeat(64),
+      pubkey: "b".repeat(64),
+      created_at: 1000,
+      kind: 1,
+      tags: [],
+      content: "a",
+      sig: "c".repeat(128),
+    };
+    const eventB = { ...eventA, id: "d".repeat(64), content: "b" };
+    const first = conn.query({ kinds: [1] });
+    const second = conn.query({ kinds: [1] });
+    await new Promise((r) => setTimeout(r, 0));
+    const calls = vi.mocked(socket.send).mock.calls.map((call) => call[0]);
+    expect(calls).toHaveLength(2);
+    const [subA, subB] = calls.map(
+      (raw) => JSON.parse(raw)[1] as string,
+    );
+    expect(subA).not.toBe(subB);
+    socket.peer(["EVENT", subA, eventA]);
+    socket.peer(["EVENT", subB, eventB]);
+    socket.peer(["EOSE", subB]);
+    socket.peer(["EOSE", subA]);
+    const [resultA, resultB] = await Promise.all([first, second]);
+    expect(resultA.events).toHaveLength(1);
+    expect(resultB.events).toHaveLength(1);
+    expect(resultA.events[0].id).toBe(eventA.id);
+    expect(resultB.events[0].id).toBe(eventB.id);
+  });
+
+  it("publishes an event and resolves on OK", async () => {
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket);
+    const event = {
+      id: "a".repeat(64),
+      pubkey: "b".repeat(64),
+      created_at: 1000,
+      kind: 1,
+      tags: [],
+      content: "hi",
+      sig: "c".repeat(128),
+    };
+    const pending = conn.publish(event);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(JSON.parse(vi.mocked(socket.send).mock.calls[0][0])).toEqual([
+      "EVENT",
+      event,
+    ]);
+    socket.peer(["OK", event.id, true, ""]);
+    const result = await pending;
+    expect(result).toEqual({ accepted: true, message: "" });
+  });
+
+  it("reconnects after an unexpected close", async () => {
+    const sockets: Array<ReturnType<typeof makeSocket>> = [];
+    const factory = () => {
+      const socket = makeSocket();
+      sockets.push(socket);
+      return socket;
+    };
+    const conn = new RelayConnection("wss://example", factory, {
+      baseReconnectMs: 5,
+      maxReconnectMs: 10,
+    });
+    expect(conn.status).toBe("closed");
+    const pending = conn.query({ kinds: [1] });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(conn.status).toBe("open");
+    const subId = JSON.parse(
+      vi.mocked(sockets[0].send).mock.calls[0][0],
+    )[1] as string;
+    sockets[0].peer(["EOSE", subId]);
+    const first = await pending;
+    expect(first.eose).toBe(true);
+    // Unexpected drop: a new socket must be dialed automatically.
+    sockets[0].onclose?.();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sockets.length).toBe(2);
+    expect(conn.status).toBe("open");
+    conn.close();
+  });
+
+  it("stops retrying after close()", async () => {
+    const sockets: Array<ReturnType<typeof makeSocket>> = [];
+    const factory = () => {
+      const socket = makeSocket();
+      sockets.push(socket);
+      return socket;
+    };
+    const conn = new RelayConnection("wss://example", factory, {
+      baseReconnectMs: 5,
+      maxReconnectMs: 10,
+    });
+    const pending = conn.query({ kinds: [1] });
+    await new Promise((r) => setTimeout(r, 0));
+    const subId = JSON.parse(
+      vi.mocked(sockets[0].send).mock.calls[0][0],
+    )[1] as string;
+    sockets[0].peer(["EOSE", subId]);
+    await pending;
+    conn.close();
+    const count = sockets.length;
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sockets.length).toBe(count);
+    expect(conn.status).toBe("closed");
+  });
 });

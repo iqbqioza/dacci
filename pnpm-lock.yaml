@@ -168,9 +168,15 @@ importers:
 
   apps/browser:
     dependencies:
+      dacci-nostr-nips:
+        specifier: workspace:*
+        version: link:../../packages/nostr/nips
       dacci-nostr-paginator:
         specifier: workspace:*
         version: link:../../packages/nostr/paginator
+      dacci-nostr-signer:
+        specifier: workspace:*
+        version: link:../../packages/nostr/signer
       dacci-nostr-ws:
         specifier: workspace:*
         version: link:../../packages/nostr/ws
@@ -221,6 +227,25 @@ importers:
       dacci-nostr-ws:
         specifier: workspace:*
         version: link:../ws
+    devDependencies:
+      typescript:
+        specifier: ~5.7.2
+        version: 5.7.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(jiti@2.7.0)(lightningcss@1.32.0)
+
+  packages/nostr/signer:
+    dependencies:
+      '@noble/curves':
+        specifier: ^1.8.0
+        version: 1.9.7
+      '@noble/hashes':
+        specifier: ^1.7.0
+        version: 1.8.0
+      dacci-nostr-nips:
+        specifier: workspace:*
+        version: link:../nips
     devDependencies:
       typescript:
         specifier: ~5.7.2

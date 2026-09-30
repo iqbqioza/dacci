@@ -1,0 +1,183 @@
+import { computeEventId } from "dacci-nostr-nips";
+import type { NostrEvent } from "dacci-nostr-nips";
+import { describe, expect, it, vi } from "vitest";
+import {
+  applyLoginFeed,
+  applyLoginRelaySet,
+  clearFeed,
+  DEFAULT_RELAYS,
+  initRelays,
+  restoreDefaults,
+  useFeed,
+  useRelays,
+} from "./relays.js";
+
+function makeListEvent(
+  pubkey: string,
+  createdAt: number,
+  relays: string[],
+): NostrEvent {
+  const base = {
+    pubkey,
+    created_at: createdAt,
+    kind: 10002,
+    tags: relays.map((url) => ["r", url]),
+    content: "",
+  };
+  return { ...base, id: computeEventId(base), sig: "s".repeat(128) };
+}
+
+const PUBKEY = "p".repeat(64);
+
+describe("applyLoginRelaySet", () => {
+  it("switches to the read relays of the newest list", async () => {
+    restoreDefaults();
+    const oldList = makeListEvent(PUBKEY, 100, ["wss://old.example"]);
+    const newList = makeListEvent(PUBKEY, 200, [
+      "wss://new-a.example",
+      "wss://new-b.example",
+    ]);
+    await applyLoginRelaySet(PUBKEY, async (url) =>
+      url === DEFAULT_RELAYS[0] ? [oldList, newList] : [],
+    );
+    expect(useRelays().relayUrls()).toEqual([
+      "wss://new-a.example",
+      "wss://new-b.example",
+    ]);
+  });
+
+  it("keeps the current set when no list exists", async () => {
+    restoreDefaults();
+    await applyLoginRelaySet(PUBKEY, async () => []);
+    expect(useRelays().relayUrls()).toEqual(DEFAULT_RELAYS);
+  });
+
+  it("drops write-only relays", async () => {
+    restoreDefaults();
+    const base = {
+      pubkey: PUBKEY,
+      created_at: 100,
+      kind: 10002,
+      content: "",
+    };
+    const tags = [
+      ["r", "wss://read.example", "read"],
+      ["r", "wss://write.example", "write"],
+    ];
+    const event: NostrEvent = {
+      ...base,
+      tags,
+      id: computeEventId({ ...base, tags }),
+      sig: "s".repeat(128),
+    };
+    await applyLoginRelaySet(PUBKEY, async () => [event]);
+    expect(useRelays().relayUrls()).toEqual(["wss://read.example"]);
+    restoreDefaults();
+  });
+});
+
+function makeContactsEvent(pubkey: string, createdAt: number, follows: string[]) {
+  const base = {
+    pubkey,
+    created_at: createdAt,
+    kind: 3,
+    tags: follows.map((p) => ["p", p]),
+    content: "",
+  };
+  return { ...base, id: computeEventId(base), sig: "s".repeat(128) };
+}
+
+describe("applyLoginFeed", () => {
+  it("adopts follows plus self from the newest list", async () => {
+    restoreDefaults();
+    const oldList = makeContactsEvent(PUBKEY, 100, ["a".repeat(64)]);
+    const newList = makeContactsEvent(PUBKEY, 200, [
+      "b".repeat(64),
+      "c".repeat(64),
+    ]);
+    await applyLoginFeed(PUBKEY, async () => [oldList, newList]);
+    expect(useFeed().feedAuthors()).toEqual([
+      PUBKEY,
+      "b".repeat(64),
+      "c".repeat(64),
+    ]);
+    clearFeed();
+  });
+
+  it("falls back to self-only without a list", async () => {
+    restoreDefaults();
+    await applyLoginFeed(PUBKEY, async () => []);
+    expect(useFeed().feedAuthors()).toEqual([PUBKEY]);
+    clearFeed();
+  });
+});
+
+describe("relay/feed persistence", () => {
+  function stubStorage() {
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => void store.set(key, value),
+      removeItem: (key: string) => void store.delete(key),
+    });
+    return store;
+  }
+
+  it("persists the switched set", async () => {
+    stubStorage();
+    try {
+      await applyLoginRelaySet(PUBKEY, async () => [
+        makeListEvent(PUBKEY, 100, [
+          "wss://personal-a.example",
+          "wss://personal-b.example",
+        ]),
+      ]);
+      expect(useRelays().relayUrls()).toEqual([
+        "wss://personal-a.example",
+        "wss://personal-b.example",
+      ]);
+      expect(JSON.parse(localStorage.getItem("dacci.relays") ?? "[]")).toEqual([
+        "wss://personal-a.example",
+        "wss://personal-b.example",
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+      clearFeed();
+      restoreDefaults();
+    }
+  });
+
+  it("restores the persisted set on init instead of defaults", () => {
+    stubStorage();
+    try {
+      localStorage.setItem(
+        "dacci.relays",
+        JSON.stringify([
+          "wss://personal-a.example",
+          "wss://personal-b.example",
+        ]),
+      );
+      initRelays();
+      expect(useRelays().relayUrls()).toEqual([
+        "wss://personal-a.example",
+        "wss://personal-b.example",
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+      clearFeed();
+      restoreDefaults();
+    }
+  });
+
+  it("falls back to defaults on corrupt storage", () => {
+    stubStorage();
+    try {
+      localStorage.setItem("dacci.relays", "{broken");
+      initRelays();
+      expect(useRelays().relayUrls()).toEqual(DEFAULT_RELAYS);
+    } finally {
+      vi.unstubAllGlobals();
+      restoreDefaults();
+    }
+  });
+});

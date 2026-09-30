@@ -1,50 +1,118 @@
 import type { NostrEvent } from "dacci-nostr-nips";
-import { createSignal, For, Match, Show, Switch } from "solid-js";
+import {
+  createEffect,
+  createSignal,
+  For,
+  Match,
+  onCleanup,
+  onMount,
+  Show,
+  Switch,
+  untrack,
+} from "solid-js";
+import { getSigner, restoreSession, useAuth } from "./auth.jsx";
+import { fetchEventById, lookupEvent } from "./event-cache.js";
 import { HomeTimeline } from "./components/HomeTimeline.jsx";
+import { RelayDebugPanel } from "./components/RelayPanel.jsx";
 import {
   NetworkView,
   NotificationsView,
   ProfileView,
   SettingsView,
 } from "./components/Views.jsx";
+import { getConnection } from "./nostr.js";
+import {
+  initRelays,
+  startAutoRefresh,
+  stopAutoRefresh,
+  useRelays,
+} from "./relays.js";
+import {
+  currentHash,
+  goBackOrHome,
+  navigate,
+  parseHash,
+  subscribeRoute,
+  type Menu,
+  type Route,
+} from "./router.js";
 
-type Menu = "home" | "notifications" | "network" | "profile" | "settings";
-
-const MENU_LABELS: Array<{ key: Menu; label: string }> = [
-  { key: "home", label: "Home" },
-  { key: "notifications", label: "Notification" },
-  { key: "network", label: "Network" },
-  { key: "profile", label: "Profile" },
-  { key: "settings", label: "Settings" },
+const MENU_LABELS: Array<{ menu: Menu; label: string }> = [
+  { menu: "home", label: "Home" },
+  { menu: "notifications", label: "Notification" },
+  { menu: "network", label: "Network" },
+  { menu: "profile", label: "Profile" },
+  { menu: "settings", label: "Settings" },
 ];
 
 export function App() {
-  const [menu, setMenu] = createSignal<Menu>("home");
+  const [route, setRoute] = createSignal<Route>(parseHash(currentHash()));
+  const { menuRoute, eventRoute } = projectRoute(route);
   const [composeOpen, setComposeOpen] = createSignal(false);
   const [draft, setDraft] = createSignal("");
-  // Detail stack inside the main column: push from timeline,
-  // pop with the back button.
-  const [stack, setStack] = createSignal<NostrEvent[]>([]);
+  const [publishing, setPublishing] = createSignal(false);
+  const [publishError, setPublishError] = createSignal<string | null>(null);
+  const { pubkey } = useAuth();
+  const { relayUrls } = useRelays();
 
-  function openMenu(key: Menu) {
-    setMenu(key);
-    setStack([]);
+  // Restore the persisted set first so personal relays survive reloads,
+  // then restore the login session on top. Live status refresh runs on.
+  onMount(() => {
+    initRelays();
+    void restoreSession();
+    const stopRefresh = startAutoRefresh();
+    // A missing hash lands on home so the URL always reflects the view.
+    if (currentHash() === "") navigate("#/home");
+    const unsubscribe = subscribeRoute(() => setRoute(parseHash(currentHash())));
+    onCleanup(() => {
+      stopRefresh();
+      unsubscribe();
+    });
+  });
+
+  function openMenu(menu: Menu): void {
+    navigate(`#/${menu}`);
   }
 
-  function openDetail(event: NostrEvent) {
-    setStack((prev) => [...prev, event]);
+  function openDetail(event: NostrEvent): void {
+    navigate(`#/event/${event.id}`);
   }
 
-  function goBack() {
-    setStack((prev) => prev.slice(0, -1));
+  async function publish(): Promise<void> {
+    const signer = getSigner();
+    const key = pubkey();
+    const content = draft().trim();
+    if (signer === null || key === null || content === "") return;
+    setPublishing(true);
+    setPublishError(null);
+    try {
+      const event = await signer.signEvent({
+        pubkey: key,
+        created_at: Math.floor(Date.now() / 1000),
+        kind: 1,
+        tags: [],
+        content,
+      });
+      const result = await getConnection(relayUrls()[0]).publish(event);
+      if (result.accepted) {
+        setDraft("");
+        setComposeOpen(false);
+      } else {
+        setPublishError(`投稿が拒否されました: ${result.message}`);
+      }
+    } catch (error) {
+      setPublishError(
+        error instanceof Error ? error.message : "投稿に失敗しました",
+      );
+    } finally {
+      setPublishing(false);
+    }
   }
-
-  const detail = () => stack()[stack().length - 1] ?? null;
 
   return (
     <div class="mx-auto flex min-h-screen max-w-6xl">
-      {/* Menu */}
-      <nav class="w-48 shrink-0 border-r border-(--dads-solid-gray-200) p-3">
+      {/* Menu (fixed) */}
+      <nav class="sticky top-0 h-screen w-48 shrink-0 overflow-y-auto border-r border-(--dads-solid-gray-200) p-3">
         <h1 class="px-2 py-2 text-xl font-bold text-(--dads-blue-700)">Dacci</h1>
         <ul>
           <For each={MENU_LABELS}>
@@ -53,9 +121,12 @@ export function App() {
                 <button
                   class="w-full rounded-2xl px-3 py-2 text-left hover:bg-(--dads-blue-50)"
                   classList={{
-                    "bg-(--dads-blue-50) font-bold": menu() === item.key,
+                    "bg-(--dads-blue-50) font-bold": isMenuActive(
+                      route(),
+                      item.menu,
+                    ),
                   }}
-                  onClick={() => openMenu(item.key)}
+                  onClick={() => openMenu(item.menu)}
                 >
                   {item.label}
                 </button>
@@ -71,26 +142,23 @@ export function App() {
         </button>
       </nav>
 
-      {/* Main column */}
+      {/* Main column: page scrolls the window, so the scrollbar sits at the window edge */}
       <main class="min-w-0 flex-1 border-r border-(--dads-solid-gray-200)">
-        <Show when={detail()} fallback={<MenuContent menu={menu()} onSelect={openDetail} />}>
-          {(event) => (
-            <div>
-              <button
-                class="m-3 rounded-2xl border border-(--dads-solid-gray-300) px-3 py-1"
-                onClick={goBack}
-              >
-                ← 戻る
-              </button>
-              <ProfileView event={event()} />
-            </div>
-          )}
-        </Show>
+        <Switch>
+          <Match when={menuRoute()}>
+            {(menu) => <MenuContent menu={menu()} onSelect={openDetail} />}
+          </Match>
+          <Match when={eventRoute()}>
+            {(detail) => (
+              <EventDetailView eventId={detail()} urls={relayUrls()} />
+            )}
+          </Match>
+        </Switch>
       </main>
 
-      {/* Reserved sidebar */}
-      <aside class="hidden w-72 shrink-0 p-4 md:block">
-        <p class="text-sm text-(--dads-solid-gray-500)">サイドバー (予約)</p>
+      {/* Reserved sidebar (fixed): relay debug panel */}
+      <aside class="sticky top-0 hidden h-screen w-72 shrink-0 overflow-y-auto p-4 md:block">
+        <RelayDebugPanel />
       </aside>
 
       {/* Compose modal */}
@@ -104,8 +172,16 @@ export function App() {
               onInput={(e) => setDraft(e.currentTarget.value)}
             />
             <p class="mt-1 text-sm text-(--dads-solid-gray-500)">
-              投稿には鍵管理が必要です (未実装のため送信できません)。
+              <Show
+                when={pubkey()}
+                fallback={"投稿にはログインが必要です (Settings) 。"}
+              >
+                {"投稿はテスト用リレーに公開されます。"}
+              </Show>
             </p>
+            <Show when={publishError()}>
+              <p class="mt-1 text-sm text-(--dads-red-600)">{publishError()}</p>
+            </Show>
             <div class="mt-3 flex justify-end gap-2">
               <button
                 class="rounded-2xl border border-(--dads-solid-gray-300) px-4 py-2"
@@ -114,11 +190,15 @@ export function App() {
                 閉じる
               </button>
               <button
-                class="rounded-2xl bg-(--dads-blue-700) px-4 py-2 text-white opacity-50"
-                disabled
-                title="鍵管理の実装後に有効化"
+                class="rounded-2xl bg-(--dads-blue-700) px-4 py-2 text-white disabled:opacity-50"
+                disabled={
+                  pubkey() === null ||
+                  draft().trim() === "" ||
+                  publishing()
+                }
+                onClick={() => void publish()}
               >
-                投稿
+                {publishing() ? "投稿中…" : "投稿"}
               </button>
             </div>
           </div>
@@ -126,6 +206,28 @@ export function App() {
       </Show>
     </div>
   );
+}
+
+function isMenuActive(route: Route, menu: Menu): boolean {
+  return route.name === "menu" && route.menu === menu;
+}
+
+// Match needs accessors, so the discriminated union is projected into
+// two optional accessors that narrow cleanly under TS.
+function projectRoute(route: () => Route): {
+  menuRoute: () => Menu | undefined;
+  eventRoute: () => string | undefined;
+} {
+  return {
+    menuRoute: () => {
+      const current = route();
+      return current.name === "menu" ? current.menu : undefined;
+    },
+    eventRoute: () => {
+      const current = route();
+      return current.name === "event" ? current.eventId : undefined;
+    },
+  };
 }
 
 function MenuContent(props: {
@@ -138,7 +240,7 @@ function MenuContent(props: {
         <HomeTimeline onSelect={props.onSelect} />
       </Match>
       <Match when={props.menu === "notifications"}>
-        <NotificationsView />
+        <NotificationsView onSelect={props.onSelect} />
       </Match>
       <Match when={props.menu === "network"}>
         <NetworkView />
@@ -150,5 +252,61 @@ function MenuContent(props: {
         <SettingsView />
       </Match>
     </Switch>
+  );
+}
+
+function EventDetailView(props: { eventId: string; urls: string[] }) {
+  const initial = lookupEvent(props.eventId);
+  const [event, setEvent] = createSignal<NostrEvent | null>(initial);
+  const [loading, setLoading] = createSignal(initial === null);
+
+  async function resolve(id: string): Promise<void> {
+    const cached = lookupEvent(id);
+    if (cached !== null) {
+      setEvent(cached);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const found = await fetchEventById(id, props.urls, (url, f) =>
+      getConnection(url)
+        .query(f, 6000)
+        .then((r) => (r.failed ? [] : r.events)),
+    );
+    // Ignore a completion for an id the user already navigated away from.
+    if (untrack(() => props.eventId) !== id) return;
+    setEvent(found);
+    setLoading(false);
+  }
+
+  // Re-resolves when the route id changes (deep links, direct navigation).
+  createEffect(() => {
+    const id = props.eventId;
+    if (id === "") return;
+    void resolve(id);
+  });
+
+  return (
+    <div>
+      <button
+        class="m-3 rounded-2xl border border-(--dads-solid-gray-300) px-3 py-1"
+        onClick={goBackOrHome}
+      >
+        ← 戻る
+      </button>
+      <Show when={loading()}>
+        <p class="px-4 py-6 text-(--dads-solid-gray-500)">読み込み中…</p>
+      </Show>
+      <Show
+        when={event() ?? null}
+        fallback={
+          <p class="px-4 py-6 text-(--dads-solid-gray-500)">
+            イベントを取得できませんでした (削除済み、またはリレーに存在しません)。
+          </p>
+        }
+      >
+        {(found) => <ProfileView event={found()} />}
+      </Show>
+    </div>
   );
 }
