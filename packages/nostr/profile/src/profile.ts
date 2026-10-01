@@ -1,4 +1,4 @@
-import { isValidEventStructure, type NostrEvent } from "dacci-nostr-nips";
+import { emojisIn, isValidEventStructure, type Emoji, type NostrEvent } from "dacci-nostr-nips";
 
 /** NIP-01 kind 0 metadata, parsed from the JSON content. */
 export interface Profile {
@@ -19,6 +19,11 @@ export interface Profile {
    * author had. The unknown keys have to travel with the known ones.
    */
   metadata: Record<string, unknown>;
+  /**
+   * The NIP-30 shortcodes this profile defines, which NIP-30 says its `name`
+   * and `about` are written with.
+   */
+  emojis: Emoji[];
 }
 
 export interface ProfileQuery {
@@ -71,6 +76,8 @@ export function parseProfile(event: NostrEvent): Profile | null {
     // The whole object travels with the parsed fields, so republishing the
     // profile keeps whatever else the author put in it.
     metadata: meta,
+    // NIP-30 puts the shortcodes for `name` and `about` on the profile itself.
+    emojis: emojisIn(event),
   };
 }
 

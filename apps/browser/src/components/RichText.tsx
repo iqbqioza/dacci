@@ -1,5 +1,10 @@
-import type { ContentSegment, UrlSpan } from "dacci-nostr-nips";
-import { mentionedProfiles, textSegments, urlSpans } from "dacci-nostr-nips";
+import type { ContentSegment, Emoji, Emojified, UrlSpan } from "dacci-nostr-nips";
+import {
+  emojify,
+  mentionedProfiles,
+  textSegments,
+  urlSpans,
+} from "dacci-nostr-nips";
 import { profileLabel } from "dacci-nostr-profile";
 import { createEffect, createMemo, For, Show } from "solid-js";
 import { shortNpub } from "../nostr.js";
@@ -41,34 +46,78 @@ export function Mention(props: { pubkey: string; label: string }) {
 }
 
 /**
- * A run of text with the addresses in it as links.
+ * One NIP-30 custom emoji, drawn inside the line it stands in.
  *
- * The address stays exactly as the author wrote it: an address is what a
- * reader needs to see to decide whether to follow it, and shortening it hides
- * where they are going. What follows it is the punctuation of the sentence, so
- * a link at the end of a line does not swallow the full stop.
+ * It sits on the text baseline rather than as a figure of its own: an emoji is
+ * a character the author wrote in the middle of a sentence, so it takes the
+ * height of the words beside it and flows with them.
+ */
+export function EmojiMark(props: { emoji: Emoji }) {
+  return (
+    <img
+      src={props.emoji.url}
+      // The shortcode is what the author wrote and what a reader who cannot
+      // see the image needs to know, so it is also what a reader hears.
+      alt={`:${props.emoji.code}:`}
+      title={`:${props.emoji.code}:`}
+      class="inline-block size-[1.15em] align-[-0.2em]"
+      loading="lazy"
+      decoding="async"
+      referrerpolicy="no-referrer"
+    />
+  );
+}
+
+/** A piece of a run of text: words, an emoji, or an address. */
+type Piece =
+  | { kind: "text"; text: string }
+  | { kind: "link"; url: string }
+  | { kind: "emoji"; emoji: Emoji };
+
+/**
+ * A run of text with the author's custom emoji and the addresses in it drawn as
+ * they are meant to be read.
+ *
+ * An emoji stands where the shortcode was written and takes no space of its
+ * own, so `:soapbox:` in the middle of a sentence reads as one character and
+ * not as a gap. The address stays exactly as the author wrote it: an address is
+ * what a reader needs to see to decide whether to follow it, and shortening it
+ * hides where they are going. What follows it is the punctuation of the
+ * sentence, so a link at the end of a line does not swallow the full stop.
  *
  * What counts as an address is one judgement shared with the image scan, so a
  * url that is an image never also shows up here as a link, and the same
  * trailing punctuation is left out of both.
  */
-export function TextRun(props: { text: string }) {
+export function TextRun(props: { text: string; emojis?: Emoji[] }) {
+  const emojis = (): Emoji[] => props.emojis ?? [];
   // Every piece keeps the space the author wrote, including a run that is only
-  // a space, so a link never ends up glued to the word before it.
-  const pieces = createMemo<Array<{ kind: "text"; text: string } | { kind: "link"; url: string }>>(() => {
-    const found: UrlSpan[] = urlSpans(props.text);
-    if (found.length === 0) return [{ kind: "text", text: props.text }];
-    const out: Array<{ kind: "text"; text: string } | { kind: "link"; url: string }> = [];
-    let cursor = 0;
-    for (const span of found) {
-      if (span.start > cursor) {
-        out.push({ kind: "text", text: props.text.slice(cursor, span.start) });
+  // a space, so a link never ends up glued to the word before it. Emoji are cut
+  // out first: a shortcode is not an address and an address is not an emoji.
+  const pieces = createMemo<Piece[]>(() => {
+    const parts: Emojified[] = emojify(props.text, emojis());
+    const out: Piece[] = [];
+    for (const part of parts) {
+      if (part.kind === "emoji") {
+        out.push(part);
+        continue;
       }
-      out.push({ kind: "link", url: span.url });
-      cursor = span.end;
-    }
-    if (cursor < props.text.length) {
-      out.push({ kind: "text", text: props.text.slice(cursor) });
+      const found: UrlSpan[] = urlSpans(part.text);
+      if (found.length === 0) {
+        out.push({ kind: "text", text: part.text });
+        continue;
+      }
+      let cursor = 0;
+      for (const span of found) {
+        if (span.start > cursor) {
+          out.push({ kind: "text", text: part.text.slice(cursor, span.start) });
+        }
+        out.push({ kind: "link", url: span.url });
+        cursor = span.end;
+      }
+      if (cursor < part.text.length) {
+        out.push({ kind: "text", text: part.text.slice(cursor) });
+      }
     }
     return out;
   });
@@ -79,6 +128,8 @@ export function TextRun(props: { text: string }) {
         {(piece) =>
           piece.kind === "text" ? (
             piece.text
+          ) : piece.kind === "emoji" ? (
+            <EmojiMark emoji={piece.emoji} />
           ) : (
             <a
               href={piece.url}
@@ -105,16 +156,40 @@ export function TextRun(props: { text: string }) {
 }
 
 /**
- * Text a person wrote, with the people it names shown by name and the
- * addresses in it as links. This is the same reading of a body a post's text
- * gets, without the images: a profile's own words are shown as written, and
- * the metadata of anyone they name is asked for so the name can arrive.
+ * Short words with the author's custom emoji drawn, and nothing else.
+ *
+ * A display name is a name, not a paragraph: it has no address to follow and
+ * nobody in it to resolve. Only the emoji are drawn, so a name can never end up
+ * holding a link inside the button that opens the profile.
+ */
+export function EmojiText(props: { text: string; emojis?: Emoji[] }) {
+  const parts = createMemo(() => emojify(props.text, props.emojis ?? []));
+  return (
+    <For each={parts()}>
+      {(part) =>
+        part.kind === "text" ? part.text : <EmojiMark emoji={part.emoji} />
+      }
+    </For>
+  );
+}
+
+/**
+ * Text a person wrote, with the people it names shown by name, their custom
+ * emoji drawn and the addresses in it as links. This is the same reading of a
+ * body a post's text gets, without the images: a profile's own words are shown
+ * as written, and the metadata of anyone they name is asked for so the name can
+ * arrive.
  *
  * With `bare` a bare `npub1…` counts as naming someone too, not only one
  * behind its `nostr:` prefix. That belongs in a profile's own bio, where a
  * person often writes their key out to say who they are, and nowhere else.
  */
-export function RichText(props: { text: string; bare?: boolean }) {
+export function RichText(props: {
+  text: string;
+  bare?: boolean;
+  /** The NIP-30 shortcodes the writing came with. */
+  emojis?: Emoji[];
+}) {
   // The people the text names are asked for by the same store every other
   // name in the app uses, so one batch covers the screen.
   createEffect(() => {
@@ -127,14 +202,16 @@ export function RichText(props: { text: string; bare?: boolean }) {
 
   return (
     <Show when={segments().length > 0}>
-      <For each={segments()}>{(segment) => renderSegment(segment)}</For>
+      <For each={segments()}>
+        {(segment) => renderSegment(segment, props.emojis)}
+      </For>
     </Show>
   );
 }
 
 // Solid does not narrow a union inside a JSX branch, so the segment is read in
 // a plain function, which does narrow it.
-function renderSegment(segment: ContentSegment) {
+function renderSegment(segment: ContentSegment, emojis: Emoji[] = []) {
   if (segment.kind === "mention") {
     return <Mention pubkey={segment.mention.pubkey} label={segment.mention.label} />;
   }
@@ -142,5 +219,5 @@ function renderSegment(segment: ContentSegment) {
   // text is shared with a post's body, so the case is handled rather than
   // pretended away.
   if (segment.kind === "image") return null;
-  return <TextRun text={segment.text} />;
+  return <TextRun text={segment.text} emojis={emojis} />;
 }

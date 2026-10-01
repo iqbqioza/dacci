@@ -85,12 +85,18 @@ export function ProfileHeader(props: { pubkey: string }) {
           {encodeNpub(props.pubkey) ?? props.pubkey}
         </p>
         {/* The bio is written by a person about themselves, so it reads the
-            same way a post does: the people it names are shown by name and the
-            addresses in it are links. */}
+            same way a post does: the people it names are shown by name, their
+            custom emoji are drawn and the addresses in it are links. NIP-30
+            says a profile's `name` and `about` are both emojified, and the
+            name is drawn that way by `ProfileName`. */}
         <Show when={profile()?.about}>
           {(about) => (
             <p class="mt-2 text-sm break-words">
-              <RichText text={about()} bare />
+              <RichText
+                text={about()}
+                bare
+                emojis={profile()?.emojis}
+              />
             </p>
           )}
         </Show>

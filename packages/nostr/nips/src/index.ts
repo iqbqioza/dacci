@@ -37,6 +37,13 @@ export type { MetadataValue } from "./metadata.js";
 export { contentSegments, imagesIn, urlSpans } from "./media.js";
 export type { ContentSegment, MediaRef, UrlSpan } from "./media.js";
 export {
+  emojify,
+  emojisIn,
+  isEmojiSetAddress,
+  withoutEmojis,
+} from "./emoji.js";
+export type { Emoji, Emojified } from "./emoji.js";
+export {
   mentionedProfiles,
   profileReferences,
   textSegments,

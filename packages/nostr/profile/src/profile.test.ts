@@ -50,6 +50,24 @@ describe("parseProfile", () => {
     });
   });
 
+  it("reads the NIP-30 emoji a profile defines for its own name and bio", () => {
+    // NIP-30 puts the shortcodes on the profile itself, so `name` and `about`
+    // can be drawn with them without asking a relay for anything.
+    const event = metaEvent(
+      A,
+      JSON.stringify({ name: "Alex Gleason :soapbox:" }),
+      100,
+    );
+    event.tags = [["emoji", "soapbox", "https://x/soapbox.png"]];
+    expect(parseProfile(event)?.emojis).toEqual([
+      { code: "soapbox", url: "https://x/soapbox.png" },
+    ]);
+  });
+
+  it("has no emoji on a profile that defines none", () => {
+    expect(parseProfile(metaEvent(A, JSON.stringify({ name: "a" })))?.emojis).toEqual([]);
+  });
+
   it("rejects other kinds and broken JSON", () => {
     expect(parseProfile({ ...metaEvent(A, "{}"), kind: 1 })).toBeNull();
     expect(parseProfile(metaEvent(A, "not json"))).toBeNull();
