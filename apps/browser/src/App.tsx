@@ -318,7 +318,10 @@ export function App() {
 
       {/* Compose modal: a new note, a reply or a quote repost */}
       <Show when={composeOpen()}>
-        <div class="fixed inset-0 flex items-center justify-center bg-(--scrim)">
+        {/* Above every pinned bar. A scroll-pinned row is a stacking context
+            of its own, so a scrim without a z-index of its own paints under
+            them and leaves the page behind it clickable while it is open. */}
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-(--scrim)">
           <div class="w-full max-w-md rounded-2xl bg-(--surface) p-4">
             <h2 class="font-bold">{COMPOSE_TITLES[composeMode()]}</h2>
             <Show when={composeTarget()}>

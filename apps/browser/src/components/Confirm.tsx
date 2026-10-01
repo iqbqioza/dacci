@@ -30,8 +30,10 @@ export function Confirm(props: {
 
   return (
     <Show when={props.open}>
+      {/* A modal, so it sits above the pinned bars: the page behind it must not
+          be reachable while a question is being answered. */}
       <div
-        class="fixed inset-0 z-40 flex items-center justify-center bg-(--scrim)"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-(--scrim)"
         // A click on the scrim is a change of mind; a click on the dialog is
         // not, so it is stopped from reaching the scrim.
         onClick={props.onCancel}
