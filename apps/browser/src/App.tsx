@@ -41,6 +41,7 @@ import { getConnection } from "./nostr.js";
 import { noticeMessage } from "./notice.js";
 import { resetHomeFeed } from "./home-feed.js";
 import { resetFollowCounts } from "./follows.js";
+import { requestMyFollows, resetMyFollows } from "./my-follows.js";
 import { startLiveFeeds, watchProfileSubject } from "./live.js";
 import { adoptMyActivity, syncMyActivity } from "./my-actions.js";
 import { resetNotifications } from "./notifications-feed.js";
@@ -145,6 +146,9 @@ export function App() {
     untrack(() => {
       resetProfiles();
       resetFollowCounts();
+      // The reader's own follow list is read from these relays too, and it is
+      // the only place a follow can be published from, so it starts over.
+      resetMyFollows();
       resetProfileFeed();
       resetEmbeds();
       resetReplies();
@@ -192,6 +196,9 @@ export function App() {
       // truth for what this key has already done.
       adoptMyActivity(pubkey());
       if (pubkey() !== null) void syncMyActivity();
+      // The follow button reads the reader's own kind 3, which is only asked
+      // for once a session, so the first profile that shows one asks for it.
+      if (pubkey() !== null) requestMyFollows();
     });
   });
 

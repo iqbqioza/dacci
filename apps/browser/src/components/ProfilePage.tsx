@@ -4,6 +4,7 @@ import { createEffect, For, onMount, Show, untrack } from "solid-js";
 import { useAuth } from "../auth.jsx";
 import { EventCard } from "./EventCard.jsx";
 import { PageBar } from "./PageBar.jsx";
+import { ProfileActions } from "./ProfileActions.jsx";
 import { ProfileAvatar, ProfileName } from "./ProfileAvatar.jsx";
 import { RichText } from "./RichText.jsx";
 import { FeedTabs, type FeedTab } from "../feed-tabs.jsx";
@@ -61,17 +62,24 @@ export function ProfileHeader(props: { pubkey: string }) {
             class="rounded-full ring-4 ring-(--surface)"
           />
         </div>
-        <div class="flex flex-wrap items-center gap-x-2">
-          <span class="text-lg font-bold">
-            <ProfileName pubkey={props.pubkey} />
-          </span>
-          <Show when={profile()?.nip05}>
-            {(identifier) => (
-              <span class="text-xs text-(--ink-quiet)">
-                {identifier()}
-              </span>
-            )}
-          </Show>
+        {/* The name takes the row it needs and the actions take the rest, so a
+            long name wraps under the buttons rather than pushing them out of
+            the header. The buttons are last so a touch on the name still reads
+            as tapping the name. */}
+        <div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-2">
+          <div class="flex min-w-0 flex-wrap items-center gap-x-2">
+            <span class="text-lg font-bold">
+              <ProfileName pubkey={props.pubkey} />
+            </span>
+            <Show when={profile()?.nip05}>
+              {(identifier) => (
+                <span class="text-xs text-(--ink-quiet)">
+                  {identifier()}
+                </span>
+              )}
+            </Show>
+          </div>
+          <ProfileActions pubkey={props.pubkey} />
         </div>
         <p class="font-mono text-xs break-all text-(--ink-quiet)">
           {encodeNpub(props.pubkey) ?? props.pubkey}
