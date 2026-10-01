@@ -1,5 +1,5 @@
 import type { NostrEvent } from "dacci-nostr-nips";
-import { displayContent, encodeNpub } from "dacci-nostr-nips";
+import { encodeNpub } from "dacci-nostr-nips";
 import { Show, createEffect, createMemo } from "solid-js";
 import { requestEmbeds } from "../embeds.js";
 import { showsCommentLabel } from "../feed-tabs.jsx";
@@ -7,6 +7,7 @@ import { formatTime } from "../nostr.js";
 import { navigate, profileHash } from "../router.js";
 import { ActionBar } from "./ActionBar.jsx";
 import { EmbeddedCard, EmbeddedPlaceholder } from "./EmbeddedCard.jsx";
+import { NoteBody } from "./NoteBody.jsx";
 import { ProfileAvatar, ProfileName } from "./ProfileAvatar.jsx";
 import { PostMenu } from "./PostMenu.jsx";
 import { SensitiveBody } from "./SensitiveBody.jsx";
@@ -96,7 +97,7 @@ export function EventCard(props: {
             note is someone else's post and carries its own warning. */}
         <SensitiveBody event={props.event}>
           <p class="whitespace-pre-wrap break-words text-(--ink)">
-            {displayContent(props.event)}
+            <NoteBody event={props.event} />
           </p>
           <EmbeddedCard event={props.event} onSelect={props.onSelect} />
           <EmbeddedPlaceholder event={props.event} />

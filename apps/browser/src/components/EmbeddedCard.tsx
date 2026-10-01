@@ -1,8 +1,8 @@
 import type { NostrEvent } from "dacci-nostr-nips";
-import { displayContent } from "dacci-nostr-nips";
 import { Show } from "solid-js";
 import { useEmbed } from "../embeds.js";
 import { formatTime } from "../nostr.js";
+import { NoteBody } from "./NoteBody.jsx";
 import { ProfileAvatar, ProfileName } from "./ProfileAvatar.jsx";
 import { SensitiveBody } from "./SensitiveBody.jsx";
 
@@ -47,7 +47,7 @@ export function EmbeddedCard(props: {
                 <p class="line-clamp-4 text-sm break-words whitespace-pre-wrap text-(--ink)">
                   {/* The embed shows no note of its own, so a link to a post
                       that is not rendered here stays in the quoted text. */}
-                  {displayContent(note)}
+                  <NoteBody event={note} />
                 </p>
               </SensitiveBody>
             </div>
