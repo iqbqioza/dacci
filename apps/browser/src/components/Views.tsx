@@ -15,6 +15,7 @@ import {
 } from "../notifications-feed.js";
 import { useNotificationLive } from "../live.js";
 import { useSensitiveMode, type SensitiveMode } from "../sensitive.js";
+import { openProfileEditor } from "../profile-edit.js";
 import { useTheme, type Theme } from "../theme.js";
 import { Choices } from "./Choices.jsx";
 import { EventCard } from "./EventCard.jsx";
@@ -206,6 +207,15 @@ export function SettingsView() {
           <p class="text-sm text-(--ink-muted)">
             {method() === "nip07" ? "拡張経由でログイン中" : "nsec (セッションのみ) でログイン中"}
           </p>
+          {/* Editing the profile is here as well as on the profile page: this is where
+              a reader goes to be signed in, so it is where they look for
+              "make this mine". */}
+          <button
+            class="mt-2 mr-2 rounded-2xl border border-(--line-strong) px-4 py-2"
+            onClick={openProfileEditor}
+          >
+            プロフィールを編集
+          </button>
           <button
             class="mt-2 rounded-2xl border border-(--line-strong) px-4 py-2"
             onClick={logout}

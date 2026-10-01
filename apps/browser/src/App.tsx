@@ -49,6 +49,7 @@ import { adoptMyActivity, syncMyActivity } from "./my-actions.js";
 import { resetNotifications } from "./notifications-feed.js";
 import { resetProfileFeed, openProfile } from "./profile-feed.js";
 import { resetProfiles } from "./profile.js";
+import { ProfileEditor } from "./components/ProfileEditor.jsx";
 import { addReply, loadReplies, resetReplies, useReplies } from "./replies-feed.js";
 import { loadServers } from "./servers.js";
 import {
@@ -382,7 +383,10 @@ export function App() {
         </div>
       </Show>
 
-      {/* Transient confirmation for repost and reaction */}
+      {/* Profile editor: the reader's own NIP-01 metadata */}
+      <ProfileEditor />
+
+      {/* Transient confirmation for an action with no visible result */}
       <Show when={noticeMessage()}>
         <p class="pointer-events-none fixed bottom-6 left-1/2 z-30 -translate-x-1/2 rounded-full bg-(--chip) px-4 py-2 text-sm text-(--on-chip)">
           {noticeMessage()}

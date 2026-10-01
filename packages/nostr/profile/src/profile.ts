@@ -11,6 +11,14 @@ export interface Profile {
   picture?: string;
   nip05?: string;
   banner?: string;
+  /**
+   * The whole published object, not only the fields above.
+   *
+   * NIP-01 replaces the entire profile with each event, so a client that
+   * republished only the fields it knows would delete everything else the
+   * author had. The unknown keys have to travel with the known ones.
+   */
+  metadata: Record<string, unknown>;
 }
 
 export interface ProfileQuery {
@@ -60,6 +68,9 @@ export function parseProfile(event: NostrEvent): Profile | null {
     picture: text("picture"),
     nip05: text("nip05"),
     banner: text("banner"),
+    // The whole object travels with the parsed fields, so republishing the
+    // profile keeps whatever else the author put in it.
+    metadata: meta,
   };
 }
 
@@ -112,8 +123,37 @@ export class ProfileStore {
       : null;
   }
 
+  /**
+   * Puts an event this client published into the cache.
+   *
+   * `request()` ignores an author it already has, which is right for a stranger
+   * and wrong for the reader's own profile: the profile they just published is
+   * the newest one there is, and the header has to show it at once rather than
+   * after a reload.
+   */
+  put(event: NostrEvent): void {
+    const profile = parseProfile(event);
+    if (profile === null) return;
+    this.entries.set(profile.pubkey, { status: "loaded", profile });
+    this.notify();
+  }
+
   isLoading(pubkey: string): boolean {
     return this.entries.get(pubkey)?.status === "loading";
+  }
+
+  /**
+   * Whether an author's profile has been settled: found, or asked for and not
+   * found.
+   *
+   * This is the difference between "this person has no profile" and "this
+   * person's profile has not arrived yet", and the two must not be confused by
+   * anything that writes: publishing a profile built from a lookup that never
+   * answered would replace a real profile with an empty one.
+   */
+  resolved(pubkey: string): boolean {
+    const entry = this.entries.get(pubkey);
+    return entry !== undefined && entry.status !== "loading";
   }
 
   /**

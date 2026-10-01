@@ -33,9 +33,20 @@ const store = new ProfileStore(
 export function useProfile(pubkey: string): {
   profile: Profile | null;
   loading: boolean;
+  /**
+   * Whether this author's profile has been settled. A null profile that is
+   * resolved means the author has none; a null profile that is not resolved
+   * means it has not arrived, and writing on top of that would replace a real
+   * profile with an empty one.
+   */
+  resolved: boolean;
 } {
   version();
-  return { profile: store.peek(pubkey), loading: store.isLoading(pubkey) };
+  return {
+    profile: store.peek(pubkey),
+    loading: store.isLoading(pubkey),
+    resolved: store.resolved(pubkey),
+  };
 }
 
 /**
@@ -50,4 +61,13 @@ export function requestProfiles(pubkeys: Iterable<string>): void {
 export function resetProfiles(): void {
   store.clear();
   setVersion((v) => v + 1);
+}
+
+/**
+ * Adopts a profile this client just published. The store ignores an author it
+ * already knows, which would leave the header showing the profile the reader
+ * has just replaced.
+ */
+export function applyProfile(event: NostrEvent): void {
+  store.put(event);
 }

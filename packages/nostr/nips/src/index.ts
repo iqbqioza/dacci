@@ -25,6 +25,15 @@ export {
   parseContacts,
   withFollowed,
 } from "./contacts.js";
+export {
+  birthdayFrom,
+  birthdayTo,
+  buildMetadata,
+  METADATA_KIND,
+  parseMetadata,
+  withMetadata,
+} from "./metadata.js";
+export type { MetadataValue } from "./metadata.js";
 export { contentSegments, imagesIn, urlSpans } from "./media.js";
 export type { ContentSegment, MediaRef, UrlSpan } from "./media.js";
 export {

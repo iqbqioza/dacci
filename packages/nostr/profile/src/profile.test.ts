@@ -36,6 +36,20 @@ describe("parseProfile", () => {
     expect(profileLabel(profile)).toBe("Alice");
   });
 
+  it("keeps the fields it does not parse", () => {
+    // NIP-01 replaces the whole profile, so republishing one has to carry the
+    // rest along. A parsed profile that only holds the known fields cannot do
+    // that.
+    const event = metaEvent(
+      A,
+      JSON.stringify({ name: "alice", lud16: "alice@wallet.example" }),
+    );
+    expect(parseProfile(event)?.metadata).toEqual({
+      name: "alice",
+      lud16: "alice@wallet.example",
+    });
+  });
+
   it("rejects other kinds and broken JSON", () => {
     expect(parseProfile({ ...metaEvent(A, "{}"), kind: 1 })).toBeNull();
     expect(parseProfile(metaEvent(A, "not json"))).toBeNull();
@@ -162,5 +176,37 @@ describe("ProfileStore", () => {
     await tick(10);
     expect(query).not.toHaveBeenCalled();
     store.clear();
+  });
+
+  it("takes a profile this client published, over the one it already had", async () => {
+    // `request()` ignores an author it already knows, so the profile a reader
+    // has just replaced would stay on screen until a reload.
+    const query = vi.fn(async () => [metaEvent(A, JSON.stringify({ name: "old" }))]);
+    const store = new ProfileStore(query, { flushDelayMs: 1 });
+    store.request([A]);
+    await tick(20);
+    expect(store.peek(A)?.name).toBe("old");
+    store.put(metaEvent(A, JSON.stringify({ name: "new" }), 200));
+    expect(store.peek(A)?.name).toBe("new");
+    store.clear();
+  });
+
+  it("notifies the view when a profile is put", () => {
+    const changes: number[] = [];
+    const store = new ProfileStore(async () => [], {
+      onChange: () => changes.push(1),
+    });
+    store.put(metaEvent(A, JSON.stringify({ name: "a" })));
+    expect(changes).toHaveLength(1);
+  });
+
+  it("ignores an event that is not a profile", () => {
+    const store = new ProfileStore(async () => [], {
+      onChange: () => {
+        throw new Error("must not notify");
+      },
+    });
+    store.put({ ...metaEvent(A, "{}"), kind: 1 });
+    expect(store.peek(A)).toBeNull();
   });
 });

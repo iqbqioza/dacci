@@ -29,6 +29,11 @@ export function UploadPicker(props: {
   onError: (message: string) => void;
   /** Signed-in readers can sign the request a server expects. */
   canUpload: boolean;
+  /**
+   * What the button is uploading, for anyone who cannot see the icon. Two
+   * pickers can sit side by side, so "アイコン" says which one is which.
+   */
+  label?: string;
 }) {
   const [open, setOpen] = createSignal(false);
   const [busy, setBusy] = createSignal<string | null>(null);
@@ -180,9 +185,9 @@ export function UploadPicker(props: {
       <button
         type="button"
         class="flex size-8 items-center justify-center rounded-full text-(--ink-muted) hover:bg-(--fill-soft) hover:text-(--accent)"
-        aria-label="画像をアップロード"
+        aria-label={props.label ?? "画像をアップロード"}
         aria-expanded={open()}
-        title="画像をアップロード"
+        title={props.label ?? "画像をアップロード"}
         disabled={!props.canUpload}
         onClick={() => setOpen(!open())}
       >

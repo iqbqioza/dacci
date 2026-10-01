@@ -2,6 +2,7 @@ import { encodeNpub } from "dacci-nostr-nips";
 import { useAuth } from "../auth.jsx";
 import { useFollowState } from "../my-follows.js";
 import { useMuteState } from "../muted.js";
+import { openProfileEditor } from "../profile-edit.js";
 import { copyItem, OverflowMenu, type MenuEntry } from "./OverflowMenu.jsx";
 
 /**
@@ -18,13 +19,22 @@ export function ProfileActions(props: { pubkey: string }) {
   const mute = useMuteState(props.pubkey);
 
   const rows = (): MenuEntry[] => [
-    // Mute comes before the copies because it is the row a reader came to this
-    // page for, and the copies are a way out of the page. It is not offered on
-    // the reader's own profile: there is nothing there to mute.
+    // Editing is offered only on the reader's own profile: it publishes under
+    // their key, and there is nothing of it on anyone else's.
     ...(isSelf()
-      ? []
+      ? [
+          {
+            label: "プロフィールを編集",
+            run: () => {
+              openProfileEditor();
+              return null;
+            },
+          },
+        ]
       : [
           {
+            // Mute comes before the copies because it is the row a reader came
+            // to this page for, and the copies are a way out of the page.
             label: mute.muted() === true ? "ミュートを解除" : "ミュート",
             run: async () => {
               await mute.toggle();
