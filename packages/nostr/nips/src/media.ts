@@ -151,7 +151,7 @@ interface Found {
 function scan(event: NostrEvent): Found[] {
   const text = displayContent(event);
   const out: Found[] = [];
-  for (const match of urlsIn(text)) {
+  for (const match of urlSpans(text)) {
     const tag = imetaFor(event, match.url);
     const mime = tag?.find((entry) => entry.startsWith("m "))?.slice(2);
     const claimed = mime !== undefined && mime.startsWith("image/");
@@ -183,8 +183,21 @@ function scan(event: NostrEvent): Found[] {
   return out;
 }
 
-function urlsIn(text: string): Array<{ url: string; start: number; end: number }> {
-  const out: Array<{ url: string; start: number; end: number }> = [];
+/**
+ * Every url written in a run of text, and where it sits, with the punctuation
+ * that ends the sentence left out of the address. Exported because what counts
+ * as a url has to be one judgement: a url this misses is a link shown as plain
+ * text, and a url this wrongly takes in is an image that never appears.
+ */
+/** An address written in a run of text, and the span it covers. */
+export interface UrlSpan {
+  url: string;
+  start: number;
+  end: number;
+}
+
+export function urlSpans(text: string): UrlSpan[] {
+  const out: UrlSpan[] = [];
   const pattern = new RegExp(URL.source, "gi");
   let match = pattern.exec(text);
   while (match !== null) {

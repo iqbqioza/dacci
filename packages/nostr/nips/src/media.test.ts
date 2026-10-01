@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   contentSegments,
   imagesIn,
+  urlSpans,
   type ContentSegment,
   type NostrEvent,
 } from "./index.js";
@@ -157,5 +158,58 @@ describe("contentSegments", () => {
     ]);
     const segments = contentSegments(event);
     expect(segments.filter((s) => s.kind === "image")).toHaveLength(1);
+  });
+});
+
+describe("urlSpans", () => {
+  it("finds an address and where it sits in the text", () => {
+    expect(urlSpans("read https://x.example/paper now")).toEqual([
+      { url: "https://x.example/paper", start: 5, end: 28 },
+    ]);
+  });
+
+  it("leaves the punctuation of the sentence out of the address", () => {
+    // The full stop is the author's, not part of where the link goes.
+    expect(urlSpans("see https://x.example/paper.")[0].url).toBe(
+      "https://x.example/paper",
+    );
+    expect(urlSpans("(https://x.example/paper)")[0].url).toBe(
+      "https://x.example/paper",
+    );
+    expect(urlSpans("https://x.example/paper、です")[0].url).toBe(
+      "https://x.example/paper",
+    );
+  });
+
+  it("finds every address, in the order they were written", () => {
+    expect(urlSpans("a https://x.example/1 b https://y.example/2 c").map((s) => s.url)).toEqual([
+      "https://x.example/1",
+      "https://y.example/2",
+    ]);
+  });
+
+  it("finds an address that carries its own punctuation inside it", () => {
+    // Only the tail is the sentence's, so a query string survives.
+    expect(urlSpans("https://x.example/a?b=1&c=2.")[0].url).toBe(
+      "https://x.example/a?b=1&c=2",
+    );
+  });
+
+  it("finds an address on its own line", () => {
+    expect(urlSpans("first\nhttps://x.example/paper\nlast")[0].start).toBe(6);
+  });
+
+  it("finds nothing in text without an address", () => {
+    expect(urlSpans("nostr:" + "1".repeat(58))).toEqual([]);
+    expect(urlSpans("mailto:someone@example.com")).toEqual([]);
+  });
+
+  it("finds an http address as well as https", () => {
+    expect(urlSpans("http://x.example/p")[0].url).toBe("http://x.example/p");
+  });
+
+  it("does not stall on text with no address between two urls", () => {
+    // The scanner has to advance even when a match is empty, or this loops.
+    expect(urlSpans("https://x.example/a https://y.example/b")).toHaveLength(2);
   });
 });

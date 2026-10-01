@@ -1,7 +1,7 @@
-import type { ContentSegment, NostrEvent } from "dacci-nostr-nips";
-import { contentSegments, mentionedProfiles } from "dacci-nostr-nips";
+import type { ContentSegment, NostrEvent, UrlSpan } from "dacci-nostr-nips";
+import { contentSegments, mentionedProfiles, urlSpans } from "dacci-nostr-nips";
 import { profileLabel } from "dacci-nostr-profile";
-import { createEffect, For, Show } from "solid-js";
+import { createEffect, createMemo, For, Show } from "solid-js";
 import { shortNpub } from "../nostr.js";
 import { requestProfiles, useProfile } from "../profile.js";
 import { navigate, profileHash } from "../router.js";
@@ -47,9 +47,7 @@ export function NoteBody(props: { event: NostrEvent }) {
 }
 
 function renderSegment(segment: ContentSegment) {
-  if (segment.kind === "text") {
-    return <span class="whitespace-pre-wrap break-words">{segment.text}</span>;
-  }
+  if (segment.kind === "text") return <TextRun text={segment.text} />;
   if (segment.kind === "mention") {
     return (
       <button
@@ -71,4 +69,69 @@ function renderSegment(segment: ContentSegment) {
     );
   }
   return <NoteImage image={segment.image} />;
+}
+
+/**
+ * A run of text with the addresses in it as links.
+ *
+ * The address stays exactly as the author wrote it: an address is what a
+ * reader needs to see to decide whether to follow it, and shortening it hides
+ * where they are going. What follows it is the punctuation of the sentence, so
+ * a link at the end of a line does not swallow the full stop.
+ *
+ * What counts as an address is one judgement shared with the image scan, so a
+ * url that is an image never also shows up here as a link, and the same
+ * trailing punctuation is left out of both.
+ */
+function TextRun(props: { text: string }) {
+  const spans = (): UrlSpan[] => urlSpans(props.text);
+  // Every piece keeps the space the author wrote, including a run that is only
+  // a space, so a link never ends up glued to the word before it.
+  const pieces = createMemo(() => {
+    const found = spans();
+    if (found.length === 0) return [{ kind: "text" as const, text: props.text }];
+    const out: Array<{ kind: "text"; text: string } | { kind: "link"; url: string }> = [];
+    let cursor = 0;
+    for (const span of found) {
+      if (span.start > cursor) {
+        out.push({ kind: "text", text: props.text.slice(cursor, span.start) });
+      }
+      out.push({ kind: "link", url: span.url });
+      cursor = span.end;
+    }
+    if (cursor < props.text.length) {
+      out.push({ kind: "text", text: props.text.slice(cursor) });
+    }
+    return out;
+  });
+
+  return (
+    <span class="whitespace-pre-wrap break-words">
+      <For each={pieces()}>
+        {(piece) =>
+          piece.kind === "text" ? (
+            piece.text
+          ) : (
+            <a
+              href={piece.url}
+              // A new tab, because the address leaves Nostr entirely and a
+              // same-tab hop would have the router treat it as a route.
+              target="_blank"
+              rel="noopener noreferrer"
+              // No padding: a link sits where the address was written.
+              class="text-(--accent) hover:underline [overflow-wrap:anywhere]"
+              title={piece.url}
+              onClick={(e) => {
+                // The card opens the post, so following the address must not
+                // also navigate away from it.
+                e.stopPropagation();
+              }}
+            >
+              {piece.url}
+            </a>
+          )
+        }
+      </For>
+    </span>
+  );
 }
