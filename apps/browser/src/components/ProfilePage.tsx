@@ -25,7 +25,7 @@ const BANNER_RATIO = "aspect-[3/1]";
  * Twitter's proportions are kept, so a banner always reads the same way
  * whatever image the author chose.
  */
-export function ProfileHeader(props: { pubkey: string; compact?: boolean }) {
+export function ProfileHeader(props: { pubkey: string }) {
   const profile = () => useProfile(props.pubkey).profile;
   const follows = useFollowCount(props.pubkey);
   const banner = () => profile()?.banner ?? null;

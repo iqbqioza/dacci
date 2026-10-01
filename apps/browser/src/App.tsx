@@ -13,7 +13,8 @@ import {
 } from "solid-js";
 import { restoreSession, useAuth } from "./auth.jsx";
 import { resetEmbeds } from "./embeds.js";
-import { fetchEventById, lookupEvent } from "./event-cache.js";
+import { createDetail } from "./detail.js";
+import { fetchEventById } from "./event-cache.js";
 import {
   closeCompose,
   composeBusy,
@@ -30,7 +31,7 @@ import { ProfileAvatar, ProfileName } from "./components/ProfileAvatar.jsx";
 import { RelayDebugPanel } from "./components/RelayPanel.jsx";
 import { NetworkView } from "./components/NetworkView.jsx";
 import { EventCard } from "./components/EventCard.jsx";
-import { ProfileHeader, ProfilePage } from "./components/ProfilePage.jsx";
+import { ProfilePage } from "./components/ProfilePage.jsx";
 import { NotificationsView, SettingsView } from "./components/Views.jsx";
 import { getConnection } from "./nostr.js";
 import { noticeMessage } from "./notice.js";
@@ -384,62 +385,56 @@ function MenuContent(props: {
   );
 }
 
+/**
+ * One post on its own page. The profile page already exists, so nothing of
+ * the author's profile is repeated here: this view is the post, the quote it
+ * carries, and the actions a reader can take on it.
+ */
 function EventDetailView(props: { eventId: string; urls: string[] }) {
-  const initial = lookupEvent(props.eventId);
-  const [event, setEvent] = createSignal<NostrEvent | null>(initial);
-  const [loading, setLoading] = createSignal(initial === null);
-
-  async function resolve(id: string): Promise<void> {
-    const cached = lookupEvent(id);
-    if (cached !== null) {
-      setEvent(cached);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    const found = await fetchEventById(id, props.urls, (url, f) =>
-      getConnection(url)
-        .query(f, 6000)
-        .then((r) => (r.failed ? [] : r.events)),
-    );
-    // Ignore a completion for an id the user already navigated away from.
-    if (untrack(() => props.eventId) !== id) return;
-    setEvent(found);
-    setLoading(false);
-  }
+  // The store lives at module level so a deep link opened from a feed shows
+  // the post at once, with no request, and the detail page keeps it.
+  const detail = createDetail(
+    (id) =>
+      fetchEventById(id, untrack(() => props.urls), (url, f) =>
+        getConnection(url)
+          .query(f, 6000)
+          .then((r) => (r.failed ? [] : r.events)),
+      ),
+  );
 
   // Re-resolves when the route id changes (deep links, direct navigation).
   createEffect(() => {
     const id = props.eventId;
     if (id === "") return;
-    void resolve(id);
+    void detail.resolve(id, () => untrack(() => props.eventId) === id);
   });
 
   return (
     <div>
-      <button
-        class="m-3 rounded-2xl border border-(--dads-solid-gray-300) px-3 py-1"
-        onClick={goBackOrHome}
-      >
-        ← 戻る
-      </button>
-      <Show when={loading()}>
+      {/* The bar is pinned so a long post can be left without hunting for
+          the way back, and it carries the id a shared link is built from. */}
+      <div class="sticky top-0 z-20 flex items-center gap-2 border-b border-(--dads-solid-gray-200) bg-white px-3 py-2">
+        <button
+          class="shrink-0 rounded-2xl border border-(--dads-solid-gray-300) px-3 py-1 hover:bg-(--dads-blue-50)"
+          onClick={goBackOrHome}
+        >
+          ← 戻る
+        </button>
+        <span class="truncate font-mono text-xs text-(--dads-solid-gray-500)">
+          {props.eventId}
+        </span>
+      </div>
+      <Show when={detail.loading()}>
         <p class="px-4 py-6 text-(--dads-solid-gray-500)">読み込み中…</p>
       </Show>
-      <Show
-        when={event() ?? null}
-        fallback={
-          <p class="px-4 py-6 text-(--dads-solid-gray-500)">
-            イベントを取得できませんでした (削除済み、またはリレーに存在しません)。
-          </p>
-        }
-      >
+      <Show when={detail.failed()}>
+        <p class="px-4 py-6 text-(--dads-solid-gray-500)">
+          イベントを取得できませんでした (削除済み、またはリレーに存在しません)。
+        </p>
+      </Show>
+      <Show when={detail.event() ?? null}>
         {(found) => (
-          <div>
-            {/* The author's header, so a deep link reads like a profile. */}
-            <ProfileHeader pubkey={found().pubkey} compact />
-            <EventCard event={found()} onSelect={() => undefined} />
-          </div>
+          <EventCard event={found()} onSelect={() => undefined} detailed />
         )}
       </Show>
     </div>
