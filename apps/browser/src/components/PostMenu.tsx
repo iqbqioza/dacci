@@ -4,6 +4,7 @@ import { createSignal } from "solid-js";
 import { useAuth } from "../auth.jsx";
 import { broadcastEvent, deleteEvent } from "../compose.js";
 import { isOwn } from "../deleted.js";
+import { useMuteState } from "../muted.js";
 import { Confirm } from "./Confirm.jsx";
 import { copyItem, OverflowMenu, type MenuEntry } from "./OverflowMenu.jsx";
 
@@ -13,9 +14,10 @@ import { copyItem, OverflowMenu, type MenuEntry } from "./OverflowMenu.jsx";
  *
  * The rows are what a post is made of: its own address, the author's key, and
  * the event as it was signed, so it can be verified or re-published elsewhere.
- * Two rows act on the network rather than on the text: putting the post on the
- * reader's own relays, which is offered for anyone's post, and deleting it,
- * which is offered only for their own because it is the one that cannot be
+ * Two rows act on the network rather than on the text, and they are the
+ * mirror image of each other: muting is offered for anyone else's post, since
+ * that is how a reader meets a name they do not want to see again, while
+ * deleting is offered only for their own, because it is the one that cannot be
  * undone.
  */
 export function PostMenu(props: {
@@ -23,9 +25,11 @@ export function PostMenu(props: {
   onOpen: (event: NostrEvent) => void;
 }) {
   const self = useAuth().pubkey;
-  // A deletion request for someone else's post is not a deletion, so the row
-  // is only offered where it would actually do something.
+  // Whether this is the reader's own post, which decides two rows and no
+  // others: a deletion request naming someone else's post is not a deletion,
+  // and there is nothing of their own to mute.
   const mine = (): boolean => isOwn(props.event, self());
+  const mute = useMuteState(props.event.pubkey);
   const [asking, setAsking] = createSignal(false);
 
   const rows = (): MenuEntry[] => [
@@ -47,21 +51,41 @@ export function PostMenu(props: {
         return null;
       },
     },
+    // Muting is offered on someone else's post and not on the reader's own,
+    // because a reader meets a name they do not want to see again in a feed
+    // rather than on their own profile, and there is nothing of their own to
+    // mute. The two rows below are the mirror image: they act on the reader's
+    // own post, and only on it.
+    ...(mine()
+      ? []
+      : [
+          {
+            label: mute.muted() === true ? "ミュートを解除" : "ミュート",
+            run: async () => {
+              await mute.toggle();
+              return null;
+            },
+          },
+        ]),
     copyItem("npub をコピー", encodeNpub(props.event.pubkey)),
     copyItem("note ID をコピー", encodeNote(props.event.id)),
     copyItem("JSON をコピー", JSON.stringify(props.event)),
-    {
-      label: "削除",
-      danger: true,
-      // The menu closes first and the question opens over the page, so a
-      // reader who meant to dismiss the menu is not asked about something
-      // they did not choose.
-      run: () => {
-        setAsking(true);
-        return null;
-      },
-    },
-  ].filter((item) => item.label !== "削除" || mine());
+    ...(mine()
+      ? [
+          {
+            label: "削除",
+            danger: true,
+            // The menu closes first and the question opens over the page, so a
+            // reader who meant to dismiss the menu is not asked about
+            // something they did not choose.
+            run: () => {
+              setAsking(true);
+              return null;
+            },
+          },
+        ]
+      : []),
+  ];
 
   return (
     <>

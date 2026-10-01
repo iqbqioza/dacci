@@ -85,7 +85,10 @@ export function OverflowMenu(props: {
         …
       </button>
       <Show when={open()}>
-        <div class="absolute top-full right-0 z-20 mt-1 w-52 rounded-2xl border border-(--line) bg-(--surface) py-1 shadow-lg">
+        {/* Above the pinned tab row of a feed or a profile, which sits at
+            z-30 and would otherwise cover the rows nearest the button: the
+            menu hangs down from a header that is directly above that row. */}
+        <div class="absolute top-full right-0 z-40 mt-1 w-52 rounded-2xl border border-(--line) bg-(--surface) py-1 shadow-lg">
           <For each={props.items}>
             {(item) => (
               <button
@@ -107,7 +110,7 @@ export function OverflowMenu(props: {
         </div>
       </Show>
       <Show when={notice()}>
-        <span class="absolute top-full right-0 z-20 mt-1 w-max rounded-2xl bg-(--chip) px-3 py-1 text-xs whitespace-nowrap text-(--on-chip)">
+        <span class="absolute top-full right-0 z-40 mt-1 w-max rounded-2xl bg-(--chip) px-3 py-1 text-xs whitespace-nowrap text-(--on-chip)">
           {notice()}
         </span>
       </Show>

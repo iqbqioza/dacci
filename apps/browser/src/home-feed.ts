@@ -4,6 +4,7 @@ import { rememberEvents } from "./event-cache.js";
 import { postsForTab, type FeedTab } from "./feed-tabs.js";
 import { planFlush } from "./flush.js";
 import { clearFeedBuffer, useFeedLive } from "./live.js";
+import { isMutedAuthor } from "./muted.js";
 import { createHomeTimeline } from "./nostr.js";
 import { useFeed, useRelays } from "./relays.js";
 import { preservingViewport } from "./viewport.js";
@@ -43,11 +44,28 @@ function feedAuthorsValue(): string[] | undefined {
 
 /**
  * The tab is a view over the loaded list, not a second query: no relay can
- * filter "has no e tag", so the home feed asks for kind 1 and NIP-22
- * comments together and the split happens here.
+ * filter "has no e tag", so the home feed asks for kind 1 and NIP-22 comments
+ * together and the split happens here.
+ *
+ * The posts the home timeline shows: the tab's split, minus anyone the reader
+ * has muted.
+ *
+ * Muted authors are dropped here, and only here. NIP-51 scopes a mute to
+ * feeds, so this is the home timeline and nothing else: a reader who opens a
+ * profile or a post on purpose is not being shown something they did not ask to
+ * avoid.
  */
+export function homePostsFor(
+  events: NostrEvent[],
+  tab: FeedTab,
+  /** Asked per author, because the list behind it can still be read. */
+  isMuted: (pubkey: string) => boolean,
+): NostrEvent[] {
+  return postsForTab(events, tab).filter((event) => !isMuted(event.pubkey));
+}
+
 function visible(): NostrEvent[] {
-  return postsForTab(all(), tab());
+  return homePostsFor(all(), tab(), isMutedAuthor);
 }
 
 /** Switches tab without touching the network: the list is already there. */

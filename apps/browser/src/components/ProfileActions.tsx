@@ -1,7 +1,8 @@
 import { encodeNpub } from "dacci-nostr-nips";
 import { useAuth } from "../auth.jsx";
 import { useFollowState } from "../my-follows.js";
-import { copyItem, OverflowMenu } from "./OverflowMenu.jsx";
+import { useMuteState } from "../muted.js";
+import { copyItem, OverflowMenu, type MenuEntry } from "./OverflowMenu.jsx";
 
 /**
  * A profile's own actions, on the right of the name row: the overflow menu
@@ -14,16 +15,30 @@ import { copyItem, OverflowMenu } from "./OverflowMenu.jsx";
 export function ProfileActions(props: { pubkey: string }) {
   const self = useAuth().pubkey;
   const isSelf = (): boolean => self() !== null && self() === props.pubkey;
+  const mute = useMuteState(props.pubkey);
+
+  const rows = (): MenuEntry[] => [
+    // Mute comes before the copies because it is the row a reader came to this
+    // page for, and the copies are a way out of the page. It is not offered on
+    // the reader's own profile: there is nothing there to mute.
+    ...(isSelf()
+      ? []
+      : [
+          {
+            label: mute.muted() === true ? "ミュートを解除" : "ミュート",
+            run: async () => {
+              await mute.toggle();
+              return null;
+            },
+          },
+        ]),
+    copyItem("npub をコピー", encodeNpub(props.pubkey)),
+    copyItem("pubkey をコピー", props.pubkey),
+  ];
 
   return (
     <div class="flex items-center gap-2">
-      <OverflowMenu
-        label="プロフィールの操作"
-        items={[
-          copyItem("npub をコピー", encodeNpub(props.pubkey)),
-          copyItem("pubkey をコピー", props.pubkey),
-        ]}
-      />
+      <OverflowMenu label="プロフィールの操作" items={rows()} />
       {isSelf() ? null : <FollowButton pubkey={props.pubkey} />}
     </div>
   );

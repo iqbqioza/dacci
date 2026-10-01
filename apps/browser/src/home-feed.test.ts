@@ -1,7 +1,7 @@
 import { COMMENT_KIND, type NostrEvent } from "dacci-nostr-nips";
 import { describe, expect, it } from "vitest";
 import { postsForTab } from "./feed-tabs.jsx";
-import { selectHomeTab, useHomeFeed } from "./home-feed.js";
+import { homePostsFor, selectHomeTab, useHomeFeed } from "./home-feed.js";
 
 function note(
   id: string,
@@ -66,5 +66,35 @@ describe("home feed tab", () => {
     const feed = useHomeFeed();
     expect(feed.events()).toEqual([]);
     expect(feed.loadedCount()).toBe(0);
+  });
+});
+
+describe("who a mute keeps out of the home feed", () => {
+  const muted = (list: string[]) => (pubkey: string) => list.includes(pubkey);
+
+  it("drops a muted author's posts and keeps everyone else's", () => {
+    const events = [
+      { ...top, pubkey: TOP },
+      { ...top, id: REPLY, pubkey: "d".repeat(64) },
+    ];
+    expect(homePostsFor(events, "notes", muted(["a".repeat(64)]))).toEqual([
+      { ...top, id: REPLY, pubkey: "d".repeat(64) },
+    ]);
+  });
+
+  it("hides the muted author on both tabs", () => {
+    // NIP-51 says feeds, and both tabs of the home feed are the feed.
+    const events = [
+      { ...top, pubkey: "d".repeat(64) },
+      { ...reply, pubkey: "e".repeat(64) },
+      { ...comment, pubkey: "d".repeat(64) },
+    ];
+    expect(homePostsFor(events, "replies", muted(["d".repeat(64)]))).toEqual([
+      { ...reply, pubkey: "e".repeat(64) },
+    ]);
+  });
+
+  it("keeps every post when nobody is muted", () => {
+    expect(homePostsFor([top, reply], "replies", muted([]))).toEqual([top, reply]);
   });
 });

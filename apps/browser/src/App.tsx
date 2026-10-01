@@ -43,6 +43,7 @@ import { resetHomeFeed } from "./home-feed.js";
 import { resetFollowCounts } from "./follows.js";
 import { requestMyFollows, resetMyFollows } from "./my-follows.js";
 import { syncDeleted, isDeleted } from "./deleted.js";
+import { requestMyMutes, resetMyMutes } from "./muted.js";
 import { startLiveFeeds, watchProfileSubject } from "./live.js";
 import { adoptMyActivity, syncMyActivity } from "./my-actions.js";
 import { resetNotifications } from "./notifications-feed.js";
@@ -150,6 +151,8 @@ export function App() {
       // The reader's own follow list is read from these relays too, and it is
       // the only place a follow can be published from, so it starts over.
       resetMyFollows();
+      // Their mute list is one of those lists.
+      resetMyMutes();
       resetProfileFeed();
       resetEmbeds();
       resetReplies();
@@ -202,6 +205,8 @@ export function App() {
         // The reader's own deletions decide what a feed does not show, so they
         // are read back from the same relays on the same login.
         void syncDeleted(self);
+        // So does their NIP-51 mute list.
+        requestMyMutes();
       }
       // The follow button reads the reader's own kind 3, which is only asked
       // for once a session, so the first profile that shows one asks for it.

@@ -34,6 +34,14 @@ export {
 } from "./profile-reference.js";
 export type { ProfileMention, ProfileReference } from "./profile-reference.js";
 export {
+  buildMuteList,
+  MUTE_LIST_KIND,
+  mutedIn,
+  mutedPubkeys,
+  muteTags,
+  withMuted,
+} from "./mute-list.js";
+export {
   CONTENT_WARNING_KIND,
   contentWarning,
   hasContentWarning,
