@@ -34,8 +34,9 @@ export function EventCard(props: {
     requestEmbeds([props.event]);
   });
 
-  // A feed separates its entries with a rule; a detail page has only one
-  // entry, so the same rule closes the post instead of dividing it.
+  // A feed separates its entries with a rule. A detail page keeps it too: the
+  // post is followed by the replies heading, and its own rule is what closes
+  // the post before that heading opens the conversation.
   const surface = (): string =>
     props.detailed === true
       ? "flex gap-3 border-b border-(--dads-solid-gray-200) px-4 py-4"

@@ -23,6 +23,8 @@ import {
   composeOpen,
   composeTarget,
   openNewPost,
+  publishReply,
+  replyFailureText,
   submitCompose,
   type ComposeMode,
 } from "./compose.js";
@@ -42,6 +44,7 @@ import { adoptMyActivity, syncMyActivity } from "./my-actions.js";
 import { resetNotifications } from "./notifications-feed.js";
 import { resetProfileFeed, openProfile } from "./profile-feed.js";
 import { resetProfiles } from "./profile.js";
+import { addReply, loadReplies, resetReplies, useReplies } from "./replies-feed.js";
 import {
   initRelays,
   startAutoRefresh,
@@ -116,7 +119,8 @@ export function App() {
 
   // A new relay set can answer metadata queries the old one could not, so
   // the profile cache and its failed-user queue start over with it. The
-  // embedded notes come from the same relays, so they start over too.
+  // embedded notes and the replies come from the same relays, so they
+  // start over too.
   createEffect(() => {
     relayVersion();
     untrack(() => {
@@ -124,6 +128,7 @@ export function App() {
       resetFollowCounts();
       resetProfileFeed();
       resetEmbeds();
+      resetReplies();
     });
   });
 
@@ -234,7 +239,11 @@ export function App() {
           </Match>
           <Match when={eventRoute()}>
             {(detail) => (
-              <EventDetailView eventId={detail()} urls={readRelays()} />
+              <EventDetailView
+                eventId={detail()}
+                urls={readRelays()}
+                onSelect={openDetail}
+              />
             )}
           </Match>
         </Switch>
@@ -390,7 +399,12 @@ function MenuContent(props: {
  * the author's profile is repeated here: this view is the post, the quote it
  * carries, and the actions a reader can take on it.
  */
-function EventDetailView(props: { eventId: string; urls: string[] }) {
+function EventDetailView(props: {
+  eventId: string;
+  urls: string[];
+  /** Opens a post, so a reply in the list can be read on its own page. */
+  onSelect: (event: NostrEvent) => void;
+}) {
   // The store lives at module level so a deep link opened from a feed shows
   // the post at once, with no request, and the detail page keeps it.
   const detail = createDetail(
@@ -407,6 +421,16 @@ function EventDetailView(props: { eventId: string; urls: string[] }) {
     const id = props.eventId;
     if (id === "") return;
     void detail.resolve(id, () => untrack(() => props.eventId) === id);
+  });
+
+  // The answers are looked up under the post being shown, so the list always
+  // belongs to the post on screen.
+  const replyState = () => useReplies(props.eventId);
+
+  createEffect(() => {
+    const found = detail.event();
+    if (found === null) return;
+    void loadReplies(found.id);
   });
 
   return (
@@ -437,6 +461,122 @@ function EventDetailView(props: { eventId: string; urls: string[] }) {
           <EventCard event={found()} onSelect={() => undefined} detailed />
         )}
       </Show>
+      {/* The direct answers, in the same card a feed uses, so a reply reads
+          exactly as it would anywhere else in the app. */}
+      <Show when={detail.event() ?? null} keyed>
+        {(found) => (
+          <RepliesOf
+            postId={found.id}
+            target={found}
+            onSelect={props.onSelect}
+          />
+        )}
+      </Show>
     </div>
+  );
+}
+
+/**
+ * The posts answering one post, below it. A NIP-10 reply and a NIP-22
+ * comment are both answers, so both kinds appear here in the same order the
+ * conversation happened.
+ */
+/**
+ * The reply box under a post. It replaces a heading here because a reader
+ * looking at a conversation is usually the one about to join it, and the
+ * form says how many answers already exist without needing a label.
+ */
+function ReplyForm(props: { target: NostrEvent }) {
+  const { pubkey } = useAuth();
+  const [draft, setDraft] = createSignal("");
+  const [busy, setBusy] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
+  const count = () => useReplies(props.target.id).events().length;
+
+  async function submit(event: SubmitEvent): Promise<void> {
+    event.preventDefault();
+    if (busy() || draft().trim() === "") return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await publishReply(props.target, draft());
+      if ("failure" in result) {
+        setError(replyFailureText(result.failure));
+        return;
+      }
+      // Show it straight away rather than waiting for a relay to echo it.
+      addReply(result.sent);
+      setDraft("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "送信に失敗しました");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form
+      class="border-b border-(--dads-solid-gray-200) px-4 py-3"
+      onSubmit={(e) => void submit(e)}
+    >
+      <textarea
+        class="w-full rounded-2xl border border-(--dads-solid-gray-300) p-2"
+        rows={2}
+        placeholder={
+          pubkey() === null
+            ? "リプライするにはログインしてください (Settings)"
+            : "リプライを入力"
+        }
+        disabled={pubkey() === null || busy()}
+        value={draft()}
+        onInput={(e) => setDraft(e.currentTarget.value)}
+      />
+      <div class="mt-2 flex items-center justify-between gap-2">
+        <span class="text-xs text-(--dads-solid-gray-500)">
+          {count() > 0 ? `リプライ ${count()}` : "まだリプライはありません"}
+        </span>
+        <button
+          type="submit"
+          class="rounded-2xl bg-(--dads-blue-700) px-4 py-1.5 text-sm text-white disabled:opacity-50"
+          disabled={pubkey() === null || busy() || draft().trim() === ""}
+        >
+          {busy() ? "送信中…" : "リプライ"}
+        </button>
+      </div>
+      <Show when={error()}>
+        {(message) => (
+          <p class="mt-1 text-sm text-(--dads-red-600)">{message()}</p>
+        )}
+      </Show>
+    </form>
+  );
+}
+
+function RepliesOf(props: {
+  postId: string;
+  /** The post being answered, which the form replies to. */
+  target: NostrEvent;
+  onSelect: (event: NostrEvent) => void;
+}) {
+  const state = () => useReplies(props.postId);
+  const answers = () => state().events();
+
+  return (
+    <section>
+      {/* The post above closes with its own rule, so the form below opens
+          the conversation with one of its own. */}
+      <ReplyForm target={props.target} />
+      <Show when={state().loading()}>
+        <p class="px-4 py-4 text-(--dads-solid-gray-500)">リプライを読み込み中…</p>
+      </Show>
+      <Show when={!state().loading() && state().searched() && answers().length === 0}>
+        <p class="px-4 py-4 text-(--dads-solid-gray-500)">
+          この投稿へのリプライはまだありません。
+        </p>
+      </Show>
+      <For each={answers()}>
+        {(event) => <EventCard event={event} onSelect={props.onSelect} />}
+      </For>
+    </section>
   );
 }

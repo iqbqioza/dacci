@@ -89,24 +89,32 @@ function isHex64(value: string | undefined): value is string {
 /** How long one relay may take before the publish moves on without it. */
 const PUBLISH_TIMEOUT_MS = 5000;
 
+/** Why a publish did not go out, so the caller can say which it was. */
+export type PublishFailure = "no-signer" | "no-relay" | "rejected" | "empty";
+
 /** Signs and broadcasts to every relay, then caches for deep links. */
-async function publish(template: {
-  pubkey: string;
-  created_at: number;
-  kind: number;
-  tags: string[][];
-  content: string;
-}): Promise<NostrEvent | null> {
+async function publish(
+  template: {
+    pubkey: string;
+    created_at: number;
+    kind: number;
+    tags: string[][];
+    content: string;
+  },
+  /** Set by the dialog only; a form reports the reason itself. */
+  reportError: (reason: PublishFailure) => void = (reason) =>
+    setError(FAILURE_TEXT[reason]),
+): Promise<NostrEvent | null> {
   const signer = getSigner();
   if (signer === null) {
-    setError("ログインが必要です (Settings)");
+    reportError("no-signer");
     return null;
   }
   const event = await signer.signEvent(template);
   // Only relays marked for writing receive what the reader publishes.
   const urls = useRelays().writeRelays();
   if (urls.length === 0) {
-    setError("書き込むリレーがありません (Network)");
+    reportError("no-relay");
     return null;
   }
   const settled = await Promise.allSettled(
@@ -132,14 +140,66 @@ async function publish(template: {
   });
   rememberEvents([event]);
   if (accepted === 0) {
-    setError("リレーに拒否されました");
+    reportError("rejected");
     return null;
   }
   return event;
 }
 
+const FAILURE_TEXT: Record<PublishFailure, string> = {
+  "no-signer": "ログインが必要です (Settings)",
+  "no-relay": "書き込むリレーがありません (Network)",
+  rejected: "リレーに拒否されました",
+  empty: "本文を入力してください",
+};
+
 function now(): number {
   return Math.floor(Date.now() / 1000);
+}
+
+/** The thread root of a post, for a reply sent from a form. */
+function rootForReply(target: NostrEvent): NostrEvent | null {
+  const marker = target.tags.find(
+    (tag) => tag[0] === "e" && tag[3] === "root" && isHex64(tag[1]),
+  );
+  if (marker === undefined || marker[1] === target.id) return null;
+  return lookupEvent(marker[1]);
+}
+
+/**
+ * Publishes a NIP-10 reply to one post, from the reply form on a detail
+ * page. The dialog does the same work, but it owns modal state, so a form
+ * cannot go through it. The reason is returned instead of being written to
+ * the dialog's error line, which the form renders itself.
+ */
+export async function publishReply(
+  target: NostrEvent,
+  text: string,
+): Promise<{ sent: NostrEvent } | { failure: PublishFailure }> {
+  const pubkey = useAuth().pubkey();
+  const body = text.trim();
+  if (pubkey === null) return { failure: "no-signer" };
+  if (body === "") return { failure: "empty" };
+  const sent = await publish(
+    buildReply({
+      pubkey,
+      target,
+      root: rootForReply(target),
+      text: body,
+      createdAt: now(),
+    }),
+    () => undefined,
+  );
+  if (sent === null) return { failure: "rejected" };
+  // Remember the action, so the post's row shows it was answered.
+  markReplied(target.id);
+  showNotice("リプライしました");
+  return { sent };
+}
+
+/** Message for a failure the reply form has to show. */
+export function replyFailureText(reason: PublishFailure): string {
+  return FAILURE_TEXT[reason];
 }
 
 /** Publishes the dialog's text as a note, a reply or a quote repost. */

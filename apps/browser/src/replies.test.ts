@@ -1,0 +1,169 @@
+import { COMMENT_KIND, type NostrEvent } from "dacci-nostr-nips";
+import { describe, expect, it } from "vitest";
+import { directReplies, isDirectReply, commentReplyParent, replyParent } from "./replies.js";
+
+function post(
+  id: string,
+  tags: string[][] = [],
+  kind = 1,
+  createdAt = 1000,
+): NostrEvent {
+  return {
+    id,
+    pubkey: "a".repeat(64),
+    created_at: createdAt,
+    kind,
+    tags,
+    content: "x",
+    sig: "s".repeat(128),
+  };
+}
+
+const ROOT = "1".repeat(64);
+const MIDDLE = "2".repeat(64);
+const LEAF = "3".repeat(64);
+
+describe("replyParent", () => {
+  it("reads the NIP-10 reply marker as the direct parent", () => {
+    const reply = post(MIDDLE, [
+      ["e", ROOT, "", "a".repeat(64), "root"],
+      ["e", LEAF, "", "a".repeat(64), "reply"],
+    ]);
+    expect(replyParent(reply)).toBe(LEAF);
+  });
+
+  it("treats a lone root marker as answering the root directly", () => {
+    // NIP-10 prescribes exactly this for a top-level reply.
+    const reply = post(MIDDLE, [["e", ROOT, "", "a".repeat(64), "root"]]);
+    expect(replyParent(reply)).toBe(ROOT);
+  });
+
+  it("falls back to the last tag for the deprecated positional form", () => {
+    const reply = post(MIDDLE, [
+      ["e", ROOT],
+      ["e", LEAF],
+    ]);
+    expect(replyParent(reply)).toBe(LEAF);
+  });
+
+  it("reports nothing for a post that answers no one", () => {
+    expect(replyParent(post(MIDDLE))).toBeNull();
+    expect(replyParent(post(MIDDLE, [["p", "a".repeat(64)]]))).toBeNull();
+  });
+
+  it("ignores an e tag that is not an event id", () => {
+    // A quote or an address is not a parent, so it must not be read as one.
+    const reply = post(MIDDLE, [["e", "30023:abc:slug"]]);
+    expect(replyParent(reply)).toBeNull();
+  });
+});
+
+describe("isDirectReply", () => {
+  it("accepts a NIP-10 reply to the post", () => {
+    expect(
+      isDirectReply(
+        post(MIDDLE, [["e", ROOT, "", "a".repeat(64), "reply"]]),
+        ROOT,
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts a NIP-22 comment answering the post", () => {
+    const comment = post(
+      MIDDLE,
+      [
+        ["E", ROOT, "", "a".repeat(64)],
+        ["K", "1"],
+        ["P", "a".repeat(64)],
+        ["e", ROOT, "", "a".repeat(64)],
+        ["k", "1"],
+        ["p", "a".repeat(64)],
+      ],
+      COMMENT_KIND,
+    );
+    expect(isDirectReply(comment, ROOT)).toBe(true);
+  });
+
+  it("rejects a reply that answers a deeper post, not this one", () => {
+    // The thread root is named, but the reply answers the middle post.
+    const reply = post(LEAF, [
+      ["e", ROOT, "", "a".repeat(64), "root"],
+      ["e", MIDDLE, "", "a".repeat(64), "reply"],
+    ]);
+    expect(isDirectReply(reply, ROOT)).toBe(false);
+    expect(isDirectReply(reply, MIDDLE)).toBe(true);
+  });
+
+  it("never counts a post as its own reply", () => {
+    expect(isDirectReply(post(ROOT, [["e", ROOT, "", "x", "reply"]]), ROOT)).toBe(
+      false,
+    );
+  });
+
+  it("does not read a NIP-10 reply as a NIP-22 comment", () => {
+    // A reply's `root` marker is lowercase e, not a NIP-22 scope tag. If it
+    // were read as a comment parent, the whole thread would hang off the
+    // top post instead of sitting under the post it answers.
+    const reply = post(MIDDLE, [
+      ["e", ROOT, "", "x", "root"],
+      ["e", LEAF, "", "x", "reply"],
+    ]);
+    expect(commentReplyParent(reply)).toBeNull();
+  });
+
+  it("leaves a NIP-22 comment scoped to an address without a parent", () => {
+    // An `A` scope names an address, so no event answers this comment.
+    const comment = post(
+      MIDDLE,
+      [
+        ["A", "30023:3c98:slug"],
+        ["K", "30023"],
+        ["a", "30023:3c98:slug"],
+        ["k", "30023"],
+      ],
+      COMMENT_KIND,
+    );
+    expect(isDirectReply(comment, ROOT)).toBe(false);
+  });
+
+  it("ignores posts that are neither kind 1 nor NIP-22", () => {
+    // A repost points at a post with an e tag but is not an answer to it.
+    const repost = post(MIDDLE, [["e", ROOT]], 6);
+    expect(isDirectReply(repost, ROOT)).toBe(false);
+  });
+});
+
+describe("directReplies", () => {
+  const toRoot = post("4".repeat(64), [["e", ROOT, "", "x", "reply"]], 1, 300);
+  const older = post("5".repeat(64), [["e", ROOT, "", "x", "reply"]], 1, 100);
+  const newer = post("6".repeat(64), [["e", ROOT, "", "x", "reply"]], 1, 200);
+  const deeper = post("7".repeat(64), [
+    ["e", ROOT, "", "x", "root"],
+    ["e", MIDDLE, "", "x", "reply"],
+  ], 1, 150);
+
+  it("keeps only the direct answers, oldest first", () => {
+    const result = directReplies([newer, deeper, toRoot, older], ROOT);
+    expect(result.map((e) => e.id)).toEqual([older.id, newer.id, toRoot.id]);
+  });
+
+  it("returns nothing when the post has no answers", () => {
+    expect(directReplies([post("8".repeat(64))], ROOT)).toEqual([]);
+  });
+
+  it("orders a comment among the replies by time, not by kind", () => {
+    const comment = post(
+      "9".repeat(64),
+      [
+        ["E", ROOT, "", "x"],
+        ["K", "1"],
+        ["e", ROOT, "", "x"],
+        ["k", "1"],
+      ],
+      COMMENT_KIND,
+      150,
+    );
+    const result = directReplies([older, comment, newer], ROOT);
+    expect(result.map((e) => e.id)).toEqual([older.id, comment.id, newer.id]);
+  });
+});
