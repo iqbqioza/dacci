@@ -32,6 +32,7 @@ import { HomeTimeline } from "./components/HomeTimeline.jsx";
 import { ProfileAvatar, ProfileName } from "./components/ProfileAvatar.jsx";
 import { RelayDebugPanel } from "./components/RelayPanel.jsx";
 import { NetworkView } from "./components/NetworkView.jsx";
+import { PageBar } from "./components/PageBar.jsx";
 import { EventCard } from "./components/EventCard.jsx";
 import { ProfilePage } from "./components/ProfilePage.jsx";
 import { UploadPicker } from "./components/UploadPicker.jsx";
@@ -59,6 +60,7 @@ import {
   goBackOrHome,
   navigate,
   parseHash,
+  profileHash,
   subscribeRoute,
   type Menu,
   type Route,
@@ -76,11 +78,20 @@ const COMPOSE_TITLES: Record<ComposeMode, string> = {
   quote: "引用付きリポスト",
 };
 
-const MENU_LABELS: Array<{ menu: Menu; label: string }> = [
-  { menu: "home", label: "Home" },
-  { menu: "notifications", label: "Notification" },
-  { menu: "network", label: "Network" },
-  { menu: "settings", label: "Settings" },
+/**
+ * The menu, in the order it is shown. Profile sits with the other personal
+ * views rather than in a list of feeds, because it opens a profile page: the
+ * reader's own is addressed the same way anyone else's is, so a link copied
+ * out of the address bar works for whoever opens it.
+ */
+type MenuItem = { label: string; menu: Menu } | { label: string; profile: true };
+
+const MENU_ITEMS: MenuItem[] = [
+  { label: "Home", menu: "home" },
+  { label: "Notification", menu: "notifications" },
+  { label: "Profile", profile: true },
+  { label: "Network", menu: "network" },
+  { label: "Settings", menu: "settings" },
 ];
 
 export function App() {
@@ -188,6 +199,25 @@ export function App() {
     navigate(`#/${menu}`);
   }
 
+  /**
+   * The reader's own profile. A session gives a pubkey to name it by, so the
+   * URL is the same `#/profile/<pubkey>` the feed links to for anyone else;
+   * without one there is nothing to put there, and the short form says to
+   * sign in instead.
+   */
+  function openSelfProfile(): void {
+    const self = pubkey();
+    navigate(self === null ? "#/profile" : profileHash(self));
+  }
+
+  function openItem(item: MenuItem): void {
+    if ("profile" in item) {
+      openSelfProfile();
+      return;
+    }
+    openMenu(item.menu);
+  }
+
   function openDetail(event: NostrEvent): void {
     navigate(`#/event/${event.id}`);
   }
@@ -203,18 +233,15 @@ export function App() {
       <nav class="sticky top-0 h-screen w-48 shrink-0 overflow-y-auto border-r border-(--dads-solid-gray-200) p-3">
         <h1 class="px-2 py-2 text-xl font-bold text-(--dads-blue-700)">Dacci</h1>
         <ul>
-          <For each={MENU_LABELS}>
+          <For each={MENU_ITEMS}>
             {(item) => (
               <li>
                 <button
                   class="w-full rounded-2xl px-3 py-2 text-left hover:bg-(--dads-blue-50)"
                   classList={{
-                    "bg-(--dads-blue-50) font-bold": isMenuActive(
-                      route(),
-                      item.menu,
-                    ),
+                    "bg-(--dads-blue-50) font-bold": isItemActive(route(), item),
                   }}
-                  onClick={() => openMenu(item.menu)}
+                  onClick={() => openItem(item)}
                 >
                   {item.label}
                 </button>
@@ -347,6 +374,14 @@ function isMenuActive(route: Route, menu: Menu): boolean {
   return route.name === "menu" && route.menu === menu;
 }
 
+/**
+ * True while the item is what the URL is showing. The profile item is lit for
+ * any profile page, since the menu has no way to say whose profile it opened.
+ */
+function isItemActive(route: Route, item: MenuItem): boolean {
+  return "profile" in item ? route.name === "profile" : isMenuActive(route, item.menu);
+}
+
 // Match needs accessors, so the discriminated union is projected into
 // optional accessors that narrow cleanly under TS.
 function projectRoute(route: () => Route): {
@@ -386,6 +421,13 @@ function projectRoute(route: () => Route): {
   };
 }
 
+/**
+ * A feed or a page from the menu. Home is the app itself, so it has no bar and
+ * nowhere to go back to. Every other page carries one, the way a note and a
+ * profile do, and names itself there so the address can be copied from
+ * wherever the reader is. Notifications cannot hand over the bar it pins
+ * itself, so that one lets this bar scroll away rather than cover it.
+ */
 function MenuContent(props: {
   menu: Menu;
   /** The tab the URL selects. */
@@ -393,20 +435,30 @@ function MenuContent(props: {
   onSelect: (event: NostrEvent) => void;
 }) {
   return (
-    <Switch>
-      <Match when={props.menu === "home"}>
-        <HomeTimeline replies={props.replies} onSelect={props.onSelect} />
-      </Match>
-      <Match when={props.menu === "notifications"}>
-        <NotificationsView onSelect={props.onSelect} />
-      </Match>
-      <Match when={props.menu === "network"}>
-        <NetworkView />
-      </Match>
-      <Match when={props.menu === "settings"}>
-        <SettingsView />
-      </Match>
-    </Switch>
+    <Show
+      when={props.menu === "home" ? null : props.menu}
+      fallback={<HomeTimeline replies={props.replies} onSelect={props.onSelect} />}
+    >
+      {(menu) => (
+        <div>
+          <PageBar
+            id={`#/${menu()}`}
+            sticky={menu() !== "notifications"}
+          />
+          <Switch>
+            <Match when={menu() === "notifications"}>
+              <NotificationsView onSelect={props.onSelect} />
+            </Match>
+            <Match when={menu() === "network"}>
+              <NetworkView />
+            </Match>
+            <Match when={menu() === "settings"}>
+              <SettingsView />
+            </Match>
+          </Switch>
+        </div>
+      )}
+    </Show>
   );
 }
 
@@ -453,17 +505,7 @@ function EventDetailView(props: {
     <div>
       {/* The bar is pinned so a long post can be left without hunting for
           the way back, and it carries the id a shared link is built from. */}
-      <div class="sticky top-0 z-20 flex items-center gap-2 border-b border-(--dads-solid-gray-200) bg-white px-3 py-2">
-        <button
-          class="shrink-0 rounded-2xl border border-(--dads-solid-gray-300) px-3 py-1 hover:bg-(--dads-blue-50)"
-          onClick={goBackOrHome}
-        >
-          ← 戻る
-        </button>
-        <span class="truncate font-mono text-xs text-(--dads-solid-gray-500)">
-          {props.eventId}
-        </span>
-      </div>
+      <PageBar id={props.eventId} />
       <Show when={detail.loading()}>
         <p class="px-4 py-6 text-(--dads-solid-gray-500)">読み込み中…</p>
       </Show>

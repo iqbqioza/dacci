@@ -3,6 +3,7 @@ import { CONTACTS_KIND, encodeNpub, parseContacts } from "dacci-nostr-nips";
 import { createEffect, For, onMount, Show, untrack } from "solid-js";
 import { useAuth } from "../auth.jsx";
 import { EventCard } from "./EventCard.jsx";
+import { PageBar } from "./PageBar.jsx";
 import { ProfileAvatar, ProfileName } from "./ProfileAvatar.jsx";
 import { FeedTabs, type FeedTab } from "../feed-tabs.jsx";
 import {
@@ -154,6 +155,10 @@ export function ProfilePage(props: {
     >
       {(author) => (
         <div>
+          {/* The bar names the profile in the address bar, the way a note's
+              does. The tab row below pins itself, so this one scrolls away
+              rather than the two covering each other. */}
+          <PageBar id={author()} sticky={false} />
           <ProfileHeader pubkey={author()} />
           <div ref={feed.setHeaderRef} class="sticky top-0 z-20 bg-white">
             <FeedTabs tab={feed.tab()} onSelect={onTab} />
