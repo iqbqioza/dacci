@@ -64,6 +64,7 @@ export {
   buildReply,
   buildRepost,
   COMMENT_KIND,
+  deletedEventIds,
   DELETION_KIND,
   embeddedEventId,
   embeddedNote,

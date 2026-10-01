@@ -261,11 +261,13 @@ function targets(event: NostrEvent): string[] {
 }
 
 /**
- * Folds one author's own events (kinds 1, 5, 6, 7) into per-post state, so a
- * reload can rebuild exactly what the reader has already done. NIP-09
- * deletions win over the actions they delete.
+ * The event ids a reader's own NIP-09 deletions name.
+ *
+ * A deletion request does not remove anything on its own: relays that honour
+ * NIP-09 drop the event, and the rest never send it again. A client that shows
+ * what it loaded has to apply the deletions itself, which is what this is for.
  */
-export function summarizeMyActivity(events: NostrEvent[]): MyActivityMap {
+export function deletedEventIds(events: NostrEvent[]): Set<string> {
   const deleted = new Set<string>();
   for (const event of events) {
     if (event.kind !== DELETION_KIND) continue;
@@ -273,6 +275,16 @@ export function summarizeMyActivity(events: NostrEvent[]): MyActivityMap {
     // tags, so every referenced id counts as removed.
     for (const id of targets(event)) deleted.add(id);
   }
+  return deleted;
+}
+
+/**
+ * Folds one author's own events (kinds 1, 5, 6, 7) into per-post state, so a
+ * reload can rebuild exactly what the reader has already done. NIP-09
+ * deletions win over the actions they delete.
+ */
+export function summarizeMyActivity(events: NostrEvent[]): MyActivityMap {
+  const deleted = deletedEventIds(events);
 
   const map: MyActivityMap = new Map();
   const entry = (target: string): MyActivity => {

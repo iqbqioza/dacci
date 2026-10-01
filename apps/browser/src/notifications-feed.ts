@@ -1,6 +1,7 @@
 import type { NostrEvent } from "dacci-nostr-nips";
 import { compareEvents } from "dacci-nostr-nips";
 import { createSignal } from "solid-js";
+import { withoutDeleted } from "./deleted.js";
 import { rememberEvents } from "./event-cache.js";
 import { planFlush } from "./flush.js";
 import {
@@ -33,7 +34,8 @@ let loadedFor: string | null = null;
 
 export function useNotifications() {
   return {
-    events,
+    /** What the reader has not deleted, which is not everything that loaded. */
+    events: () => withoutDeleted(events()),
     loading,
     loadingMore,
     coverage,

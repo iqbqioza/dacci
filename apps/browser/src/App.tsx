@@ -42,6 +42,7 @@ import { noticeMessage } from "./notice.js";
 import { resetHomeFeed } from "./home-feed.js";
 import { resetFollowCounts } from "./follows.js";
 import { requestMyFollows, resetMyFollows } from "./my-follows.js";
+import { syncDeleted, isDeleted } from "./deleted.js";
 import { startLiveFeeds, watchProfileSubject } from "./live.js";
 import { adoptMyActivity, syncMyActivity } from "./my-actions.js";
 import { resetNotifications } from "./notifications-feed.js";
@@ -194,8 +195,14 @@ export function App() {
       resetNotifications();
       // Action highlights are personal, and the relays are the source of
       // truth for what this key has already done.
-      adoptMyActivity(pubkey());
-      if (pubkey() !== null) void syncMyActivity();
+      const self = pubkey();
+      adoptMyActivity(self);
+      if (self !== null) {
+        void syncMyActivity();
+        // The reader's own deletions decide what a feed does not show, so they
+        // are read back from the same relays on the same login.
+        void syncDeleted(self);
+      }
       // The follow button reads the reader's own kind 3, which is only asked
       // for once a session, so the first profile that shows one asks for it.
       if (pubkey() !== null) requestMyFollows();
@@ -497,6 +504,9 @@ function EventDetailView(props: {
   // The answers are looked up under the post being shown, so the list always
   // belongs to the post on screen.
   const replyState = () => useReplies(props.eventId);
+  // A deletion request is the reader's own, so the page knows it even when a
+  // relay would still hand the post back.
+  const gone = (): boolean => isDeleted(props.eventId);
 
   createEffect(() => {
     const found = detail.event();
@@ -517,14 +527,21 @@ function EventDetailView(props: {
           イベントを取得できませんでした (削除済み、またはリレーに存在しません)。
         </p>
       </Show>
-      <Show when={detail.event() ?? null}>
+      {/* A post the reader deleted is gone from the cache and from the feed, so
+          its own page says so rather than showing it one more time. */}
+      <Show when={gone()}>
+        <p class="px-4 py-6 text-(--ink-muted)">
+          この投稿は削除されました。
+        </p>
+      </Show>
+      <Show when={gone() ? null : (detail.event() ?? null)}>
         {(found) => (
           <EventCard event={found()} onSelect={() => undefined} detailed />
         )}
       </Show>
       {/* The direct answers, in the same card a feed uses, so a reply reads
           exactly as it would anywhere else in the app. */}
-      <Show when={detail.event() ?? null} keyed>
+      <Show when={gone() ? null : (detail.event() ?? null)} keyed>
         {(found) => (
           <RepliesOf
             postId={found.id}

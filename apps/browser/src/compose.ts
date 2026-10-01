@@ -10,6 +10,7 @@ import {
 } from "dacci-nostr-nips";
 import { createSignal } from "solid-js";
 import { getSigner, useAuth } from "./auth.jsx";
+import { isOwn, markDeleted } from "./deleted.js";
 import { lookupEvent, rememberEvents } from "./event-cache.js";
 import { showNotice } from "./notice.js";
 import { getConnection } from "./nostr.js";
@@ -295,6 +296,56 @@ export async function toggleRepost(event: NostrEvent): Promise<boolean> {
     if (existing === undefined) markReposted(event.id, sent.id);
     else clearReposted(event.id);
     showNotice(existing === undefined ? "リポストしました" : "リポストを取り消しました");
+    return true;
+  } finally {
+    setBusy(false);
+  }
+}
+
+/**
+ * NIP-09 deletion of the reader's own post.
+ *
+ * A deletion request is a request, not a removal: the event stays in the
+ * relays that do not honour NIP-09, and every client has to apply it. So the
+ * post is taken off this screen the moment the request is out, and the request
+ * itself is remembered as one of the reader's own events, which is what a
+ * reload rebuilds from.
+ */
+export async function deleteEvent(event: NostrEvent): Promise<boolean> {
+  const pubkey = useAuth().pubkey();
+  if (pubkey === null) {
+    showNotice("削除するにはログインしてください");
+    return false;
+  }
+  if (!isOwn(event, pubkey)) {
+    // A deletion request for someone else's post is not a deletion, it is a
+    // claim, and no relay will act on it.
+    showNotice("自分の投稿だけを削除できます");
+    return false;
+  }
+  setBusy(true);
+  try {
+    const sent = await publishEvent(
+      buildDeletion({
+        pubkey,
+        eventIds: [event.id],
+        // NIP-09 lets `k` name the kinds the request covers, which is what a
+        // relay uses to decide whether it may drop the event.
+        kinds: [event.kind],
+        createdAt: now(),
+      }),
+    );
+    if (sent === null) {
+      showNotice("削除に失敗しました");
+      return false;
+    }
+    // The post is gone from every list the app shows before any of them has
+    // been refetched, so the reader sees the result of what they just did.
+    markDeleted([event.id]);
+    // The request is the reader's own event, so a reload finds it again and
+    // keeps the post out of sight without the reader doing anything.
+    showNotice("削除しました");
+    showNotice("削除しました");
     return true;
   } finally {
     setBusy(false);

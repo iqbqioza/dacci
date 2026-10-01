@@ -197,6 +197,8 @@ body {
   --accent-ink: var(--dads-blue-800);
 
   --danger: var(--dads-red-600);
+  --on-danger: #ffffff;
+  --danger-soft: var(--dads-red-50);
   --warn: var(--dads-yellow-600);
   --warn-strong: var(--dads-yellow-800);
   --warn-soft: var(--dads-yellow-50);
@@ -230,6 +232,8 @@ body {
   --accent-ink: color-mix(in srgb, #0017c1 30%, white);
 
   --danger: color-mix(in srgb, #d11a2a 45%, white);
+  --on-danger: color-mix(in srgb, #d11a2a 30%, black);
+  --danger-soft: color-mix(in srgb, #d11a2a 18%, #111111);
   --warn: color-mix(in srgb, #c9a100 55%, white);
   --warn-strong: color-mix(in srgb, #c9a100 35%, white);
   --warn-soft: color-mix(in srgb, #c9a100 18%, #111111);

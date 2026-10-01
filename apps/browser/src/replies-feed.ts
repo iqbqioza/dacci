@@ -3,6 +3,7 @@ import { createSignal } from "solid-js";
 import { rememberEvents } from "./event-cache.js";
 import { getConnection } from "./nostr.js";
 import { commentReplyParent, directReplies, replyParent } from "./replies.js";
+import { withoutDeleted } from "./deleted.js";
 import { useRelays } from "./relays.js";
 
 /**
@@ -82,7 +83,9 @@ export function useReplies(postId: string): {
   searched: () => boolean;
 } {
   return {
-    events: () => replies().get(postId) ?? [],
+    // An answer the reader deleted is not an answer any more, so the thread is
+    // read through the deletions rather than straight from the cache.
+    events: () => withoutDeleted(replies().get(postId) ?? []),
     loading,
     searched,
   };

@@ -24,6 +24,12 @@ export interface MenuEntry {
    * what a copy reports; `null` means the row had nothing to report.
    */
   run: () => string | null | Promise<string | null>;
+  /**
+   * The row takes something away. It is marked in the danger colour rather
+   * than separated by a rule, because a row that cannot be undone should not
+   * read like the copies above it.
+   */
+  danger?: boolean;
 }
 
 export function OverflowMenu(props: {
@@ -84,8 +90,12 @@ export function OverflowMenu(props: {
             {(item) => (
               <button
                 type="button"
-                class="block w-full px-4 py-2 text-left text-sm hover:bg-(--accent-soft)"
-              onClick={(e) => {
+                class={`block w-full px-4 py-2 text-left text-sm ${
+                  item.danger === true
+                    ? "text-(--danger) hover:bg-(--danger-soft)"
+                    : "hover:bg-(--accent-soft)"
+                }`}
+                onClick={(e) => {
                   e.stopPropagation();
                   void select(item);
                 }}

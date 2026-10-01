@@ -1,6 +1,7 @@
 import type { NostrEvent } from "dacci-nostr-nips";
 import { isComment } from "dacci-nostr-nips";
 import { For } from "solid-js";
+import { withoutDeleted } from "./deleted.js";
 
 /** The two tabs a feed offers, as Twitter does. */
 export type FeedTab = "notes" | "replies";
@@ -45,13 +46,17 @@ export function classifyFeedPost(event: NostrEvent): FeedPostKind {
  * The posts a tab shows, from everything the feed has loaded. No relay can
  * filter "has no e tag", so both tabs read the same events and the split
  * happens here instead of costing a second request.
+ *
+ * Deleted posts are dropped here rather than in each feed, so a post the reader
+ * deleted in another tab is gone from every tab and every feed at once.
  */
 export function postsForTab(
   events: NostrEvent[],
   tab: FeedTab,
 ): NostrEvent[] {
-  if (tab === "replies") return events;
-  return events.filter((event) => classifyFeedPost(event) === "note");
+  const shown = withoutDeleted(events);
+  if (tab === "replies") return shown;
+  return shown.filter((event) => classifyFeedPost(event) === "note");
 }
 
 const TABS: Array<{ id: FeedTab; label: string }> = [

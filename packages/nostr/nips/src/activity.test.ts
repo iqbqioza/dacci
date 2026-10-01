@@ -10,6 +10,7 @@ import {
   buildReaction,
   buildReply,
   buildRepost,
+  deletedEventIds,
   mentionedPubkeys,
   quotedEventId,
   quoteTag,
@@ -248,6 +249,47 @@ describe("buildDeletion", () => {
       createdAt: AT,
     });
     expect(event.tags).toEqual([["e", "d".repeat(64)]]);
+  });
+});
+
+describe("deletedEventIds", () => {
+  const one = "1".repeat(64);
+  const two = "2".repeat(64);
+
+  it("names every event a deletion request references", () => {
+    // A request removes nothing by itself: relays that honour NIP-09 drop the
+    // event, and the client has to take it off screen itself.
+    const events = [
+      note(one, AUTHOR),
+      signed(5, ME, [["e", one]], 2000),
+    ];
+    expect([...deletedEventIds(events)]).toEqual([one]);
+  });
+
+  it("counts every referenced id even when k narrows the kinds", () => {
+    // Relays index the `e` tags and ignore `k` when deciding what is gone, so
+    // a client reading the same way does not show a post a relay has dropped.
+    const events = [
+      note(one, AUTHOR),
+      note(two, AUTHOR),
+      signed(5, ME, [["k", "7"], ["e", one], ["e", two]], 2000),
+    ];
+    expect([...deletedEventIds(events)]).toEqual([one, two]);
+  });
+
+  it("finds nothing when there is no deletion among the events", () => {
+    expect(deletedEventIds([note(one, AUTHOR)]).size).toBe(0);
+  });
+
+  it("takes the same ids the activity summary uses, so both agree", () => {
+    const reactionEvent = signed(7, ME, [["e", one, "", AUTHOR]], 1000);
+    const events = [
+      reactionEvent,
+      signed(5, ME, [["e", reactionEvent.id]], 2000),
+    ];
+    expect([...deletedEventIds(events)]).toEqual([reactionEvent.id]);
+    // The reaction was deleted, so no action is remembered for it.
+    expect(summarizeMyActivity(events).size).toBe(0);
   });
 });
 
