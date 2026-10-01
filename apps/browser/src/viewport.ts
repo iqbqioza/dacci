@@ -3,15 +3,18 @@
  * looking at. Any layout change inside - a control being added or removed,
  * posts being inserted - is absorbed, so the visible content never moves.
  *
- * `container` must be the element that holds the rendered items; the
- * anchor is the item covering the top edge of the viewport.
+ * `container` must be the element that holds the rendered items; the anchor
+ * is the item covering the first visible line below `topOffset`. That offset
+ * is the height of a pinned header (a tab row or a bar), so the anchor is
+ * the card the reader can actually see rather than one hidden beneath it.
  */
 export function preservingViewport(
   container: HTMLElement | undefined,
   change: () => void,
+  topOffset = 0,
 ): void {
   const scrollBefore = window.scrollY;
-  const anchor = itemUnderTopEdge(container);
+  const anchor = itemUnderTopEdge(container, "article", topOffset);
   const before = anchor === null ? null : anchor.getBoundingClientRect().top;
 
   change();
@@ -28,19 +31,20 @@ export function preservingViewport(
 }
 
 /**
- * The item currently under the top edge of the viewport. It has to be the
- * one that *covers* that line: relays do carry multi-thousand-pixel
- * events, and picking the first item below the edge would anchor to
- * something the reader cannot see.
+ * The item currently under the first visible line. It has to be the one
+ * that *covers* that line: relays do carry multi-thousand-pixel events, and
+ * picking the first item below the edge would anchor to something the
+ * reader cannot see.
  */
 export function itemUnderTopEdge(
   container: HTMLElement | undefined,
   selector = "article",
+  topOffset = 0,
 ): HTMLElement | null {
   if (container === undefined) return null;
   const items = container.querySelectorAll<HTMLElement>(selector);
   if (items.length === 0) return null;
-  const probeY = 8;
+  const probeY = topOffset + 8;
   for (const item of items) {
     const rect = item.getBoundingClientRect();
     if (rect.top > probeY) break;

@@ -4,13 +4,13 @@ import { createEffect, For, onMount, Show } from "solid-js";
 import { useAuth } from "../auth.jsx";
 import { EventCard } from "./EventCard.jsx";
 import { ProfileAvatar, ProfileName } from "./ProfileAvatar.jsx";
+import { FeedTabs } from "../feed-tabs.jsx";
 import {
   flushProfileArrivals,
   loadMoreProfile,
   openProfile,
   selectProfileTab,
   useProfileFeed,
-  type ProfileTab,
 } from "../profile-feed.js";
 import { useProfileLive } from "../live.js";
 import { useProfile } from "../profile.js";
@@ -18,11 +18,6 @@ import { useFollowCount } from "../follows.js";
 
 /** Twitter's profile header is 3:1, so the banner keeps that ratio. */
 const BANNER_RATIO = "aspect-[3/1]";
-
-const TABS: Array<{ id: ProfileTab; label: string }> = [
-  { id: "notes", label: "Notes" },
-  { id: "replies", label: "Replies and notes" },
-];
 
 /**
  * Profile header: banner, avatar, name, npub, bio and the follow count.
@@ -140,33 +135,17 @@ export function ProfilePage(props: {
       {(author) => (
         <div>
           <ProfileHeader pubkey={author()} />
-          <div class="flex border-b border-(--dads-solid-gray-200)">
-            <For each={TABS}>
-              {(tab) => (
-                <button
-                  class="flex-1 border-b-2 px-3 py-3 text-sm font-medium"
-                  classList={{
-                    "border-(--dads-blue-700) text-(--dads-blue-700)":
-                      feed.tab() === tab.id,
-                    "border-transparent text-(--dads-solid-gray-600)":
-                      feed.tab() !== tab.id,
-                  }}
-                  onClick={() => selectProfileTab(tab.id)}
-                >
-                  {tab.label}
-                </button>
-              )}
-            </For>
+          <div ref={feed.setHeaderRef} class="sticky top-0 z-20 bg-white">
+            <FeedTabs tab={feed.tab()} onSelect={selectProfileTab} />
+            <Show when={subject() === author() && buffered().length > 0}>
+              <button
+                class="block w-full border-b border-(--dads-solid-gray-200) px-4 py-3 text-left hover:bg-(--dads-blue-50)"
+                onClick={flushProfileArrivals}
+              >
+                新着 {buffered().length} 件
+              </button>
+            </Show>
           </div>
-
-          <Show when={subject() === author() && buffered().length > 0}>
-            <button
-              class="sticky top-0 z-10 block w-full border-b border-(--dads-solid-gray-200) bg-white px-4 py-3 text-left hover:bg-(--dads-blue-50)"
-              onClick={flushProfileArrivals}
-            >
-              新着 {buffered().length} 件
-            </button>
-          </Show>
           <Show when={feed.authRelays().length > 0}>
             <p class="border-b border-(--dads-yellow-600) bg-(--dads-yellow-50) px-4 py-2 text-sm text-(--dads-solid-gray-800)">
               認証が必要なリレー: {feed.authRelays().join(", ")}

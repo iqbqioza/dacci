@@ -1,51 +1,13 @@
 import type { NostrEvent } from "dacci-nostr-nips";
-import { compareEvents, isComment, isHex64 } from "dacci-nostr-nips";
+import { compareEvents, isHex64 } from "dacci-nostr-nips";
 import { createSignal } from "solid-js";
 import { rememberEvents } from "./event-cache.js";
+import { postsForTab, type FeedTab } from "./feed-tabs.js";
 import { planFlush } from "./flush.js";
 import { clearProfileBuffer, useProfileLive } from "./live.js";
 import { createTimeline } from "./nostr.js";
 import { useRelays } from "./relays.js";
 import { preservingViewport } from "./viewport.js";
-
-/** The two tabs a profile feed offers, as Twitter does. */
-export type ProfileTab = "notes" | "replies";
-
-/** What kind of post a profile entry is, for the tab split. */
-export type ProfilePostKind = "note" | "reply" | "comment";
-
-/**
- * Posts that belong to a conversation are labelled コメント, which is what
- * separates them from a standalone note everywhere cards are rendered.
- * That covers NIP-22 comments and plain NIP-10 replies alike.
- */
-export function showsCommentLabel(event: NostrEvent): boolean {
-  return isReply(event);
-}
-
-/**
- * A post that answers or addresses someone is a reply: an `e` tag pointing
- * at another event, a `p` tag naming an author, or a NIP-22 comment. NIP-10
- * lets a client tag its own thread root with an `e` tag, so a tag pointing
- * at the event itself does not count.
- */
-export function isReply(event: NostrEvent): boolean {
-  if (isComment(event)) return true;
-  return event.tags.some(
-    (tag) => (tag[0] === "e" && tag[1] !== event.id) || tag[0] === "p",
-  );
-}
-
-/**
- * Splits a profile post the way the tabs do: a note is a top-level kind 1,
- * a reply is a kind 1 answering another event, and a comment is NIP-22
- * kind 1111, which belongs with the replies.
- */
-export function classifyProfilePost(event: NostrEvent): ProfilePostKind {
-  if (isComment(event)) return "comment";
-  if (isReply(event)) return "reply";
-  return "note";
-}
 
 /**
  * Profile feed state lives at module level like the other feeds, so
@@ -55,7 +17,7 @@ export function classifyProfilePost(event: NostrEvent): ProfilePostKind {
  */
 const [all, setAll] = createSignal<NostrEvent[]>([]);
 const [subject, setSubject] = createSignal<string | null>(null);
-const [tab, setTab] = createSignal<ProfileTab>("notes");
+const [tab, setTab] = createSignal<FeedTab>("notes");
 const [loading, setLoading] = createSignal(false);
 const [loadingMore, setLoadingMore] = createSignal(false);
 const [coverage, setCoverage] = createSignal("partial");
@@ -71,6 +33,7 @@ let paginator = createTimeline(useRelays().readRelays(), {
 });
 let generation = 0;
 let listRef: HTMLDivElement | undefined;
+let headerRef: HTMLDivElement | undefined;
 
 /**
  * The tab is a view over the loaded list, not a separate query: no relay
@@ -78,10 +41,7 @@ let listRef: HTMLDivElement | undefined;
  * (NIP-22 kind 1111) only ever belong to the replies tab.
  */
 function visible(): NostrEvent[] {
-  const events = all();
-  return tab() === "notes"
-    ? events.filter((event) => classifyProfilePost(event) === "note")
-    : events;
+  return postsForTab(all(), tab());
 }
 
 export function useProfileFeed() {
@@ -100,11 +60,14 @@ export function useProfileFeed() {
     setListRef: (el: HTMLDivElement | undefined) => {
       listRef = el;
     },
+    setHeaderRef: (el: HTMLDivElement | undefined) => {
+      headerRef = el;
+    },
   };
 }
 
 /** Switches tab without touching the network: the list is already there. */
-export function selectProfileTab(next: ProfileTab): void {
+export function selectProfileTab(next: FeedTab): void {
   setTab(next);
 }
 
@@ -190,5 +153,5 @@ export function flushProfileArrivals(): void {
   preservingViewport(listRef, () => {
     clearProfileBuffer();
     if (plan.added.length > 0) setAll(plan.events.sort(compareEvents));
-  });
+  }, headerRef?.offsetHeight ?? 0);
 }

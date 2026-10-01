@@ -1,6 +1,7 @@
 import type { NostrEvent } from "dacci-nostr-nips";
 import { createSignal } from "solid-js";
 import { rememberEvents } from "./event-cache.js";
+import { postsForTab, type FeedTab } from "./feed-tabs.js";
 import { planFlush } from "./flush.js";
 import { clearFeedBuffer, useFeedLive } from "./live.js";
 import { createHomeTimeline } from "./nostr.js";
@@ -13,7 +14,8 @@ import { preservingViewport } from "./viewport.js";
  * "読み込み中" and refetching. Only a real change (login, logout, relay
  * set, follow list) resets it.
  */
-const [events, setEvents] = createSignal<NostrEvent[]>([]);
+const [all, setAll] = createSignal<NostrEvent[]>([]);
+const [tab, setTab] = createSignal<FeedTab>("notes");
 const [loading, setLoading] = createSignal(true);
 const [loadingMore, setLoadingMore] = createSignal(false);
 const [coverage, setCoverage] = createSignal("partial");
@@ -26,6 +28,7 @@ let paginator = createHomeTimeline(relayUrlsValue(), feedAuthorsValue());
 let generation = 0;
 let listRef: HTMLDivElement | undefined;
 let barRef: HTMLButtonElement | undefined;
+let headerRef: HTMLDivElement | undefined;
 let wasBarVisible = false;
 let wasLoadMoreVisible = false;
 
@@ -38,9 +41,36 @@ function feedAuthorsValue(): string[] | undefined {
   return useFeed().feedAuthors() ?? undefined;
 }
 
+/**
+ * The tab is a view over the loaded list, not a second query: no relay can
+ * filter "has no e tag", so the home feed asks for kind 1 and NIP-22
+ * comments together and the split happens here.
+ */
+function visible(): NostrEvent[] {
+  return postsForTab(all(), tab());
+}
+
+/** Switches tab without touching the network: the list is already there. */
+export function selectHomeTab(next: FeedTab): void {
+  setTab(next);
+}
+
+/**
+ * The pinned tab row and bar together, as one element. The viewport anchor
+ * probe has to start below it, or it would hold on a card hidden under the
+ * pinned header and the reader would be scrolled to the wrong place.
+ */
+export function pinnedHeaderHeight(): number {
+  return headerRef?.offsetHeight ?? 0;
+}
+
 export function useHomeFeed() {
   return {
-    events,
+    /** Only the posts the selected tab shows. */
+    events: visible,
+    /** Everything loaded, whatever the tab shows. */
+    loadedCount: () => all().length,
+    tab,
     loading,
     loadingMore,
     coverage,
@@ -56,6 +86,9 @@ export function useHomeFeed() {
       barRef = el;
       wasBarVisible = false;
     },
+    setHeaderRef: (el: HTMLDivElement | undefined) => {
+      headerRef = el;
+    },
   };
 }
 
@@ -69,7 +102,7 @@ export async function loadMoreHome(): Promise<void> {
     if (gen !== generation) return;
     // Keep a cache so event deep links survive reloads.
     rememberEvents(page.events);
-    setEvents((prev) => [...prev, ...page.events]);
+    setAll((prev) => [...prev, ...page.events]);
     setCoverage(page.coverage);
     setAuthRelays(page.authRequiredRelays);
     setPendingRelays(page.pendingRelays);
@@ -89,7 +122,7 @@ export function resetHomeFeed(): void {
   const next = createHomeTimeline(relayUrlsValue(), feedAuthorsValue());
   paginator = next;
   generation += 1;
-  setEvents([]);
+  setAll([]);
   setCoverage("partial");
   setAuthRelays([]);
   setPendingRelays([]);
@@ -105,15 +138,15 @@ export function resetHomeFeed(): void {
  * of being dropped on the newest one.
  */
 export function flushNewArrivals(): void {
-  const plan = planFlush(useFeedLive().buffered(), events());
+  const plan = planFlush(useFeedLive().buffered(), all());
   preservingViewport(listRef, () => {
     // This function accounts for the bar removal itself.
     wasBarVisible = false;
     clearFeedBuffer();
     if (plan.added.length > 0) {
-      setEvents(plan.events);
+      setAll(plan.events);
     }
-  });
+  }, pinnedHeaderHeight());
 }
 
 /**
@@ -125,6 +158,8 @@ export function flushNewArrivals(): void {
 export function noteBarVisibility(visible: boolean): void {
   if (!visible || wasBarVisible) return;
   wasBarVisible = true;
+  // Only the bar's own height shifts the list: the tab row above it is
+  // always present, so it moves no content when the bar appears.
   const height = barRef?.offsetHeight ?? 0;
   if (height <= 0 || window.scrollY <= 0) return;
   window.scrollBy({ top: height, behavior: "instant" });
@@ -137,5 +172,5 @@ export function noteBarVisibility(visible: boolean): void {
 export function noteLoadMoreVisibility(shown: boolean): void {
   if (shown === wasLoadMoreVisible) return;
   wasLoadMoreVisible = shown;
-  preservingViewport(listRef, () => undefined);
+  preservingViewport(listRef, () => undefined, pinnedHeaderHeight());
 }

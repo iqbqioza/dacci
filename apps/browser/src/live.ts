@@ -6,7 +6,7 @@ import {
 import { createSignal } from "solid-js";
 import type { LiveSubscription } from "dacci-nostr-ws";
 import { rememberEvents } from "./event-cache.js";
-import { getConnection } from "./nostr.js";
+import { HOME_KINDS, getConnection } from "./nostr.js";
 import { useRelays } from "./relays.js";
 
 const MAX_BUFFERED = 200;
@@ -119,11 +119,13 @@ export function startLiveFeeds(deps: LiveFeedDeps): () => void {
     const readable = deps.readRelays();
     for (const url of readable) {
       const connection = getConnection(url);
-      // `since` keeps the relay from replaying stored history.
+      // `since` keeps the relay from replaying stored history. The home feed
+      // shows NIP-22 comments beside kind 1, so the stream carries both.
+      const feedKinds = HOME_KINDS;
       const feedFilter: Filter =
         authors === undefined
-          ? { kinds: [1], since: Math.floor(Date.now() / 1000) }
-          : { kinds: [1], authors, since: Math.floor(Date.now() / 1000) };
+          ? { kinds: feedKinds, since: Math.floor(Date.now() / 1000) }
+          : { kinds: feedKinds, authors, since: Math.floor(Date.now() / 1000) };
       subs.push(connection.subscribe(feedFilter, push(setFeedBuffer)));
 
       if (self !== undefined) {

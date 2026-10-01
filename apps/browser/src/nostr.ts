@@ -38,14 +38,21 @@ export function createTimeline(
   );
 }
 
-/** Home feed: own posts when signed in, otherwise the global firehose. */
+/** Kinds a home feed shows: text notes and NIP-22 comments. */
+export const HOME_KINDS = [1, 1111];
+
+/**
+ * Home feed: own posts when signed in, otherwise the global firehose. Notes
+ * and NIP-22 comments come in one query because the tabs need both and no
+ * relay can filter "has no e tag".
+ */
 export function createHomeTimeline(
   relayUrls: string[],
   authors?: string[],
 ): TimelinePaginator {
   return createTimeline(
     relayUrls,
-    authors === undefined ? { kinds: [1] } : { kinds: [1], authors },
+    authors === undefined ? { kinds: HOME_KINDS } : { kinds: HOME_KINDS, authors },
   );
 }
 

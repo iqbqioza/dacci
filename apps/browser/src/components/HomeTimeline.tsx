@@ -1,10 +1,12 @@
 import type { NostrEvent } from "dacci-nostr-nips";
 import { createEffect, For, onCleanup, Show, untrack } from "solid-js";
+import { FeedTabs } from "../feed-tabs.jsx";
 import {
   flushNewArrivals,
   loadMoreHome,
   noteBarVisibility,
   noteLoadMoreVisibility,
+  selectHomeTab,
   useHomeFeed,
 } from "../home-feed.js";
 import { useFeedLive } from "../live.js";
@@ -47,17 +49,24 @@ export function HomeTimeline(props: {
 
   return (
     <div>
-      <Show when={buffered().length > 0}>
-        {/* Pinned to the top of the viewport and removed entirely on
-            click. The corrections absorb the layout shift that causes. */}
-        <button
-          ref={feed.setBarRef}
-          class="sticky top-0 z-10 block w-full border-b border-(--dads-solid-gray-200) bg-white px-4 py-3 text-left hover:bg-(--dads-blue-50)"
-          onClick={flushNewArrivals}
-        >
-          新着 {buffered().length} 件
-        </button>
-      </Show>
+      {/* The tab row and the new-arrivals bar share one sticky container:
+          the tabs stay reachable while scrolling, and the bar appears and
+          disappears below them without ever covering them. */}
+      <div
+        ref={feed.setHeaderRef}
+        class="sticky top-0 z-20 bg-white"
+      >
+        <FeedTabs tab={feed.tab()} onSelect={selectHomeTab} />
+        <Show when={buffered().length > 0}>
+          <button
+            ref={feed.setBarRef}
+            class="block w-full border-b border-(--dads-solid-gray-200) px-4 py-3 text-left hover:bg-(--dads-blue-50)"
+            onClick={flushNewArrivals}
+          >
+            新着 {buffered().length} 件
+          </button>
+        </Show>
+      </div>
       <Show when={feed.loading()}>
         <p class="px-4 py-6 text-(--dads-solid-gray-500)">読み込み中…</p>
       </Show>

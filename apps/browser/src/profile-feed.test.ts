@@ -1,10 +1,13 @@
 import { COMMENT_KIND, computeEventId, type NostrEvent } from "dacci-nostr-nips";
 import { describe, expect, it } from "vitest";
 import {
-  classifyProfilePost,
+  classifyFeedPost,
   isReply,
-  selectProfileTab,
+  postsForTab,
   showsCommentLabel,
+} from "./feed-tabs.jsx";
+import {
+  selectProfileTab,
   useProfileFeed,
 } from "./profile-feed.js";
 
@@ -49,7 +52,7 @@ describe("isReply", () => {
   });
 });
 
-describe("classifyProfilePost", () => {
+describe("classifyFeedPost", () => {
   const comment = note(COMMENT, ME, [["I", "30023", AUTHOR, "my-article"]], 1000, COMMENT_KIND);
   const legacyComment = note(COMMENT, ME, [["e", PARENT]], 1000, COMMENT_KIND);
   const reply = note(REPLY, ME, [["e", PARENT, "", AUTHOR, "root"], ["p", AUTHOR]]);
@@ -57,39 +60,39 @@ describe("classifyProfilePost", () => {
   const ownRoot = note(TOP, ME, [["e", TOP, "", ME, "root"]]);
 
   it("calls a top-level kind 1 a note", () => {
-    expect(classifyProfilePost(top)).toBe("note");
+    expect(classifyFeedPost(top)).toBe("note");
     // An e tag pointing at the event itself is the thread's own root.
-    expect(classifyProfilePost(ownRoot)).toBe("note");
+    expect(classifyFeedPost(ownRoot)).toBe("note");
   });
 
   it("calls a kind 1 that answers another event a reply", () => {
-    expect(classifyProfilePost(reply)).toBe("reply");
+    expect(classifyFeedPost(reply)).toBe("reply");
     expect(isReply(reply)).toBe(true);
   });
 
   it("counts a p tag as addressing someone, so a reply", () => {
     // A mention names its author, so the post is not a plain note.
     const mention = note(TOP, ME, [["p", AUTHOR]]);
-    expect(classifyProfilePost(mention)).toBe("reply");
+    expect(classifyFeedPost(mention)).toBe("reply");
     expect(isReply(mention)).toBe(true);
     // Even when the author points at themselves.
     expect(isReply(note(TOP, ME, [["p", ME]]))).toBe(true);
   });
 
   it("keeps a note with no e or p tag a note", () => {
-    expect(classifyProfilePost(note(TOP, ME, [["t", "nostr"]]))).toBe("note");
+    expect(classifyFeedPost(note(TOP, ME, [["t", "nostr"]]))).toBe("note");
   });
 
   it("treats NIP-22 comments as replies whichever tag they use", () => {
-    expect(classifyProfilePost(comment)).toBe("comment");
-    expect(classifyProfilePost(legacyComment)).toBe("comment");
+    expect(classifyFeedPost(comment)).toBe("comment");
+    expect(classifyFeedPost(legacyComment)).toBe("comment");
     expect(isReply(comment)).toBe(true);
   });
 
   it("treats a kind 1 with an I tag as a comment", () => {
     // Before the dedicated kind, comments were kind 1 with an I tag.
     const kind1Comment = note(TOP, ME, [["I", "30023", AUTHOR, "post"]]);
-    expect(classifyProfilePost(kind1Comment)).toBe("comment");
+    expect(classifyFeedPost(kind1Comment)).toBe("comment");
     expect(isReply(kind1Comment)).toBe(true);
   });
 });
