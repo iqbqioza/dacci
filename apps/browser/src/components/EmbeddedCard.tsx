@@ -23,7 +23,7 @@ export function EmbeddedCard(props: {
     <Show when={quoted()} keyed>
       {(note) => (
         <div
-          class="mt-2 cursor-pointer overflow-hidden rounded-2xl border border-(--dads-solid-gray-200) hover:bg-(--dads-blue-50)"
+          class="mt-2 cursor-pointer overflow-hidden rounded-2xl border border-(--line) hover:bg-(--accent-soft)"
           onClick={(e) => {
             // The outer card opens the repost; the embed opens the note.
             e.stopPropagation();
@@ -35,11 +35,11 @@ export function EmbeddedCard(props: {
             <div class="min-w-0 flex-1">
               <div class="flex items-baseline justify-between gap-2">
                 <ProfileName pubkey={note.pubkey} class="text-sm" />
-                <span class="shrink-0 text-xs whitespace-nowrap text-(--dads-solid-gray-500)">
+                <span class="shrink-0 text-xs whitespace-nowrap text-(--ink-muted)">
                   {formatTime(note.created_at)}
                 </span>
               </div>
-              <p class="mt-0.5 line-clamp-4 text-sm break-words whitespace-pre-wrap text-(--dads-solid-gray-900)">
+              <p class="mt-0.5 line-clamp-4 text-sm break-words whitespace-pre-wrap text-(--ink)">
                 {/* The embed shows no note of its own, so a link to a post
                     that is not rendered here stays in the quoted text. */}
                 {displayContent(note)}
@@ -61,7 +61,7 @@ export function EmbeddedPlaceholder(props: { event: NostrEvent }) {
   return (
     <Show when={useEmbed(props.event).loading}>
       <div
-        class="mt-2 rounded-2xl border border-(--dads-solid-gray-200) px-3 py-2.5 text-sm text-(--dads-solid-gray-500)"
+        class="mt-2 rounded-2xl border border-(--line) px-3 py-2.5 text-sm text-(--ink-muted)"
         aria-live="polite"
       >
         引用元を読み込み中…

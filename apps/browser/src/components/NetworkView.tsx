@@ -21,11 +21,11 @@ const STATUS_LABEL: Record<RelayConnStatus, string> = {
 };
 
 const STATUS_CLASS: Record<RelayConnStatus, string> = {
-  unknown: "bg-(--dads-solid-gray-400)",
-  checking: "bg-(--dads-yellow-600)",
-  online: "bg-(--dads-green-600)",
-  offline: "bg-(--dads-red-600)",
-  auth: "bg-(--dads-orange-600)",
+  unknown: "bg-(--unknown)",
+  checking: "bg-(--warn)",
+  online: "bg-(--ok)",
+  offline: "bg-(--danger)",
+  auth: "bg-(--auth)",
 };
 
 const MODE_LABEL: Record<RelayMode, string> = {
@@ -152,7 +152,7 @@ export function NetworkView() {
     <div class="px-4 py-3">
       <div class="flex flex-wrap items-baseline justify-between gap-2">
         <h2 class="text-lg font-bold">リレーセット</h2>
-        <span class="text-xs text-(--dads-solid-gray-500)">
+        <span class="text-xs text-(--ink-muted)">
           {counts().total} 件 / 読み {counts().read} / 書き {counts().write}
           {" / "}
           オンライン {counts().online}
@@ -165,7 +165,7 @@ export function NetworkView() {
 
       <div class="mt-2 flex flex-wrap gap-2">
         <input
-          class="min-w-0 flex-1 rounded-2xl border border-(--dads-solid-gray-300) px-3 py-2"
+          class="min-w-0 flex-1 rounded-2xl border border-(--line-strong) px-3 py-2"
           placeholder="wss://relay.example"
           value={input()}
           onInput={(e) => {
@@ -182,31 +182,31 @@ export function NetworkView() {
           onChange={setNewMode}
         />
         <button
-          class="rounded-2xl bg-(--dads-blue-700) px-4 py-2 text-white disabled:opacity-50"
+          class="rounded-2xl bg-(--accent) px-4 py-2 text-(--on-accent) disabled:opacity-50"
           disabled={input().trim() === ""}
           onClick={add}
         >
           追加
         </button>
         <button
-          class="rounded-2xl border border-(--dads-solid-gray-300) px-4 py-2 disabled:opacity-50"
+          class="rounded-2xl border border-(--line-strong) px-4 py-2 disabled:opacity-50"
           disabled={refreshing()}
           onClick={() => void refresh()}
         >
           {refreshing() ? "更新中…" : "情報を更新"}
         </button>
         <button
-          class="rounded-2xl border border-(--dads-solid-gray-300) px-4 py-2"
+          class="rounded-2xl border border-(--line-strong) px-4 py-2"
           onClick={restoreDefaults}
         >
           初期化
         </button>
       </div>
       <Show when={error()}>
-        <p class="mt-1 text-sm text-(--dads-red-600)">{error()}</p>
+        <p class="mt-1 text-sm text-(--danger)">{error()}</p>
       </Show>
       <Show when={counts().read === 0 || counts().write === 0}>
-        <p class="mt-1 text-sm text-(--dads-yellow-800)">
+        <p class="mt-1 text-sm text-(--warn-strong)">
           <Show
             when={counts().read === 0}
             fallback={"書き込み専用のリレーがありません。投稿は送信されません。"}
@@ -221,7 +221,7 @@ export function NetworkView() {
           {(entry) => <RelayRow url={entry.url} mode={entry.mode} />}
         </For>
       </ul>
-      <p class="mt-3 text-xs text-(--dads-solid-gray-500)">
+      <p class="mt-3 text-xs text-(--ink-muted)">
         名前・説明・アイコン・対応 NIP・連絡先・ソフトウェアなどは、リレーの NIP-11
         ドキュメント (Accept: application/nostr+json) から取得します。読み取り専用のリレーはタイムライン・通知・プロフィール取得に、書き込み専用のリレーは投稿の配信にだけ使われます。ログイン時に NIP-65
         のリレー一覧を取得した場合は、その一覧の read/write 設定が優先されます。
@@ -242,12 +242,12 @@ function RelayRow(props: { url: string; mode: RelayMode }) {
     iconBroken() ? null : (info().icon ?? null);
 
   return (
-    <li class="border-b border-(--dads-solid-gray-200) py-3">
+    <li class="border-b border-(--line) py-3">
       <div class="flex items-start gap-2">
         <Show
           when={icon()}
           fallback={
-            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-(--dads-solid-gray-200) text-xs text-(--dads-solid-gray-600)">
+            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-(--fill) text-xs text-(--ink-quiet)">
               {hostOf(props.url).slice(0, 2).toUpperCase()}
             </span>
           }
@@ -271,7 +271,7 @@ function RelayRow(props: { url: string; mode: RelayMode }) {
             <span class="text-sm font-bold">
               {info().name ?? hostOf(props.url)}
             </span>
-            <span class="flex items-center gap-1 text-xs text-(--dads-solid-gray-600)">
+            <span class="flex items-center gap-1 text-xs text-(--ink-quiet)">
               <span
                 class={`inline-block h-2 w-2 shrink-0 rounded-full ${STATUS_CLASS[status()]}`}
                 aria-hidden="true"
@@ -279,7 +279,7 @@ function RelayRow(props: { url: string; mode: RelayMode }) {
               {STATUS_LABEL[status()]}
             </span>
           </p>
-          <p class="break-all font-mono text-xs text-(--dads-solid-gray-600)">
+          <p class="break-all font-mono text-xs text-(--ink-quiet)">
             {props.url}
           </p>
 
@@ -289,7 +289,7 @@ function RelayRow(props: { url: string; mode: RelayMode }) {
                 <Show when={info().description}>
                   <tr>
                     <RowLabel>説明</RowLabel>
-                    <td class="px-0 pb-1 align-top break-words text-(--dads-solid-gray-800)">
+                    <td class="px-0 pb-1 align-top break-words text-(--ink)">
                       {info().description}
                     </td>
                   </tr>
@@ -298,7 +298,7 @@ function RelayRow(props: { url: string; mode: RelayMode }) {
                   {(fact) => (
                     <tr>
                       <RowLabel>{fact.label}</RowLabel>
-                      <td class="px-0 pb-1 align-top break-words text-(--dads-solid-gray-800)">
+                      <td class="px-0 pb-1 align-top break-words text-(--ink)">
                         {fact.value}
                       </td>
                     </tr>
@@ -317,7 +317,7 @@ function RelayRow(props: { url: string; mode: RelayMode }) {
                         <For each={nips()}>
                           {(nip) => (
                             <li
-                              class="rounded-md bg-(--dads-blue-50) px-1.5 py-0.5 font-mono whitespace-nowrap text-(--dads-blue-800)"
+                              class="rounded-md bg-(--accent-soft) px-1.5 py-0.5 font-mono whitespace-nowrap text-(--accent-ink)"
                               title={`NIP-${nip}`}
                             >
                               {nip}
@@ -340,7 +340,7 @@ function RelayRow(props: { url: string; mode: RelayMode }) {
             onChange={(mode) => setRelayMode(props.url, mode)}
           />
           <button
-            class="rounded-full px-2 py-1 text-xs text-(--dads-solid-gray-500) hover:bg-(--dads-solid-gray-200) hover:text-(--dads-red-600)"
+            class="rounded-full px-2 py-1 text-xs text-(--ink-muted) hover:bg-(--line) hover:text-(--danger)"
             title="このリレーを削除"
             onClick={() => removeRelay(props.url)}
           >
@@ -357,7 +357,7 @@ function RowLabel(props: { children: unknown }) {
   return (
     <th
       scope="row"
-      class="w-24 py-0 pr-2 text-left align-top font-normal whitespace-nowrap text-(--dads-solid-gray-500)"
+      class="w-24 py-0 pr-2 text-left align-top font-normal whitespace-nowrap text-(--ink-muted)"
     >
       {props.children as never}
     </th>
@@ -376,7 +376,7 @@ function ModeSelect(props: {
   return (
     <select
       aria-label={props.label}
-      class="rounded-2xl border border-(--dads-solid-gray-300) bg-white px-2 py-1 text-xs"
+      class="rounded-2xl border border-(--line-strong) bg-(--surface) px-2 py-1 text-xs"
       value={props.value}
       onChange={(e) => props.onChange(e.currentTarget.value as RelayMode)}
     >

@@ -70,15 +70,15 @@ export function FeedTabs(props: {
   onSelect: (tab: FeedTab) => void;
 }) {
   return (
-    <div class="flex border-b border-(--dads-solid-gray-200) bg-white">
+    <div class="flex border-b border-(--line) bg-(--surface)">
       <For each={TABS}>
         {(tab) => (
           <button
             class="flex-1 border-b-2 px-3 py-3 text-sm font-medium"
             classList={{
-              "border-(--dads-blue-700) text-(--dads-blue-700)":
+              "border-(--accent) text-(--accent)":
                 props.tab === tab.id,
-              "border-transparent text-(--dads-solid-gray-600)":
+              "border-transparent text-(--ink-quiet)":
                 props.tab !== tab.id,
             }}
             onClick={() => props.onSelect(tab.id)}

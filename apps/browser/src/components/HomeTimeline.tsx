@@ -71,13 +71,13 @@ export function HomeTimeline(props: {
           disappears below them without ever covering them. */}
       <div
         ref={feed.setHeaderRef}
-        class="sticky top-0 z-20 bg-white"
+        class="sticky top-0 z-20 bg-(--surface)"
       >
         <FeedTabs tab={feed.tab()} onSelect={onTab} />
         <Show when={buffered().length > 0}>
           <button
             ref={feed.setBarRef}
-            class="block w-full border-b border-(--dads-solid-gray-200) px-4 py-3 text-left hover:bg-(--dads-blue-50)"
+            class="block w-full border-b border-(--line) px-4 py-3 text-left hover:bg-(--accent-soft)"
             onClick={flushNewArrivals}
           >
             新着 {buffered().length} 件
@@ -85,15 +85,15 @@ export function HomeTimeline(props: {
         </Show>
       </div>
       <Show when={feed.loading()}>
-        <p class="px-4 py-6 text-(--dads-solid-gray-500)">読み込み中…</p>
+        <p class="px-4 py-6 text-(--ink-muted)">読み込み中…</p>
       </Show>
       <Show when={!feed.loading() && feed.events().length === 0}>
-        <p class="px-4 py-6 text-(--dads-solid-gray-500)">
+        <p class="px-4 py-6 text-(--ink-muted)">
           イベントを取得できませんでした。リレーの接続を確認してください。
         </p>
       </Show>
       <Show when={feed.authRelays().length > 0}>
-        <p class="border-b border-(--dads-yellow-600) bg-(--dads-yellow-50) px-4 py-2 text-sm text-(--dads-solid-gray-800)">
+        <p class="border-b border-(--warn) bg-(--warn-soft) px-4 py-2 text-sm text-(--warn-ink)">
           認証が必要なリレー: {feed.authRelays().join(", ")}
         </p>
       </Show>
@@ -107,7 +107,7 @@ export function HomeTimeline(props: {
           {/* Same block style as the new-arrivals bar, at the end of the
               feed where older posts continue. */}
           <button
-            class="block w-full border-b border-(--dads-solid-gray-200) px-4 py-3 text-left hover:bg-(--dads-blue-50) disabled:opacity-50"
+            class="block w-full border-b border-(--line) px-4 py-3 text-left hover:bg-(--accent-soft) disabled:opacity-50"
             disabled={feed.loadingMore()}
             onClick={() => void loadMoreHome()}
           >
@@ -116,7 +116,7 @@ export function HomeTimeline(props: {
         </Show>
       </div>
       <Show when={!feed.hasMore() && feed.events().length > 0}>
-        <p class="px-4 py-4 text-sm text-(--dads-solid-gray-500)">
+        <p class="px-4 py-4 text-sm text-(--ink-muted)">
           {feed.coverage() === "complete"
             ? "履歴の末尾です"
             : "取得可能な履歴の末尾です (一部未確定)"}

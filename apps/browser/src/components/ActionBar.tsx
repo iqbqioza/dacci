@@ -23,7 +23,7 @@ const ACTIONS: Action[] = [
     icon: "reply",
     label: "リプライ",
     doneLabel: "リプライ済み",
-    doneClass: "text-(--dads-blue-700)",
+    doneClass: "text-(--accent)",
     run: (event) => openReply(event),
   },
   {
@@ -31,7 +31,7 @@ const ACTIONS: Action[] = [
     icon: "repost",
     label: "リポスト",
     doneLabel: "リポストを取り消す",
-    doneClass: "text-(--dads-blue-700)",
+    doneClass: "text-(--accent)",
     run: (event) => void toggleRepost(event),
   },
   {
@@ -39,7 +39,7 @@ const ACTIONS: Action[] = [
     icon: "quote-repost",
     label: "引用付きリポスト",
     doneLabel: "引用済み (取り消し不可)",
-    doneClass: "text-(--dads-blue-700)",
+    doneClass: "text-(--accent)",
     run: (event) => openQuote(event),
   },
   {
@@ -47,7 +47,7 @@ const ACTIONS: Action[] = [
     icon: "react",
     label: "リアクション",
     doneLabel: "リアクションを取り消す",
-    doneClass: "text-(--dads-red-600)",
+    doneClass: "text-(--danger)",
     run: (event) => void toggleReaction(event),
   },
 ];
@@ -79,7 +79,7 @@ export function ActionBar(props: { event: NostrEvent }) {
             class={`flex items-center justify-center rounded-full py-1.5 ${
               hasDone(action.kind, id())
                 ? action.doneClass
-                : "text-(--dads-solid-gray-500) hover:bg-(--dads-blue-50) hover:text-(--dads-blue-700)"
+                : "text-(--ink-muted) hover:bg-(--accent-soft) hover:text-(--accent)"
             }`}
             onClick={(e) => {
               // The card itself opens the detail view.

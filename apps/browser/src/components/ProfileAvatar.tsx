@@ -40,14 +40,14 @@ export function ProfileAvatar(props: {
     // `block` matters: an inline box ignores overflow, so the image would
     // not be clipped into a circle outside a flex row.
     <span
-      class={`block shrink-0 overflow-hidden rounded-full bg-(--dads-solid-gray-200) ${props.class ?? ""}`}
+      class={`block shrink-0 overflow-hidden rounded-full bg-(--fill) ${props.class ?? ""}`}
       style={{ width: `${size()}px`, height: `${size()}px` }}
     >
       <Show
         when={picture()}
         fallback={
           <span
-            class="flex h-full w-full items-center justify-center text-sm text-(--dads-solid-gray-600)"
+            class="flex h-full w-full items-center justify-center text-sm text-(--ink-quiet)"
             aria-hidden="true"
           >
             {initial()}
@@ -86,7 +86,7 @@ export function ProfileName(props: { pubkey: string; class?: string }) {
     // Block level so the ellipsis applies: a long name must stop before
     // the time, not run underneath it.
     <span
-      class={`block truncate font-medium text-(--dads-solid-gray-900) ${
+      class={`block truncate font-medium text-(--ink) ${
         props.class ?? ""
       }`}
     >

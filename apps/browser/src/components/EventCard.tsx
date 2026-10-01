@@ -39,8 +39,8 @@ export function EventCard(props: {
   // the post before that heading opens the conversation.
   const surface = (): string =>
     props.detailed === true
-      ? "flex gap-3 border-b border-(--dads-solid-gray-200) px-4 py-4"
-      : "flex cursor-pointer gap-3 border-b border-(--dads-solid-gray-200) px-4 py-3 hover:bg-(--dads-blue-50)";
+      ? "flex gap-3 border-b border-(--line) px-4 py-4"
+      : "flex cursor-pointer gap-3 border-b border-(--line) px-4 py-3 hover:bg-(--accent-soft)";
 
   return (
     <article
@@ -67,7 +67,7 @@ export function EventCard(props: {
               <ProfileName pubkey={props.event.pubkey} />
             </button>
             <p
-              class="truncate font-mono text-xs text-(--dads-solid-gray-500)"
+              class="truncate font-mono text-xs text-(--ink-muted)"
               title={npub() ?? props.event.pubkey}
             >
               {npub() ?? props.event.pubkey}
@@ -77,11 +77,11 @@ export function EventCard(props: {
             {/* A post that answers another one is labelled コメント, so a
                 conversation is told apart from a standalone note. */}
             <Show when={showsCommentLabel(props.event)}>
-              <span class="rounded-md bg-(--dads-solid-gray-100) px-1.5 py-0.5 text-xs text-(--dads-solid-gray-600)">
+              <span class="rounded-md bg-(--fill-soft) px-1.5 py-0.5 text-xs text-(--ink-quiet)">
                 コメント
               </span>
             </Show>
-            <span class="text-xs whitespace-nowrap text-(--dads-solid-gray-500)">
+            <span class="text-xs whitespace-nowrap text-(--ink-muted)">
               {formatTime(props.event.created_at)}
             </span>
             <PostMenu event={props.event} onOpen={props.onSelect} />
@@ -91,7 +91,7 @@ export function EventCard(props: {
             the text drops that link rather than printing it twice. A feed
             never clips it either: a long note is the reader's whole reason
             for opening the post. */}
-        <p class="mt-1 whitespace-pre-wrap break-words text-(--dads-solid-gray-900)">
+        <p class="mt-1 whitespace-pre-wrap break-words text-(--ink)">
           {displayContent(props.event)}
         </p>
         <EmbeddedCard event={props.event} onSelect={props.onSelect} />

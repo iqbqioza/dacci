@@ -230,16 +230,16 @@ export function App() {
   return (
     <div class="mx-auto flex min-h-screen max-w-6xl">
       {/* Menu (fixed) */}
-      <nav class="sticky top-0 h-screen w-48 shrink-0 overflow-y-auto border-r border-(--dads-solid-gray-200) p-3">
-        <h1 class="px-2 py-2 text-xl font-bold text-(--dads-blue-700)">Dacci</h1>
+      <nav class="sticky top-0 h-screen w-48 shrink-0 overflow-y-auto border-r border-(--line) p-3">
+        <h1 class="px-2 py-2 text-xl font-bold text-(--accent)">Dacci</h1>
         <ul>
           <For each={MENU_ITEMS}>
             {(item) => (
               <li>
                 <button
-                  class="w-full rounded-2xl px-3 py-2 text-left hover:bg-(--dads-blue-50)"
+                  class="w-full rounded-2xl px-3 py-2 text-left hover:bg-(--accent-soft)"
                   classList={{
-                    "bg-(--dads-blue-50) font-bold": isItemActive(route(), item),
+                    "bg-(--accent-soft) font-bold": isItemActive(route(), item),
                   }}
                   onClick={() => openItem(item)}
                 >
@@ -250,7 +250,7 @@ export function App() {
           </For>
         </ul>
         <button
-          class="mt-3 w-full rounded-2xl bg-(--dads-blue-700) px-3 py-2 text-white"
+          class="mt-3 w-full rounded-2xl bg-(--accent) px-3 py-2 text-(--on-accent)"
           onClick={openNewPost}
         >
           Compose
@@ -258,7 +258,7 @@ export function App() {
       </nav>
 
       {/* Main column: page scrolls the window, so the scrollbar sits at the window edge */}
-      <main class="min-w-0 flex-1 border-r border-(--dads-solid-gray-200)">
+      <main class="min-w-0 flex-1 border-r border-(--line)">
         <Switch>
           <Match when={menuRoute()}>
             {(menu) => (
@@ -299,16 +299,16 @@ export function App() {
 
       {/* Compose modal: a new note, a reply or a quote repost */}
       <Show when={composeOpen()}>
-        <div class="fixed inset-0 flex items-center justify-center bg-black/40">
-          <div class="w-full max-w-md rounded-2xl bg-white p-4">
+        <div class="fixed inset-0 flex items-center justify-center bg-(--scrim)">
+          <div class="w-full max-w-md rounded-2xl bg-(--surface) p-4">
             <h2 class="font-bold">{COMPOSE_TITLES[composeMode()]}</h2>
             <Show when={composeTarget()}>
               {(event) => (
-                <div class="mt-2 flex gap-2 rounded-2xl bg-(--dads-solid-gray-100) p-2">
+                <div class="mt-2 flex gap-2 rounded-2xl bg-(--fill-soft) p-2">
                   <ProfileAvatar pubkey={event().pubkey} size={28} />
                   <div class="min-w-0">
                     <ProfileName pubkey={event().pubkey} class="text-sm" />
-                    <p class="line-clamp-3 text-xs break-words text-(--dads-solid-gray-700)">
+                    <p class="line-clamp-3 text-xs break-words text-(--ink-muted)">
                       {displayContent(event())}
                     </p>
                   </div>
@@ -316,11 +316,11 @@ export function App() {
               )}
             </Show>
             <textarea
-              class="mt-2 h-32 w-full rounded-2xl border border-(--dads-solid-gray-300) p-2"
+              class="mt-2 h-32 w-full rounded-2xl border border-(--line-strong) p-2"
               value={draft()}
               onInput={(e) => setDraft(e.currentTarget.value)}
             />
-            <p class="mt-1 text-sm text-(--dads-solid-gray-500)">
+            <p class="mt-1 text-sm text-(--ink-muted)">
               <Show
                 when={pubkey()}
                 fallback={"投稿にはログインが必要です (Settings) 。"}
@@ -329,17 +329,17 @@ export function App() {
               </Show>
             </p>
             <Show when={composeError()}>
-              <p class="mt-1 text-sm text-(--dads-red-600)">{composeError()}</p>
+              <p class="mt-1 text-sm text-(--danger)">{composeError()}</p>
             </Show>
             <div class="mt-3 flex justify-end gap-2">
               <button
-                class="rounded-2xl border border-(--dads-solid-gray-300) px-4 py-2"
+                class="rounded-2xl border border-(--line-strong) px-4 py-2"
                 onClick={closeCompose}
               >
                 閉じる
               </button>
               <button
-                class="rounded-2xl bg-(--dads-blue-700) px-4 py-2 text-white disabled:opacity-50"
+                class="rounded-2xl bg-(--accent) px-4 py-2 text-(--on-accent) disabled:opacity-50"
                 disabled={
                   pubkey() === null ||
                   draft().trim() === "" ||
@@ -362,7 +362,7 @@ export function App() {
 
       {/* Transient confirmation for repost and reaction */}
       <Show when={noticeMessage()}>
-        <p class="pointer-events-none fixed bottom-6 left-1/2 z-30 -translate-x-1/2 rounded-full bg-(--dads-solid-gray-800) px-4 py-2 text-sm text-white">
+        <p class="pointer-events-none fixed bottom-6 left-1/2 z-30 -translate-x-1/2 rounded-full bg-(--chip) px-4 py-2 text-sm text-(--on-chip)">
           {noticeMessage()}
         </p>
       </Show>
@@ -425,8 +425,7 @@ function projectRoute(route: () => Route): {
  * A feed or a page from the menu. Home is the app itself, so it has no bar and
  * nowhere to go back to. Every other page carries one, the way a note and a
  * profile do, and names itself there so the address can be copied from
- * wherever the reader is. Notifications cannot hand over the bar it pins
- * itself, so that one lets this bar scroll away rather than cover it.
+ * wherever the reader is.
  */
 function MenuContent(props: {
   menu: Menu;
@@ -441,10 +440,7 @@ function MenuContent(props: {
     >
       {(menu) => (
         <div>
-          <PageBar
-            id={`#/${menu()}`}
-            sticky={menu() !== "notifications"}
-          />
+          <PageBar id={`#/${menu()}`} />
           <Switch>
             <Match when={menu() === "notifications"}>
               <NotificationsView onSelect={props.onSelect} />
@@ -507,10 +503,10 @@ function EventDetailView(props: {
           the way back, and it carries the id a shared link is built from. */}
       <PageBar id={props.eventId} />
       <Show when={detail.loading()}>
-        <p class="px-4 py-6 text-(--dads-solid-gray-500)">読み込み中…</p>
+        <p class="px-4 py-6 text-(--ink-muted)">読み込み中…</p>
       </Show>
       <Show when={detail.failed()}>
-        <p class="px-4 py-6 text-(--dads-solid-gray-500)">
+        <p class="px-4 py-6 text-(--ink-muted)">
           イベントを取得できませんでした (削除済み、またはリレーに存在しません)。
         </p>
       </Show>
@@ -591,12 +587,12 @@ function ReplyForm(props: { target: NostrEvent }) {
 
   return (
     <form
-      class="border-b border-(--dads-solid-gray-200) px-4 py-3"
+      class="border-b border-(--line) px-4 py-3"
       onSubmit={(e) => void submit(e)}
     >
       <textarea
         ref={input}
-        class="w-full rounded-2xl border border-(--dads-solid-gray-300) p-2"
+        class="w-full rounded-2xl border border-(--line-strong) p-2"
         rows={2}
         placeholder={
           pubkey() === null
@@ -615,7 +611,7 @@ function ReplyForm(props: { target: NostrEvent }) {
         />
         <button
           type="submit"
-          class="rounded-2xl bg-(--dads-blue-700) px-4 py-1.5 text-sm text-white disabled:opacity-50"
+          class="rounded-2xl bg-(--accent) px-4 py-1.5 text-sm text-(--on-accent) disabled:opacity-50"
           disabled={pubkey() === null || busy() || draft().trim() === ""}
         >
           {busy() ? "送信中…" : "リプライ"}
@@ -623,7 +619,7 @@ function ReplyForm(props: { target: NostrEvent }) {
       </div>
       <Show when={error()}>
         {(message) => (
-          <p class="mt-1 text-sm text-(--dads-red-600)">{message()}</p>
+          <p class="mt-1 text-sm text-(--danger)">{message()}</p>
         )}
       </Show>
     </form>
@@ -645,10 +641,10 @@ function RepliesOf(props: {
           the conversation with one of its own. */}
       <ReplyForm target={props.target} />
       <Show when={state().loading()}>
-        <p class="px-4 py-4 text-(--dads-solid-gray-500)">リプライを読み込み中…</p>
+        <p class="px-4 py-4 text-(--ink-muted)">リプライを読み込み中…</p>
       </Show>
       <Show when={!state().loading() && state().searched() && answers().length === 0}>
-        <p class="px-4 py-4 text-(--dads-solid-gray-500)">
+        <p class="px-4 py-4 text-(--ink-muted)">
           この投稿へのリプライはまだありません。
         </p>
       </Show>

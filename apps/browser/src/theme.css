@@ -158,8 +158,87 @@
 }
 
 body {
-  background-color: var(--dads-white);
-  color: var(--dads-solid-gray-900);
+  background-color: var(--surface);
+  color: var(--ink);
+}
+
+/*
+ * The roles the app paints with. The light theme is the DADS palette above
+ * exactly as it reads on white, so naming the roles instead of the steps
+ * changes nothing a reader can see today; it is what lets a second theme be
+ * one block rather than a decision in every component.
+ *
+ * The dark theme is derived from the same anchors, mixed toward white for
+ * anything that carries text and toward the dark neutral for anything that
+ * fills, so no hex is invented and both themes come from one palette. Each
+ * role is named for the job it does, which is why there is a `--on-accent`
+ * beside the `--accent` it sits on: in the dark theme the accent is a light
+ * blue, so white text on it would be unreadable.
+ */
+:root {
+  color-scheme: light;
+
+  --surface: #ffffff;
+  --fill: var(--dads-solid-gray-200);
+  --fill-soft: var(--dads-solid-gray-100);
+  --line: var(--dads-solid-gray-200);
+  --line-strong: var(--dads-solid-gray-300);
+
+  --ink: var(--dads-solid-gray-900);
+  --ink-muted: var(--dads-solid-gray-500);
+  --ink-quiet: var(--dads-solid-gray-600);
+
+  --chip: var(--dads-solid-gray-800);
+  --on-chip: #ffffff;
+
+  --accent: var(--dads-blue-700);
+  --on-accent: #ffffff;
+  --accent-soft: var(--dads-blue-50);
+  --accent-ink: var(--dads-blue-800);
+
+  --danger: var(--dads-red-600);
+  --warn: var(--dads-yellow-600);
+  --warn-strong: var(--dads-yellow-800);
+  --warn-soft: var(--dads-yellow-50);
+  --warn-ink: var(--dads-solid-gray-800);
+  --ok: var(--dads-green-600);
+  --auth: var(--dads-orange-600);
+  --unknown: var(--dads-solid-gray-400);
+
+  --scrim: rgb(0 0 0 / 0.4);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --surface: #111111;
+  --fill: #2e2e2e;
+  --fill-soft: #1a1a1a;
+  --line: #2e2e2e;
+  --line-strong: #474747;
+
+  --ink: #e6e6e6;
+  --ink-muted: #b3b3b3;
+  --ink-quiet: #999999;
+
+  --chip: #e6e6e6;
+  --on-chip: #1a1a1a;
+
+  --accent: color-mix(in srgb, #0017c1 45%, white);
+  --on-accent: color-mix(in srgb, #0017c1 80%, black);
+  --accent-soft: color-mix(in srgb, #0017c1 25%, #111111);
+  --accent-ink: color-mix(in srgb, #0017c1 30%, white);
+
+  --danger: color-mix(in srgb, #d11a2a 45%, white);
+  --warn: color-mix(in srgb, #c9a100 55%, white);
+  --warn-strong: color-mix(in srgb, #c9a100 35%, white);
+  --warn-soft: color-mix(in srgb, #c9a100 18%, #111111);
+  --warn-ink: color-mix(in srgb, #c9a100 25%, white);
+  --ok: color-mix(in srgb, #0f7b3d 45%, white);
+  --auth: color-mix(in srgb, #c96a00 45%, white);
+  --unknown: #757575;
+
+  --scrim: rgb(0 0 0 / 0.6);
 }
 
 /*

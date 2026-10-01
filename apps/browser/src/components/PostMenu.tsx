@@ -47,7 +47,7 @@ export function PostMenu(props: {
         type="button"
         aria-label="投稿の操作"
         aria-expanded={open()}
-        class="rounded-full px-2 py-0.5 text-(--dads-solid-gray-500) hover:bg-(--dads-solid-gray-200) hover:text-(--dads-solid-gray-900)"
+        class="rounded-full px-2 py-0.5 text-(--ink-muted) hover:bg-(--line) hover:text-(--ink)"
         onClick={(e) => {
           // The whole card is clickable; the menu is not.
           e.stopPropagation();
@@ -57,7 +57,7 @@ export function PostMenu(props: {
         …
       </button>
       <Show when={open()}>
-        <div class="absolute top-full right-0 z-20 mt-1 w-52 rounded-2xl border border-(--dads-solid-gray-200) bg-white py-1 shadow-lg">
+        <div class="absolute top-full right-0 z-20 mt-1 w-52 rounded-2xl border border-(--line) bg-(--surface) py-1 shadow-lg">
           <MenuItem
             label="詳細を開く"
             onSelect={() => {
@@ -80,7 +80,7 @@ export function PostMenu(props: {
         </div>
       </Show>
       <Show when={notice()}>
-        <span class="absolute top-full right-0 z-20 mt-1 w-max rounded-2xl bg-(--dads-solid-gray-800) px-3 py-1 text-xs whitespace-nowrap text-white">
+        <span class="absolute top-full right-0 z-20 mt-1 w-max rounded-2xl bg-(--chip) px-3 py-1 text-xs whitespace-nowrap text-(--on-chip)">
           {notice()}
         </span>
       </Show>
@@ -92,7 +92,7 @@ function MenuItem(props: { label: string; onSelect: () => void }) {
   return (
     <button
       type="button"
-      class="block w-full px-4 py-2 text-left text-sm hover:bg-(--dads-blue-50)"
+      class="block w-full px-4 py-2 text-left text-sm hover:bg-(--accent-soft)"
       onClick={(e) => {
         e.stopPropagation();
         props.onSelect();

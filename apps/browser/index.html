@@ -4,6 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dacci</title>
+    <script>
+      // The dark theme has to be on the document before the first paint, or a
+      // reader who chose it sees a white flash. This reads the same key
+      // `theme.ts` uses; the two must agree, so keep them together.
+      (() => {
+        let asked = "system";
+        try {
+          asked = localStorage.getItem("dacci.theme") ?? "system";
+        } catch {
+          // Storage refused: the app still applies a theme, just after paint.
+        }
+        const dark =
+          asked === "dark" ||
+          (asked === "system" &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.toggle("dark", dark);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

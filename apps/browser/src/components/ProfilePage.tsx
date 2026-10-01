@@ -36,8 +36,8 @@ export function ProfileHeader(props: { pubkey: string }) {
   };
 
   return (
-    <header class="border-b border-(--dads-solid-gray-200)">
-      <div class={`relative w-full overflow-hidden bg-(--dads-solid-gray-200) ${BANNER_RATIO}`}>
+    <header class="border-b border-(--line)">
+      <div class={`relative w-full overflow-hidden bg-(--fill) ${BANNER_RATIO}`}>
         <Show when={banner()}>
           {(url) => (
             <img
@@ -57,7 +57,7 @@ export function ProfileHeader(props: { pubkey: string }) {
           <ProfileAvatar
             pubkey={props.pubkey}
             size={128}
-            class="rounded-full ring-4 ring-white"
+            class="rounded-full ring-4 ring-(--surface)"
           />
         </div>
         <div class="flex flex-wrap items-center gap-x-2">
@@ -66,13 +66,13 @@ export function ProfileHeader(props: { pubkey: string }) {
           </span>
           <Show when={profile()?.nip05}>
             {(identifier) => (
-              <span class="text-xs text-(--dads-solid-gray-600)">
+              <span class="text-xs text-(--ink-quiet)">
                 {identifier()}
               </span>
             )}
           </Show>
         </div>
-        <p class="font-mono text-xs break-all text-(--dads-solid-gray-600)">
+        <p class="font-mono text-xs break-all text-(--ink-quiet)">
           {encodeNpub(props.pubkey) ?? props.pubkey}
         </p>
         <Show when={profile()?.about}>
@@ -82,7 +82,7 @@ export function ProfileHeader(props: { pubkey: string }) {
             </p>
           )}
         </Show>
-        <p class="mt-2 flex flex-wrap gap-x-4 text-xs text-(--dads-solid-gray-600)">
+        <p class="mt-2 flex flex-wrap gap-x-4 text-xs text-(--ink-quiet)">
           <Show when={follows() !== null}>
             <span>フォロー {follows()}</span>
           </Show>
@@ -146,7 +146,7 @@ export function ProfilePage(props: {
     <Show
       when={props.invalid === true ? "" : subject0()}
       fallback={
-        <p class="px-4 py-6 text-(--dads-solid-gray-500)">
+        <p class="px-4 py-6 text-(--ink-muted)">
           {props.invalid === true
             ? "プロフィールのリンクが壊れています (pubkey がありません)。"
             : "プロフィールを見るにはログインしてください (Settings)。"}
@@ -155,16 +155,20 @@ export function ProfilePage(props: {
     >
       {(author) => (
         <div>
-          {/* The bar names the profile in the address bar, the way a note's
-              does. The tab row below pins itself, so this one scrolls away
-              rather than the two covering each other. */}
-          <PageBar id={author()} sticky={false} />
-          <ProfileHeader pubkey={author()} />
-          <div ref={feed.setHeaderRef} class="sticky top-0 z-20 bg-white">
+          {/* The bar and the profile header share a region, which is what
+              bounds where the pinned bar goes: it hovers over the banner and
+              is pushed up and out as the region ends, exactly where the tab
+              row below takes the top. Bounding it any later would have the
+              tabs cover it instead. */}
+          <div>
+            <PageBar id={author()} />
+            <ProfileHeader pubkey={author()} />
+          </div>
+          <div ref={feed.setHeaderRef} class="sticky top-0 z-30 bg-(--surface)">
             <FeedTabs tab={feed.tab()} onSelect={onTab} />
             <Show when={subject() === author() && buffered().length > 0}>
               <button
-                class="block w-full border-b border-(--dads-solid-gray-200) px-4 py-3 text-left hover:bg-(--dads-blue-50)"
+                class="block w-full border-b border-(--line) px-4 py-3 text-left hover:bg-(--accent-soft)"
                 onClick={flushProfileArrivals}
               >
                 新着 {buffered().length} 件
@@ -172,17 +176,17 @@ export function ProfilePage(props: {
             </Show>
           </div>
           <Show when={feed.authRelays().length > 0}>
-            <p class="border-b border-(--dads-yellow-600) bg-(--dads-yellow-50) px-4 py-2 text-sm text-(--dads-solid-gray-800)">
+            <p class="border-b border-(--warn) bg-(--warn-soft) px-4 py-2 text-sm text-(--warn-ink)">
               認証が必要なリレー: {feed.authRelays().join(", ")}
             </p>
           </Show>
 
           <div ref={feed.setListRef}>
             <Show when={feed.loading() && feed.events().length === 0}>
-              <p class="px-4 py-6 text-(--dads-solid-gray-500)">読み込み中…</p>
+              <p class="px-4 py-6 text-(--ink-muted)">読み込み中…</p>
             </Show>
             <Show when={!feed.loading() && feed.events().length === 0}>
-              <p class="px-4 py-6 text-(--dads-solid-gray-500)">
+              <p class="px-4 py-6 text-(--ink-muted)">
                 {feed.tab() === "notes"
                   ? "这只の投稿はまだありません。"
                   : "投稿はまだありません。"}
@@ -193,7 +197,7 @@ export function ProfilePage(props: {
             </For>
             <Show when={feed.hasMore() && !feed.loading()}>
               <button
-                class="block w-full border-b border-(--dads-solid-gray-200) px-4 py-3 text-left hover:bg-(--dads-blue-50) disabled:opacity-50"
+                class="block w-full border-b border-(--line) px-4 py-3 text-left hover:bg-(--accent-soft) disabled:opacity-50"
                 disabled={feed.loadingMore()}
                 onClick={() => void loadMoreProfile()}
               >
@@ -202,7 +206,7 @@ export function ProfilePage(props: {
             </Show>
           </div>
           <Show when={!feed.hasMore() && feed.events().length > 0}>
-            <p class="px-4 py-4 text-sm text-(--dads-solid-gray-500)">
+            <p class="px-4 py-4 text-sm text-(--ink-muted)">
               {feed.coverage() === "complete"
                 ? "すべての投稿を読み込みました"
                 : "取得可能な投稿を読み込みました (一部未確認)"}

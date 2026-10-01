@@ -179,7 +179,7 @@ export function UploadPicker(props: {
     >
       <button
         type="button"
-        class="flex size-8 items-center justify-center rounded-full text-(--dads-solid-gray-500) hover:bg-(--dads-solid-gray-100) hover:text-(--dads-blue-700)"
+        class="flex size-8 items-center justify-center rounded-full text-(--ink-muted) hover:bg-(--fill-soft) hover:text-(--accent)"
         aria-label="画像をアップロード"
         aria-expanded={open()}
         title="画像をアップロード"
@@ -197,10 +197,10 @@ export function UploadPicker(props: {
       <Show when={open()}>
         <div
           data-list
-          class="absolute top-0 left-0 z-30 max-h-[calc(100dvh-1rem)] w-72 overflow-y-auto overscroll-contain rounded-2xl border border-(--dads-solid-gray-200) bg-white p-1 shadow-lg"
+          class="absolute top-0 left-0 z-30 max-h-[calc(100dvh-1rem)] w-72 overflow-y-auto overscroll-contain rounded-2xl border border-(--line) bg-(--surface) p-1 shadow-lg"
           style={{ transform: `translate(${at().x}px, ${at().y}px)` }}
         >
-          <p class="px-3 pt-2 pb-1 text-xs font-bold text-(--dads-solid-gray-600)">
+          <p class="px-3 pt-2 pb-1 text-xs font-bold text-(--ink-quiet)">
             Media upload(Blossom)
           </p>
           <ServerList
@@ -254,7 +254,7 @@ function ServerList(props: {
     <Show
       when={props.servers.length > 0}
       fallback={
-        <p class="px-3 py-1 text-xs text-(--dads-solid-gray-500)">
+        <p class="px-3 py-1 text-xs text-(--ink-muted)">
           サーバーが登録されていません
         </p>
       }
@@ -265,7 +265,7 @@ function ServerList(props: {
             <li class="flex items-center gap-1">
               <button
                 type="button"
-                class="min-w-0 flex-1 truncate rounded-2xl px-3 py-1.5 text-left text-sm hover:bg-(--dads-blue-50)"
+                class="min-w-0 flex-1 truncate rounded-2xl px-3 py-1.5 text-left text-sm hover:bg-(--accent-soft)"
                 title={`${server.url} にアップロード`}
                 onClick={() => props.onPick(server)}
               >
@@ -276,7 +276,7 @@ function ServerList(props: {
               <Show when={server.builtin !== true}>
                 <button
                   type="button"
-                  class="shrink-0 rounded-full px-2 py-1 text-xs text-(--dads-solid-gray-500) hover:bg-(--dads-solid-gray-200) hover:text-(--dads-red-600)"
+                  class="shrink-0 rounded-full px-2 py-1 text-xs text-(--ink-muted) hover:bg-(--line) hover:text-(--danger)"
                   title="このサーバーを削除"
                   onClick={() => props.onRemove(server.url)}
                 >
@@ -303,10 +303,10 @@ function AddRow(props: {
   onAdd: () => void;
 }) {
   return (
-    <div class="border-t border-(--dads-solid-gray-200)">
+    <div class="border-t border-(--line)">
       <button
         type="button"
-        class="w-full rounded-2xl px-3 py-1.5 text-left text-sm text-(--dads-blue-700) hover:bg-(--dads-blue-50)"
+        class="w-full rounded-2xl px-3 py-1.5 text-left text-sm text-(--accent) hover:bg-(--accent-soft)"
         onClick={props.onToggle}
       >
         {props.label}
@@ -315,7 +315,7 @@ function AddRow(props: {
         <div class="px-2 pb-2">
           <div class="flex gap-1">
             <input
-              class="min-w-0 flex-1 rounded-2xl border border-(--dads-solid-gray-300) px-2 py-1 text-sm"
+              class="min-w-0 flex-1 rounded-2xl border border-(--line-strong) px-2 py-1 text-sm"
               placeholder={props.placeholder}
               value={props.draft}
               disabled={props.saving}
@@ -326,7 +326,7 @@ function AddRow(props: {
             />
             <button
               type="button"
-              class="rounded-2xl bg-(--dads-blue-700) px-3 py-1 text-sm text-white disabled:opacity-50"
+              class="rounded-2xl bg-(--accent) px-3 py-1 text-sm text-(--on-accent) disabled:opacity-50"
               disabled={props.draft.trim() === "" || props.saving}
               onClick={props.onAdd}
             >
@@ -335,7 +335,7 @@ function AddRow(props: {
           </div>
           <Show when={props.error}>
             {(message) => (
-              <p class="mt-1 px-1 text-xs text-(--dads-red-600)">{message()}</p>
+              <p class="mt-1 px-1 text-xs text-(--danger)">{message()}</p>
             )}
           </Show>
         </div>
