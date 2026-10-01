@@ -1,10 +1,10 @@
 import type { NostrEvent } from "dacci-nostr-nips";
 import { CONTACTS_KIND, encodeNpub, parseContacts } from "dacci-nostr-nips";
-import { createEffect, For, onMount, Show } from "solid-js";
+import { createEffect, For, onMount, Show, untrack } from "solid-js";
 import { useAuth } from "../auth.jsx";
 import { EventCard } from "./EventCard.jsx";
 import { ProfileAvatar, ProfileName } from "./ProfileAvatar.jsx";
-import { FeedTabs } from "../feed-tabs.jsx";
+import { FeedTabs, type FeedTab } from "../feed-tabs.jsx";
 import {
   flushProfileArrivals,
   loadMoreProfile,
@@ -12,6 +12,7 @@ import {
   selectProfileTab,
   useProfileFeed,
 } from "../profile-feed.js";
+import { feedHash, navigate, profileHash } from "../router.js";
 import { useProfileLive } from "../live.js";
 import { useProfile } from "../profile.js";
 import { useFollowCount } from "../follows.js";
@@ -106,6 +107,8 @@ export function ProfilePage(props: {
   pubkey: string | null;
   /** The link carried no usable pubkey. */
   invalid?: boolean;
+  /** True while the URL asks for the Replies and notes tab. */
+  replies?: boolean;
   onSelect: (event: NostrEvent) => void;
 }) {
   const { pubkey: self } = useAuth();
@@ -120,6 +123,23 @@ export function ProfilePage(props: {
   createEffect(() => {
     openProfile(subject0());
   });
+
+  // The URL names the tab, so a shared profile link opens the tab it
+  // asks for and the back button walks the tab history.
+  createEffect(() => {
+    const next: FeedTab = props.replies === true ? "replies" : "notes";
+    untrack(() => {
+      if (feed.tab() !== next) selectProfileTab(next);
+    });
+  });
+
+  const onTab = (tab: FeedTab): void => {
+    const base =
+      props.invalid === true || props.pubkey === null
+        ? "#/profile"
+        : profileHash(props.pubkey);
+    navigate(feedHash(base, tab === "replies"));
+  };
 
   return (
     <Show
@@ -136,7 +156,7 @@ export function ProfilePage(props: {
         <div>
           <ProfileHeader pubkey={author()} />
           <div ref={feed.setHeaderRef} class="sticky top-0 z-20 bg-white">
-            <FeedTabs tab={feed.tab()} onSelect={selectProfileTab} />
+            <FeedTabs tab={feed.tab()} onSelect={onTab} />
             <Show when={subject() === author() && buffered().length > 0}>
               <button
                 class="block w-full border-b border-(--dads-solid-gray-200) px-4 py-3 text-left hover:bg-(--dads-blue-50)"

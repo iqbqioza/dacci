@@ -1,9 +1,20 @@
 export type Menu = "home" | "notifications" | "network" | "settings";
 
+/**
+ * The `/replies` suffix that selects the Replies and notes tab. The Notes
+ * tab carries no suffix, so a link to a feed is the short one.
+ */
+const REPLIES_SUFFIX = "replies";
+
 export type Route =
-  | { name: "menu"; menu: Menu }
+  | { name: "menu"; menu: Menu; replies: boolean }
   /** `invalid` marks a profile link that carries no usable pubkey. */
-  | { name: "profile"; pubkey: string | null; invalid: boolean }
+  | {
+      name: "profile";
+      pubkey: string | null;
+      invalid: boolean;
+      replies: boolean;
+    }
   | { name: "event"; eventId: string };
 
 const MENUS: Menu[] = ["home", "notifications", "network", "settings"];
@@ -13,11 +24,25 @@ function isMenu(value: string): value is Menu {
 }
 
 /**
+ * Strips a trailing `/replies` and reports whether it was there. An
+ * unrecognised trailing segment is not a tab, so it is left in place for
+ * the caller to reject rather than silently read as Notes.
+ */
+function splitReplies(path: string): { base: string; replies: boolean } {
+  const match = path.match(/^(.*)\/([^/]+)$/);
+  if (match !== null && match[2] === REPLIES_SUFFIX) {
+    return { base: match[1], replies: true };
+  }
+  return { base: path, replies: false };
+}
+
+/**
  * Parse a location hash into a route. Unknown hashes fall back to home
  * so a broken link never blanks the app.
  *
  * `#/profile` is the reader's own profile and `#/profile/<pubkey>` anyone
- * else's, which is what the links in the feed use.
+ * else's, which is what the links in the feed use. A `/replies` suffix on
+ * either a feed or a profile selects the Replies and notes tab.
  */
 export function parseHash(hash: string): Route {
   const path = hash.startsWith("#") ? hash.slice(1) : hash;
@@ -25,11 +50,14 @@ export function parseHash(hash: string): Route {
   if (eventMatch) {
     return { name: "event", eventId: eventMatch[1].toLowerCase() };
   }
-  const profileMatch = path.match(/^\/profile(?:\/([^/]*))?\/?$/);
+  // Only the feeds carry tabs, so the suffix is read before the routes that
+  // would otherwise treat "replies" as a menu name or a pubkey.
+  const { base, replies } = splitReplies(path);
+  const profileMatch = base.match(/^\/profile(?:\/([^/]*))?\/?$/);
   if (profileMatch !== null) {
     const raw = profileMatch[1];
     if (raw === undefined || raw === "") {
-      return { name: "profile", pubkey: null, invalid: false };
+      return { name: "profile", pubkey: null, invalid: false, replies };
     }
     // A broken profile link must say so: falling back to the home feed
     // would show the reader someone else's timeline without warning.
@@ -38,16 +66,14 @@ export function parseHash(hash: string): Route {
       name: "profile",
       pubkey: usable ? raw.toLowerCase() : null,
       invalid: !usable,
+      replies,
     };
   }
-  const menuMatch = path.match(/^\/([a-z]+)\/?$/);
+  const menuMatch = base.match(/^\/([a-z]+)\/?$/);
   if (menuMatch && isMenu(menuMatch[1])) {
-    return { name: "menu", menu: menuMatch[1] };
+    return { name: "menu", menu: menuMatch[1], replies };
   }
-  if (path === "" || path === "/") {
-    return { name: "menu", menu: "home" };
-  }
-  return { name: "menu", menu: "home" };
+  return { name: "menu", menu: "home", replies: false };
 }
 
 export function currentHash(): string {
@@ -68,6 +94,18 @@ export function navigate(hash: string): void {
 /** Link to a profile page, own or someone else's. */
 export function profileHash(pubkey: string): string {
   return `#/profile/${pubkey}`;
+}
+
+/**
+ * Link to a feed tab. Notes has no suffix, so a link to the default tab
+ * stays the short `#/home` form that is already in circulation.
+ */
+export function feedHash(base: string, replies: boolean): string {
+  const path = toHash(base);
+  if (!replies) return path;
+  return path.endsWith("/")
+    ? `${path}${REPLIES_SUFFIX}`
+    : `${path}/${REPLIES_SUFFIX}`;
 }
 
 /** Go back in history, or home when there is nowhere to go back to. */

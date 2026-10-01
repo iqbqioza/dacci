@@ -79,7 +79,7 @@ const MENU_LABELS: Array<{ menu: Menu; label: string }> = [
 
 export function App() {
   const [route, setRoute] = createSignal<Route>(parseHash(currentHash()));
-  const { menuRoute, eventRoute, profileRoute, profileTarget } =
+  const { menuRoute, eventRoute, profileRoute, profileTarget, repliesRoute } =
     projectRoute(route);
   const [draft, setDraft] = createSignal("");
   const { pubkey } = useAuth();
@@ -212,7 +212,13 @@ export function App() {
       <main class="min-w-0 flex-1 border-r border-(--dads-solid-gray-200)">
         <Switch>
           <Match when={menuRoute()}>
-            {(menu) => <MenuContent menu={menu()} onSelect={openDetail} />}
+            {(menu) => (
+              <MenuContent
+                menu={menu()}
+                replies={repliesRoute()}
+                onSelect={openDetail}
+              />
+            )}
           </Match>
           {/* Match needs an accessor to hand the target to the page. */}
           <Match when={profileTarget()}>
@@ -220,6 +226,7 @@ export function App() {
               <ProfilePage
                 pubkey={target().pubkey}
                 invalid={target().invalid}
+                replies={repliesRoute()}
                 onSelect={openDetail}
               />
             )}
@@ -315,10 +322,12 @@ function isMenuActive(route: Route, menu: Menu): boolean {
 }
 
 // Match needs accessors, so the discriminated union is projected into
-// two optional accessors that narrow cleanly under TS.
+// optional accessors that narrow cleanly under TS.
 function projectRoute(route: () => Route): {
   menuRoute: () => Menu | undefined;
   eventRoute: () => string | undefined;
+  /** True while the URL asks for the Replies and notes tab. */
+  repliesRoute: () => boolean;
   /** Pubkey of the profile being shown; null means the reader's own. */
   profileRoute: () => string | null | undefined;
   /** The whole profile target, or undefined off the profile page. */
@@ -332,6 +341,11 @@ function projectRoute(route: () => Route): {
     eventRoute: () => {
       const current = route();
       return current.name === "event" ? current.eventId : undefined;
+    },
+    repliesRoute: () => {
+      const current = route();
+      // An event page has no tabs, so it reports the default.
+      return current.name !== "event" && current.replies;
     },
     profileRoute: () => {
       const current = route();
@@ -348,12 +362,14 @@ function projectRoute(route: () => Route): {
 
 function MenuContent(props: {
   menu: Menu;
+  /** The tab the URL selects. */
+  replies: boolean;
   onSelect: (event: NostrEvent) => void;
 }) {
   return (
     <Switch>
       <Match when={props.menu === "home"}>
-        <HomeTimeline onSelect={props.onSelect} />
+        <HomeTimeline replies={props.replies} onSelect={props.onSelect} />
       </Match>
       <Match when={props.menu === "notifications"}>
         <NotificationsView onSelect={props.onSelect} />

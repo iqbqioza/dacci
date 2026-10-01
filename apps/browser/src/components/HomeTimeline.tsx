@@ -1,6 +1,6 @@
 import type { NostrEvent } from "dacci-nostr-nips";
 import { createEffect, For, onCleanup, Show, untrack } from "solid-js";
-import { FeedTabs } from "../feed-tabs.jsx";
+import { FeedTabs, type FeedTab } from "../feed-tabs.jsx";
 import {
   flushNewArrivals,
   loadMoreHome,
@@ -10,13 +10,30 @@ import {
   useHomeFeed,
 } from "../home-feed.js";
 import { useFeedLive } from "../live.js";
+import { feedHash, navigate } from "../router.js";
 import { EventCard } from "./EventCard.jsx";
 
 export function HomeTimeline(props: {
+  /** True while the URL asks for the Replies and notes tab. */
+  replies: boolean;
   onSelect: (event: NostrEvent) => void;
 }) {
   const feed = useHomeFeed();
   const { buffered } = useFeedLive();
+
+  // The URL is the single source of truth for the tab, so a shared link
+  // lands on the tab it names and the back button walks the tab history.
+  createEffect(() => {
+    const next: FeedTab = props.replies ? "replies" : "notes";
+    untrack(() => {
+      if (feed.tab() !== next) selectHomeTab(next);
+    });
+  });
+
+  // Clicking a tab rewrites the URL, which routes back here and applies it.
+  const onTab = (tab: FeedTab): void => {
+    navigate(feedHash("#/home", tab === "replies"));
+  };
 
   createEffect(() => {
     untrack(() => noteBarVisibility(buffered().length > 0));
@@ -56,7 +73,7 @@ export function HomeTimeline(props: {
         ref={feed.setHeaderRef}
         class="sticky top-0 z-20 bg-white"
       >
-        <FeedTabs tab={feed.tab()} onSelect={selectHomeTab} />
+        <FeedTabs tab={feed.tab()} onSelect={onTab} />
         <Show when={buffered().length > 0}>
           <button
             ref={feed.setBarRef}
