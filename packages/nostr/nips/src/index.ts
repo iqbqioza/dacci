@@ -21,12 +21,20 @@ export type { ClientMessage, RelayMessage } from "./message.js";
 export { isRelayMessage } from "./message.js";
 export {
   AUTH_EVENT_KIND,
+  base64,
+  base64Url,
+  BLOSSOM_AUTH_EVENT_KIND,
+  HTTP_AUTH_EVENT_KIND,
   isAuthRequiredMessage,
   isValidAuthSecret,
   signAuthEvent,
+  signBlossomAuth,
   signEvent,
+  signHttpAuth,
 } from "./auth.js";
-export type { AuthSecret, UnsignedEvent } from "./auth.js";
+export type { AuthSecret, HttpAuth, UnsignedEvent } from "./auth.js";
+export { sha256 } from "@noble/hashes/sha256";
+export { bytesToHex } from "@noble/hashes/utils";
 export {
   buildDeletion,
   buildQuoteRepost,

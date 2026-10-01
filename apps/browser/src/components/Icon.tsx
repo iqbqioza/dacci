@@ -1,4 +1,6 @@
 import {
+  paperClipIcon,
+  photoIcon,
   quoteRepostIcon,
   reactIcon,
   reactIconSolid,
@@ -13,6 +15,8 @@ const ICONS = {
   "quote-repost": quoteRepostIcon,
   react: reactIcon,
   "react-solid": reactIconSolid,
+  photo: photoIcon,
+  "paper-clip": paperClipIcon,
 } as const satisfies Record<string, Heroicon>;
 
 export type IconName = keyof typeof ICONS;

@@ -93,7 +93,7 @@ const PUBLISH_TIMEOUT_MS = 5000;
 export type PublishFailure = "no-signer" | "no-relay" | "rejected" | "empty";
 
 /** Signs and broadcasts to every relay, then caches for deep links. */
-async function publish(
+export async function publishEvent(
   template: {
     pubkey: string;
     created_at: number;
@@ -101,7 +101,7 @@ async function publish(
     tags: string[][];
     content: string;
   },
-  /** Set by the dialog only; a form reports the reason itself. */
+  /** Set by the dialog only; a form or a store reports the reason itself. */
   reportError: (reason: PublishFailure) => void = (reason) =>
     setError(FAILURE_TEXT[reason]),
 ): Promise<NostrEvent | null> {
@@ -180,7 +180,7 @@ export async function publishReply(
   const body = text.trim();
   if (pubkey === null) return { failure: "no-signer" };
   if (body === "") return { failure: "empty" };
-  const sent = await publish(
+  const sent = await publishEvent(
     buildReply({
       pubkey,
       target,
@@ -214,9 +214,9 @@ export async function submitCompose(text: string): Promise<boolean> {
     const created_at = now();
     const sent =
       current === null
-        ? await publish({ pubkey, created_at, kind: 1, tags: [], content: body })
+        ? await publishEvent({ pubkey, created_at, kind: 1, tags: [], content: body })
         : mode() === "quote"
-          ? await publish(
+          ? await publishEvent(
               buildQuoteRepost({
                 pubkey,
                 target: current,
@@ -224,7 +224,7 @@ export async function submitCompose(text: string): Promise<boolean> {
                 createdAt: created_at,
               }),
             )
-          : await publish(
+          : await publishEvent(
               buildReply({
                 pubkey,
                 target: current,
@@ -277,8 +277,8 @@ export async function toggleRepost(event: NostrEvent): Promise<boolean> {
   try {
     const sent =
       existing === undefined
-        ? await publish(buildRepost({ pubkey, target: event, createdAt: now() }))
-        : await publish(
+        ? await publishEvent(buildRepost({ pubkey, target: event, createdAt: now() }))
+        : await publishEvent(
             buildDeletion({
               pubkey,
               eventIds: [existing],
@@ -313,10 +313,10 @@ export async function toggleReaction(event: NostrEvent): Promise<boolean> {
   try {
     const sent =
       existing === undefined
-        ? await publish(
+        ? await publishEvent(
             buildReaction({ pubkey, target: event, createdAt: now() }),
           )
-        : await publish(
+        : await publishEvent(
             buildDeletion({
               pubkey,
               eventIds: [existing],

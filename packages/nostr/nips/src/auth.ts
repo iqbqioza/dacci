@@ -68,3 +68,121 @@ export function signAuthEvent(
 export function isAuthRequiredMessage(message: string): boolean {
   return message.startsWith("auth-required:");
 }
+
+/** NIP-98 HTTP API auth event kind. */
+export const HTTP_AUTH_EVENT_KIND = 27235;
+/** Blossom (BUD-11) authorization token kind. */
+export const BLOSSOM_AUTH_EVENT_KIND = 24242;
+
+/** What a signed `Authorization` header must carry. */
+export interface HttpAuth {
+  /** Scheme and credentials, e.g. `Nostr <base64 event>`. */
+  header: string;
+  /** The signed event, for callers that need its id. */
+  event: NostrEvent;
+}
+
+/**
+ * Build a NIP-98 authorization for one HTTP request. A file storage server
+ * checks the `u` and `method` tags against the request it received, so both
+ * are required and must match exactly.
+ */
+export async function signHttpAuth(input: {
+  method: string;
+  url: string;
+  /** 32-byte x-only pubkey of the signer. */
+  pubkey: string;
+  signEvent: (template: UnsignedEvent) => Promise<NostrEvent>;
+  /** SHA-256 of the file, or of whatever else the header must bind. */
+  payload?: Uint8Array;
+  createdAt?: number;
+}): Promise<HttpAuth> {
+  const created_at = input.createdAt ?? Math.floor(Date.now() / 1000);
+  const tags: string[][] = [
+    ["u", input.url],
+    ["method", input.method.toUpperCase()],
+  ];
+  if (input.payload !== undefined) tags.push(["payload", base64Of(input.payload)]);
+  const event = await input.signEvent({
+    pubkey: input.pubkey,
+    created_at,
+    kind: HTTP_AUTH_EVENT_KIND,
+    tags,
+    content: "",
+  });
+  return {
+    // NIP-98 encodes the whole event as base64 after the scheme name.
+    header: `Nostr ${base64(JSON.stringify(event))}`,
+    event,
+  };
+}
+
+/** How long a Blossom token stays valid. */
+const BLOSSOM_TOKEN_TTL_SECONDS = 60 * 10;
+
+/**
+ * Build a Blossom authorization token. BUD-11 defines a different event from
+ * NIP-98: kind 24242, a `t` verb naming the action, an `expiration` the
+ * server checks, and an `x` tag naming the blob when the endpoint implies
+ * one. A server validates all of these, so a NIP-98 header is refused.
+ */
+export async function signBlossomAuth(input: {
+  /** The verb the endpoint requires, e.g. `upload`. */
+  verb: string;
+  /** 32-byte x-only pubkey of the signer. */
+  pubkey: string;
+  signEvent: (template: UnsignedEvent) => Promise<NostrEvent>;
+  /** SHA-256 of the blob, required by most endpoints. */
+  hashHex?: string;
+  /** Host the token is scoped to; omitted means any server. */
+  server?: string;
+  /** Human readable note shown to the reader, per BUD-11. */
+  content?: string;
+  createdAt?: number;
+}): Promise<HttpAuth> {
+  const created_at = input.createdAt ?? Math.floor(Date.now() / 1000);
+  const tags: string[][] = [
+    ["t", input.verb],
+    ["expiration", String(created_at + BLOSSOM_TOKEN_TTL_SECONDS)],
+  ];
+  if (input.hashHex !== undefined) tags.push(["x", input.hashHex]);
+  if (input.server !== undefined) tags.push(["server", input.server]);
+  const event = await input.signEvent({
+    pubkey: input.pubkey,
+    created_at,
+    kind: BLOSSOM_AUTH_EVENT_KIND,
+    tags,
+    content: input.content ?? "",
+  });
+  return {
+    // BUD-11 asks for base64url without padding, as JWT uses, and keeps the
+    // `Nostr` scheme name. A server that decodes standard base64 accepts
+    // this too, since the two alphabets differ only outside the token.
+    header: `Nostr ${base64Url(JSON.stringify(event))}`,
+    event,
+  };
+}
+
+/** Base64 of raw bytes, for a NIP-98 tag value. */
+function base64Of(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+/** Base64 of a UTF-8 string, for the NIP-98 header itself. */
+export function base64(value: string): string {
+  return base64Of(new TextEncoder().encode(value));
+}
+
+/**
+ * Base64url without padding, which is what BUD-11 specifies for its token.
+ * The standard alphabet and the url-safe one differ only in `+` and `/`,
+ * which become `-` and `_`.
+ */
+export function base64Url(value: string): string {
+  return base64(value)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}

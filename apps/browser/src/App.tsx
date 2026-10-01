@@ -34,6 +34,7 @@ import { RelayDebugPanel } from "./components/RelayPanel.jsx";
 import { NetworkView } from "./components/NetworkView.jsx";
 import { EventCard } from "./components/EventCard.jsx";
 import { ProfilePage } from "./components/ProfilePage.jsx";
+import { UploadPicker } from "./components/UploadPicker.jsx";
 import { NotificationsView, SettingsView } from "./components/Views.jsx";
 import { getConnection } from "./nostr.js";
 import { noticeMessage } from "./notice.js";
@@ -45,6 +46,7 @@ import { resetNotifications } from "./notifications-feed.js";
 import { resetProfileFeed, openProfile } from "./profile-feed.js";
 import { resetProfiles } from "./profile.js";
 import { addReply, loadReplies, resetReplies, useReplies } from "./replies-feed.js";
+import { loadServers } from "./servers.js";
 import {
   initRelays,
   startAutoRefresh,
@@ -97,12 +99,18 @@ export function App() {
   };
   let stopLiveFeeds: () => void = () => {};
   let liveKey = "";
+  /** Whose server list is loaded, so it is read again only on a change. */
+  let serversIdentity = "";
 
   // Restore the persisted set first so personal relays survive reloads,
   // then restore the login session on top. Live status refresh runs on.
   onMount(() => {
     initRelays();
-    void restoreSession();
+    // The upload servers are the reader's own settings and live on the
+    // account, so they are read only once the session is known: asking
+    // before the restore finished would query as a signed-out reader and
+    // quietly fall back to the defaults.
+    void restoreSession().then(() => loadServers());
     const stopRefresh = startAutoRefresh();
     // Live feeds live at app level: switching pages must not stop them.
     const stopLive = startLiveFeeds(liveDeps);
@@ -154,6 +162,14 @@ export function App() {
     const key = `${pubkey() ?? ""}|${relayVersion()}|${JSON.stringify(feedAuthors() ?? [])}`;
     if (key === liveKey) return;
     liveKey = key;
+    // A login or logout changes whose servers these are, so they are read
+    // again. A relay change on its own does not: the same list still
+    // applies, and the startup read already covered the first pass.
+    const identity = `${pubkey() ?? ""}`;
+    if (identity !== serversIdentity) {
+      serversIdentity = identity;
+      untrack(() => void loadServers());
+    }
     untrack(() => {
       stopLiveFeeds();
       stopLiveFeeds = startLiveFeeds(liveDeps);
@@ -477,14 +493,10 @@ function EventDetailView(props: {
 }
 
 /**
- * The posts answering one post, below it. A NIP-10 reply and a NIP-22
- * comment are both answers, so both kinds appear here in the same order the
- * conversation happened.
- */
-/**
- * The reply box under a post. It replaces a heading here because a reader
- * looking at a conversation is usually the one about to join it, and the
- * form says how many answers already exist without needing a label.
+ * The reply box under a post, with the image picker beside it. It replaces a
+ * heading here because a reader looking at a conversation is usually the one
+ * about to join it, and the form says how many answers already exist without
+ * needing a label.
  */
 function ReplyForm(props: { target: NostrEvent }) {
   const { pubkey } = useAuth();
@@ -492,6 +504,28 @@ function ReplyForm(props: { target: NostrEvent }) {
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const count = () => useReplies(props.target.id).events().length;
+  // The caret is kept so an uploaded url lands where the reader was typing,
+  // not at the end of the text they have since moved away from.
+  let input: HTMLTextAreaElement | undefined;
+
+  /** Inserts text at the caret, or at the end when there is no caret. */
+  function insertAtCaret(text: string): void {
+    const el = input;
+    if (el === undefined) {
+      setDraft((prev) => (prev === "" ? text : `${prev}\n${text}`));
+      return;
+    }
+    const at = el.selectionStart ?? el.value.length;
+    const next = `${el.value.slice(0, at)}${text}${el.value.slice(at)}`;
+    setDraft(next);
+    // The value is set by the signal, so the caret has to be moved after the
+    // DOM catches up, or it would jump back to where it was.
+    queueMicrotask(() => {
+      const caret = at + text.length;
+      el.setSelectionRange(caret, caret);
+      el.focus();
+    });
+  }
 
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
@@ -520,6 +554,7 @@ function ReplyForm(props: { target: NostrEvent }) {
       onSubmit={(e) => void submit(e)}
     >
       <textarea
+        ref={input}
         class="w-full rounded-2xl border border-(--dads-solid-gray-300) p-2"
         rows={2}
         placeholder={
@@ -532,9 +567,16 @@ function ReplyForm(props: { target: NostrEvent }) {
         onInput={(e) => setDraft(e.currentTarget.value)}
       />
       <div class="mt-2 flex items-center justify-between gap-2">
-        <span class="text-xs text-(--dads-solid-gray-500)">
-          {count() > 0 ? `リプライ ${count()}` : "まだリプライはありません"}
-        </span>
+        <div class="flex items-center gap-1">
+          <UploadPicker
+            canUpload={pubkey() !== null}
+            onUploaded={insertAtCaret}
+            onError={setError}
+          />
+          <span class="text-xs text-(--dads-solid-gray-500)">
+            {count() > 0 ? `リプライ ${count()}` : "まだリプライはありません"}
+          </span>
+        </div>
         <button
           type="submit"
           class="rounded-2xl bg-(--dads-blue-700) px-4 py-1.5 text-sm text-white disabled:opacity-50"

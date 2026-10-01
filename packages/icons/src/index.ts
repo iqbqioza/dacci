@@ -1,4 +1,6 @@
 export {
+  paperClipIcon,
+  photoIcon,
   quoteRepostIcon,
   reactIcon,
   reactIconSolid,
