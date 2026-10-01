@@ -495,15 +495,14 @@ function EventDetailView(props: {
 /**
  * The reply box under a post, with the image picker beside it. It replaces a
  * heading here because a reader looking at a conversation is usually the one
- * about to join it, and the form says how many answers already exist without
- * needing a label.
+ * about to join it, and the answers are listed right below, so a count beside
+ * the box would only repeat what the list already shows.
  */
 function ReplyForm(props: { target: NostrEvent }) {
   const { pubkey } = useAuth();
   const [draft, setDraft] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
-  const count = () => useReplies(props.target.id).events().length;
   // The caret is kept so an uploaded url lands where the reader was typing,
   // not at the end of the text they have since moved away from.
   let input: HTMLTextAreaElement | undefined;
@@ -567,16 +566,11 @@ function ReplyForm(props: { target: NostrEvent }) {
         onInput={(e) => setDraft(e.currentTarget.value)}
       />
       <div class="mt-2 flex items-center justify-between gap-2">
-        <div class="flex items-center gap-1">
-          <UploadPicker
-            canUpload={pubkey() !== null}
-            onUploaded={insertAtCaret}
-            onError={setError}
-          />
-          <span class="text-xs text-(--dads-solid-gray-500)">
-            {count() > 0 ? `リプライ ${count()}` : "まだリプライはありません"}
-          </span>
-        </div>
+        <UploadPicker
+          canUpload={pubkey() !== null}
+          onUploaded={insertAtCaret}
+          onError={setError}
+        />
         <button
           type="submit"
           class="rounded-2xl bg-(--dads-blue-700) px-4 py-1.5 text-sm text-white disabled:opacity-50"
