@@ -112,23 +112,38 @@ export async function publishEvent(
     return null;
   }
   const event = await signer.signEvent(template);
-  // Only relays marked for writing receive what the reader publishes.
-  const urls = useRelays().writeRelays();
-  if (urls.length === 0) {
-    reportError("no-relay");
+  rememberEvents([event]);
+  const accepted = await sendToWriteRelays(event);
+  if (accepted === 0) {
+    reportError("rejected");
     return null;
   }
+  return event;
+}
+
+/**
+ * Sends an already-signed event to every relay the reader writes to, and says
+ * how many took it.
+ *
+ * The event is sent as it is: an id and a signature are the author's, and
+ * re-signing would produce a different event that no longer says what they
+ * wrote. That is what lets someone put another person's post onto their own
+ * relays without claiming to have written it.
+ */
+async function sendToWriteRelays(event: NostrEvent): Promise<number> {
+  // Only relays marked for writing receive what the reader publishes.
+  const urls = useRelays().writeRelays();
+  if (urls.length === 0) return 0;
   const settled = await Promise.allSettled(
     urls.map(async (url) => {
       // A relay that accepts the socket and never answers (relay.damus.io
       // does) must not hold the button hostage, so every publish is raced.
-      const result = await Promise.race([
+      return Promise.race([
         getConnection(url).publish(event),
         new Promise<null>((resolve) =>
           setTimeout(() => resolve(null), PUBLISH_TIMEOUT_MS),
         ),
       ]);
-      return result;
     }),
   );
   let accepted = 0;
@@ -139,12 +154,7 @@ export async function publishEvent(
     // Report the outcome per relay, so write-only relays show a real state.
     noteWriteResult(url, ok);
   });
-  rememberEvents([event]);
-  if (accepted === 0) {
-    reportError("rejected");
-    return null;
-  }
-  return event;
+  return accepted;
 }
 
 const FAILURE_TEXT: Record<PublishFailure, string> = {
@@ -300,6 +310,32 @@ export async function toggleRepost(event: NostrEvent): Promise<boolean> {
   } finally {
     setBusy(false);
   }
+}
+
+/**
+ * Puts a post onto the reader's own relays, whoever wrote it.
+ *
+ * The event is sent exactly as its author signed it. A relay stores what it
+ * is given, so this is how a post that only lives on relays the reader does not
+ * use ends up on their own set, and how their own post reaches a relay that
+ * missed it. It is not a repost: nothing refers to the post and no new event is
+ * created, so the copy on the new relay is the same event with the same id.
+ *
+ * What it cannot do is make the post appear for people who are not connected to
+ * these relays, which is why the notice names how many relays took it.
+ */
+export async function broadcastEvent(event: NostrEvent): Promise<boolean> {
+  if (useRelays().writeRelays().length === 0) {
+    showNotice("書き込むリレーがありません (Network)");
+    return false;
+  }
+  const accepted = await sendToWriteRelays(event);
+  if (accepted === 0) {
+    showNotice("再配信できませんでした");
+    return false;
+  }
+  showNotice(`${accepted} つのリレーに再配信しました`);
+  return true;
 }
 
 /**

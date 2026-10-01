@@ -2,7 +2,7 @@ import type { NostrEvent } from "dacci-nostr-nips";
 import { encodeNote, encodeNpub } from "dacci-nostr-nips";
 import { createSignal } from "solid-js";
 import { useAuth } from "../auth.jsx";
-import { deleteEvent } from "../compose.js";
+import { broadcastEvent, deleteEvent } from "../compose.js";
 import { isOwn } from "../deleted.js";
 import { Confirm } from "./Confirm.jsx";
 import { copyItem, OverflowMenu, type MenuEntry } from "./OverflowMenu.jsx";
@@ -13,8 +13,10 @@ import { copyItem, OverflowMenu, type MenuEntry } from "./OverflowMenu.jsx";
  *
  * The rows are what a post is made of: its own address, the author's key, and
  * the event as it was signed, so it can be verified or re-published elsewhere.
- * On the reader's own post one more row appears, which is the only one here
- * that cannot be undone.
+ * Two rows act on the network rather than on the text: putting the post on the
+ * reader's own relays, which is offered for anyone's post, and deleting it,
+ * which is offered only for their own because it is the one that cannot be
+ * undone.
  */
 export function PostMenu(props: {
   event: NostrEvent;
@@ -31,6 +33,17 @@ export function PostMenu(props: {
       label: "詳細を開く",
       run: () => {
         props.onOpen(props.event);
+        return null;
+      },
+    },
+    {
+      // The one row that is offered on every post, whatever wrote it: sending
+      // an event as it stands needs no authority over it. The outcome is
+      // reported by the action itself, which knows how many relays took it,
+      // so the menu does not add a second line saying less.
+      label: "自分のリレーに再配信",
+      run: async () => {
+        await broadcastEvent(props.event);
         return null;
       },
     },

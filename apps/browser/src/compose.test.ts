@@ -114,3 +114,61 @@ describe("deleteEvent", () => {
     expect(published).toHaveLength(0);
   });
 });
+
+describe("broadcastEvent", () => {
+  it("sends someone else's post as it stands, without signing it again", async () => {
+    // The id and the signature are the author's. Re-signing would make a
+    // different event, which is not the post any more.
+    const compose = await import("./compose.js");
+    const theirs = post(OTHER);
+    expect(await compose.broadcastEvent(theirs)).toBe(true);
+    expect(published).toEqual([theirs]);
+    expect((published[0] as NostrEvent).id).toBe(POST);
+    expect((published[0] as NostrEvent).sig).toBe("s".repeat(128));
+  });
+
+  it("needs no login, because the reader is not the author", async () => {
+    signedInAs = null;
+    const compose = await import("./compose.js");
+    expect(await compose.broadcastEvent(post(OTHER))).toBe(true);
+    expect(published).toHaveLength(1);
+  });
+
+  it("says so when no relay took it", async () => {
+    accepted = false;
+    const compose = await import("./compose.js");
+    expect(await compose.broadcastEvent(post(OTHER))).toBe(false);
+  });
+
+  it("sends nothing when there is no relay to write to", async () => {
+    vi.doMock("./relays.js", () => ({
+      useRelays: () => ({ writeRelays: () => [] }),
+      noteWriteResult: () => undefined,
+    }));
+    const compose = await import("./compose.js");
+    expect(await compose.broadcastEvent(post(OTHER))).toBe(false);
+    expect(published).toHaveLength(0);
+  });
+
+  it("reports the outcome per relay, so the panel shows a real state", async () => {
+    const noted: Array<[string, boolean]> = [];
+    vi.doMock("./nostr.js", () => ({
+      getConnection: (url: string) => ({
+        publish: async () => ({ accepted: url.includes("ok") }),
+      }),
+    }));
+    vi.doMock("./relays.js", () => ({
+      useRelays: () => ({
+        writeRelays: () => ["wss://ok.example", "wss://no.example"],
+      }),
+      noteWriteResult: (url: string, good: boolean) => noted.push([url, good]),
+    }));
+    const compose = await import("./compose.js");
+    // One relay took it, so the action succeeded and both relays are recorded.
+    expect(await compose.broadcastEvent(post(OTHER))).toBe(true);
+    expect(noted).toEqual([
+      ["wss://ok.example", true],
+      ["wss://no.example", false],
+    ]);
+  });
+});
