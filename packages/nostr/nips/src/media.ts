@@ -1,4 +1,6 @@
 import type { NostrEvent } from "./event.js";
+import type { ProfileMention } from "./profile-reference.js";
+import { textSegments } from "./profile-reference.js";
 import { displayContent } from "./text-reference.js";
 
 /**
@@ -31,11 +33,13 @@ export interface MediaRef {
 
 /**
  * A post's body in the order it was written, so an image can be shown where
- * the author put it instead of being pulled out into a gallery.
+ * the author put it instead of being pulled out into a gallery, and so a
+ * profile the post names can be shown as the name that author gave it.
  */
 export type ContentSegment =
   | { kind: "text"; text: string }
-  | { kind: "image"; image: MediaRef };
+  | { kind: "image"; image: MediaRef }
+  | { kind: "mention"; mention: ProfileMention };
 
 /** Extensions a file name may end in for a browser to render it inline. */
 const IMAGE_EXTENSIONS = new Set([
@@ -205,31 +209,44 @@ function urlsIn(text: string): Array<{ url: string; start: number; end: number }
  * the paragraph structure the post had, minus the urls that became images, so
  * what a reader reads is what the author wrote.
  */
-export function contentSegments(event: NostrEvent): ContentSegment[] {
+export function contentSegments(
+  event: NostrEvent,
+  /**
+   * The name to show for a pubkey the post mentions in its own text. Omit it
+   * and a mention is left as the `nostr:` uri it was written as, which is what
+   * a client that cannot resolve names has to show.
+   */
+  nameOf?: (pubkey: string) => string,
+): ContentSegment[] {
   const text = displayContent(event);
   const found = scan(event);
-  if (found.length === 0) return [{ kind: "text", text }];
+  // Without a resolver a mention is left as the `nostr:` uri it was written
+  // as, which is what a client that cannot resolve names has to show.
+  const say = (run: string): ContentSegment[] =>
+    nameOf === undefined ? [{ kind: "text", text: run }] : textSegments(run, nameOf);
+  if (found.length === 0) return tidy(say(text));
   const out: ContentSegment[] = [];
   let cursor = 0;
   for (const image of found) {
-    const before = text.slice(cursor, image.start);
-    if (before !== "") out.push({ kind: "text", text: before });
+    out.push(...say(text.slice(cursor, image.start)));
     out.push({ kind: "image", image: image.ref });
     cursor = image.end;
   }
-  const after = text.slice(cursor);
-  if (after !== "") out.push({ kind: "text", text: after });
+  out.push(...say(text.slice(cursor)));
   return tidy(out);
 }
 
 /**
  * Tidies the split: the url that became an image leaves the space it was
  * written in, and the whitespace that leaves behind is collapsed the way a
- * removed `nostr:` link is, without touching the paragraphs.
+ * removed `nostr:` link is, without touching the paragraphs. An image and a
+ * name are what the reader is here for, so neither is ever dropped.
  */
 function tidy(segments: ContentSegment[]): ContentSegment[] {
   return segments
-    .filter((segment) => segment.kind === "image" || segment.text.trim() !== "")
+    .filter(
+      (segment) => segment.kind !== "text" || segment.text.trim() !== "",
+    )
     .map((segment) =>
       segment.kind === "text"
         ? {

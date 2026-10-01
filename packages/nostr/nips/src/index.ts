@@ -20,6 +20,12 @@ export { CONTACTS_KIND, parseContacts } from "./contacts.js";
 export { contentSegments, imagesIn } from "./media.js";
 export type { ContentSegment, MediaRef } from "./media.js";
 export {
+  mentionedProfiles,
+  profileReferences,
+  textSegments,
+} from "./profile-reference.js";
+export type { ProfileMention, ProfileReference } from "./profile-reference.js";
+export {
   CONTENT_WARNING_KIND,
   contentWarning,
   hasContentWarning,

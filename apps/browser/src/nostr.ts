@@ -1,5 +1,6 @@
 import type { Filter } from "dacci-nostr-nips";
 import type { NostrEvent } from "dacci-nostr-nips";
+import { encodeNpub } from "dacci-nostr-nips";
 import { RelayConnection } from "dacci-nostr-ws";
 import { TimelinePaginator } from "dacci-nostr-paginator";
 
@@ -92,6 +93,17 @@ export function createNotificationTimeline(
 
 export function shortId(id: string): string {
   return `${id.slice(0, 8)}…${id.slice(-4)}`;
+}
+
+/**
+ * A pubkey shortened in the form a post would have written it, so a name that
+ * cannot be resolved still reads as the same person everywhere else. A pubkey
+ * that will not encode falls back to the hex, which says the same thing.
+ */
+export function shortNpub(pubkey: string): string {
+  const npub = encodeNpub(pubkey);
+  if (npub === null) return shortId(pubkey);
+  return `${npub.slice(0, 11)}…${npub.slice(-4)}`;
 }
 
 export function formatTime(createdAt: number): string {
