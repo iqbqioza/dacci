@@ -9,6 +9,7 @@ import { ActionBar } from "./ActionBar.jsx";
 import { EmbeddedCard, EmbeddedPlaceholder } from "./EmbeddedCard.jsx";
 import { ProfileAvatar, ProfileName } from "./ProfileAvatar.jsx";
 import { PostMenu } from "./PostMenu.jsx";
+import { SensitiveBody } from "./SensitiveBody.jsx";
 
 /**
  * Every post in the app uses this card: the author's icon in the left column
@@ -90,12 +91,16 @@ export function EventCard(props: {
         {/* The note shown as an embed below replaces its `nostr:` link, so
             the text drops that link rather than printing it twice. A feed
             never clips it either: a long note is the reader's whole reason
-            for opening the post. */}
-        <p class="mt-1 whitespace-pre-wrap break-words text-(--ink)">
-          {displayContent(props.event)}
-        </p>
-        <EmbeddedCard event={props.event} onSelect={props.onSelect} />
-        <EmbeddedPlaceholder event={props.event} />
+            for opening the post. A post that carries a NIP-36 warning is
+            covered until the reader acts on it, embeds included: a quoted
+            note is someone else's post and carries its own warning. */}
+        <SensitiveBody event={props.event}>
+          <p class="whitespace-pre-wrap break-words text-(--ink)">
+            {displayContent(props.event)}
+          </p>
+          <EmbeddedCard event={props.event} onSelect={props.onSelect} />
+          <EmbeddedPlaceholder event={props.event} />
+        </SensitiveBody>
         <ActionBar event={props.event} />
       </div>
     </article>

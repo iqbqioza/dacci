@@ -17,6 +17,11 @@ export type { RelayListEntry } from "./relay-list.js";
 export { parseRelayInfoDocument, relayInfoUrl } from "./nip11.js";
 export type { RelayInformation } from "./nip11.js";
 export { CONTACTS_KIND, parseContacts } from "./contacts.js";
+export {
+  CONTENT_WARNING_KIND,
+  contentWarning,
+  hasContentWarning,
+} from "./content-warning.js";
 export type { ClientMessage, RelayMessage } from "./message.js";
 export { isRelayMessage } from "./message.js";
 export {

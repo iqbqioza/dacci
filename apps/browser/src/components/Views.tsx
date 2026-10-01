@@ -14,7 +14,9 @@ import {
   useNotifications,
 } from "../notifications-feed.js";
 import { useNotificationLive } from "../live.js";
+import { useSensitiveMode, type SensitiveMode } from "../sensitive.js";
 import { useTheme, type Theme } from "../theme.js";
+import { Choices } from "./Choices.jsx";
 import { EventCard } from "./EventCard.jsx";
 
 function newestFirst(a: NostrEvent, b: NostrEvent): number {
@@ -105,7 +107,8 @@ export function SettingsView() {
   const { pubkey, method, authError, restoring } = useAuth();
   const [nsec, setNsec] = createSignal("");
   const [busy, setBusy] = createSignal(false);
-  const { theme, resolved, setTheme } = useTheme();
+  const { theme, setTheme } = useTheme();
+  const { mode: sensitive, setMode: setSensitiveMode } = useSensitiveMode();
 
   async function doExtensionLogin() {
     setBusy(true);
@@ -136,7 +139,14 @@ export function SettingsView() {
       <p class="mt-1 text-sm text-(--ink-muted)">
         背景に合わせて本文・罫線・アクセントのコントラストを切り替えます。システムを選ぶと端末の設定に追従します。
       </p>
-      <ThemeChoice theme={theme} resolved={resolved} onSelect={setTheme} />
+      <ThemeChoice theme={theme} onSelect={setTheme} />
+
+      <h3 class="mt-6 font-bold">センシティブコンテンツ</h3>
+      <p class="mt-1 text-sm text-(--ink-muted)">
+        投稿に NIP-36
+        の警告タグがあるとき、本文を隠す範囲を選びます。引用された投稿の警告もそれぞれの投稿として扱います。
+      </p>
+      <SensitiveChoice mode={sensitive} onSelect={setSensitiveMode} />
 
       <h3 class="mt-6 font-bold">ログイン</h3>
       <Show
@@ -211,59 +221,52 @@ export function SettingsView() {
   );
 }
 
-const THEME_CHOICES: Array<{ id: Theme; label: string }> = [
-  { id: "system", label: "システム" },
-  { id: "light", label: "ライト" },
-  { id: "dark", label: "ダーク" },
+const THEME_CHOICES: Array<{ id: Theme; label: string; swatch: string }> = [
+  { id: "system", label: "システム", swatch: "linear-gradient(105deg, #ffffff 50%, #111111 50%)" },
+  { id: "light", label: "ライト", swatch: "#ffffff" },
+  { id: "dark", label: "ダーク", swatch: "#111111" },
 ];
 
 /**
  * The theme, as one choice rather than a switch: `system` is a real answer
  * and not a fourth "off" state, so it belongs beside the two it resolves to.
- * Each swatch is painted with the roles the theme sets, so the choice can be
- * judged from the row itself instead of by pressing it and looking.
+ * Each swatch is painted with the colours the theme sets, so the choice can
+ * be judged from the row itself instead of by pressing it and looking.
  */
 function ThemeChoice(props: {
   theme: () => Theme;
-  resolved: () => "light" | "dark";
   onSelect: (next: Theme) => void;
 }) {
   return (
-    <div class="mt-2 flex flex-wrap gap-2" role="group" aria-label="テーマ">
-      <For each={THEME_CHOICES}>
-        {(choice) => (
-          <button
-            class="flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm"
-            classList={{
-              "border-(--accent) bg-(--accent-soft) font-bold": props.theme() === choice.id,
-              "border-(--line-strong) hover:bg-(--fill-soft)":
-                props.theme() !== choice.id,
-            }}
-            aria-pressed={props.theme() === choice.id}
-            onClick={() => props.onSelect(choice.id)}
-          >
-            <span
-              class="h-4 w-6 shrink-0 rounded-full border border-(--line-strong)"
-              style={{
-                "background-color": swatch(choice.id, props.resolved()),
-              }}
-            />
-            {choice.label}
-          </button>
-        )}
-      </For>
-    </div>
+    <Choices
+      label="テーマ"
+      options={THEME_CHOICES}
+      value={props.theme}
+      onSelect={props.onSelect}
+    />
   );
 }
 
+const SENSITIVE_CHOICES: Array<{ id: SensitiveMode; label: string; swatch: string }> = [
+  { id: "show", label: "すべて表示", swatch: "#ffffff" },
+  { id: "blur", label: "ぼかす", swatch: "#b3b3b3" },
+  { id: "hide", label: "表示しない", swatch: "#111111" },
+];
+
 /**
- * The colour a swatch shows: what the theme resolves to, except for `system`,
- * which is drawn as the two halves the device is choosing between.
+ * What a post that carries a NIP-36 warning is shown as. The swatch is the
+ * covering itself, so the three answers can be told apart by looking at them.
  */
-function swatch(id: Theme, resolved: "light" | "dark"): string {
-  const light = "#ffffff";
-  const dark = "#111111";
-  if (id === "light") return light;
-  if (id === "dark") return dark;
-  return `linear-gradient(105deg, ${light} 50%, ${dark} 50%)`;
+function SensitiveChoice(props: {
+  mode: () => SensitiveMode;
+  onSelect: (next: SensitiveMode) => void;
+}) {
+  return (
+    <Choices
+      label="センシティブコンテンツ"
+      options={SENSITIVE_CHOICES}
+      value={props.mode}
+      onSelect={props.onSelect}
+    />
+  );
 }

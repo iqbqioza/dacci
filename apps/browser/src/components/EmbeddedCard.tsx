@@ -4,6 +4,7 @@ import { Show } from "solid-js";
 import { useEmbed } from "../embeds.js";
 import { formatTime } from "../nostr.js";
 import { ProfileAvatar, ProfileName } from "./ProfileAvatar.jsx";
+import { SensitiveBody } from "./SensitiveBody.jsx";
 
 /**
  * The note a repost or a quote repost points at, shown as a bordered card
@@ -39,11 +40,16 @@ export function EmbeddedCard(props: {
                   {formatTime(note.created_at)}
                 </span>
               </div>
-              <p class="mt-0.5 line-clamp-4 text-sm break-words whitespace-pre-wrap text-(--ink)">
-                {/* The embed shows no note of its own, so a link to a post
-                    that is not rendered here stays in the quoted text. */}
-                {displayContent(note)}
-              </p>
+              {/* A quoted note is a post of its own, so it carries its own
+                  NIP-36 warning: the outer post asking for approval says
+                  nothing about what it quotes. */}
+              <SensitiveBody event={note}>
+                <p class="line-clamp-4 text-sm break-words whitespace-pre-wrap text-(--ink)">
+                  {/* The embed shows no note of its own, so a link to a post
+                      that is not rendered here stays in the quoted text. */}
+                  {displayContent(note)}
+                </p>
+              </SensitiveBody>
             </div>
           </div>
         </div>
