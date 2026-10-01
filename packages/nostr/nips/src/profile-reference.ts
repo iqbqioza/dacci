@@ -33,24 +33,45 @@ export interface ProfileReference {
 }
 
 /**
- * Matches an `npub` entity behind its `nostr:` prefix. The body is bounded to
- * bech32's charset so trailing prose is never swallowed, and the checksum
- * decides what is real, so an ordinary word is never taken for a name.
+ * Matches an `npub` entity, with its `nostr:` prefix optional. The body is
+ * bounded to bech32's charset so trailing prose is never swallowed, and the
+ * checksum decides what is real, so an ordinary word is never taken for a
+ * name.
+ *
+ * Whether the prefix counts is the caller's decision: in a post, an `npub` is
+ * part of a `nostr:` uri the author chose to write, while in a profile's own
+ * bio it is also how the person names themselves, which is the one place a
+ * bare `npub1…` is a reference.
  */
-const PROFILE = /\bnostr:npub1[023456789acdefghjklmnpqrstuvwxyz]{20,}\b/gi;
+const PROFILE = /\b(?:nostr:)?(npub1[023456789acdefghjklmnpqrstuvwxyz]{20,})\b/gi;
 
-/** Every profile a post names in its own text, in reading order. */
-export function profileReferences(content: string): ProfileReference[] {
+/**
+ * Every profile a post names in its own text, in reading order.
+ *
+ * With `bare` the prefix is optional, so a bare `npub1…` counts as a reference
+ * too. That belongs in a profile's bio and nowhere else: in a post a bare
+ * `npub1…` is as likely to be a key someone pasted to be looked up as it is a
+ * person being written about.
+ */
+export function profileReferences(
+  content: string,
+  bare = false,
+): ProfileReference[] {
   const out: ProfileReference[] = [];
   // One regex instance is stateful, so a fresh literal is used per call.
   const pattern = new RegExp(PROFILE.source, "gi");
   let match = pattern.exec(content);
   while (match !== null) {
-    const pubkey = decodeNpub(match[0].slice("nostr:".length));
+    // The prefix is part of the match rather than beside it, so the span covers
+    // exactly what the author wrote either way.
+    const prefixed = match[0].length > match[1].length;
     // A word that begins like an npub but fails the checksum is not one, and
     // the text keeps it rather than losing it.
-    if (pubkey !== null) {
-      out.push({ pubkey, start: match.index, end: match.index + match[0].length });
+    if (prefixed || bare) {
+      const pubkey = decodeNpub(match[1]);
+      if (pubkey !== null) {
+        out.push({ pubkey, start: match.index, end: match.index + match[0].length });
+      }
     }
     if (match.index === pattern.lastIndex) pattern.lastIndex += 1;
     match = pattern.exec(content);
@@ -71,8 +92,14 @@ export function profileReferences(content: string): ProfileReference[] {
 export function textSegments(
   text: string,
   nameOf: (pubkey: string) => string,
+  /**
+   * Accept a bare `npub1…` as a reference as well as one behind its `nostr:`
+   * prefix. This is for a profile's own bio, which is the one place a person
+   * writes an npub to mean themselves.
+   */
+  bare = false,
 ): ContentSegment[] {
-  const references = profileReferences(text);
+  const references = profileReferences(text, bare);
   if (references.length === 0) return [{ kind: "text", text }];
   const out: ContentSegment[] = [];
   let cursor = 0;
@@ -114,10 +141,13 @@ function needsSpaceAfter(text: string, from: number): boolean {
 }
 
 /** The profiles a post names, so a client can ask for their metadata. */
-export function mentionedProfiles(event: NostrEvent): string[] {
+export function mentionedProfiles(
+  content: string,
+  bare = false,
+): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
-  for (const reference of profileReferences(event.content)) {
+  for (const reference of profileReferences(content, bare)) {
     if (seen.has(reference.pubkey)) continue;
     seen.add(reference.pubkey);
     out.push(reference.pubkey);

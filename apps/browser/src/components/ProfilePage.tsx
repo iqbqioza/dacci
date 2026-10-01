@@ -5,6 +5,7 @@ import { useAuth } from "../auth.jsx";
 import { EventCard } from "./EventCard.jsx";
 import { PageBar } from "./PageBar.jsx";
 import { ProfileAvatar, ProfileName } from "./ProfileAvatar.jsx";
+import { RichText } from "./RichText.jsx";
 import { FeedTabs, type FeedTab } from "../feed-tabs.jsx";
 import {
   flushProfileArrivals,
@@ -75,10 +76,13 @@ export function ProfileHeader(props: { pubkey: string }) {
         <p class="font-mono text-xs break-all text-(--ink-quiet)">
           {encodeNpub(props.pubkey) ?? props.pubkey}
         </p>
+        {/* The bio is written by a person about themselves, so it reads the
+            same way a post does: the people it names are shown by name and the
+            addresses in it are links. */}
         <Show when={profile()?.about}>
           {(about) => (
-            <p class="mt-2 text-sm break-words whitespace-pre-wrap">
-              {about()}
+            <p class="mt-2 text-sm break-words">
+              <RichText text={about()} bare />
             </p>
           )}
         </Show>

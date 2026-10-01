@@ -60,8 +60,44 @@ describe("profileReferences", () => {
   });
 
   it("lists each profile once, whatever the order", () => {
-    const event = note(`${npub(ALICE)} ${npub(BOB)} ${npub(ALICE)}`);
-    expect(mentionedProfiles(event)).toEqual([ALICE, BOB]);
+    expect(mentionedProfiles(`${npub(ALICE)} ${npub(BOB)} ${npub(ALICE)}`)).toEqual([
+      ALICE,
+      BOB,
+    ]);
+  });
+
+  it("takes a bare npub as a reference only when the caller asks", () => {
+    // A profile's bio is the one place a person writes their key out to mean
+    // themselves. In a post a bare npub is as likely to be a key pasted for
+    // looking up as it is a person being written about.
+    const bare = encodeNpub(ALICE) as string;
+    expect(profileReferences(`me: ${bare}`)).toEqual([]);
+    expect(profileReferences(`me: ${bare}`, true)).toEqual([
+      { pubkey: ALICE, start: 4, end: 4 + bare.length },
+    ]);
+  });
+
+  it("still reads a prefixed npub when bare ones are allowed", () => {
+    expect(profileReferences(`hi ${npub(ALICE)}`, true).map((f) => f.pubkey)).toEqual([
+      ALICE,
+    ]);
+  });
+
+  it("does not let a bare npub be read twice as two references", () => {
+    // `nostr:npub1…` also matches from the `npub1` on, so the span has to be
+    // consumed as a whole rather than restarted inside it.
+    const found = profileReferences(npub(ALICE), true);
+    expect(found).toHaveLength(1);
+    expect(found[0].start).toBe(0);
+    expect(found[0].end).toBe(npub(ALICE).length);
+  });
+
+  it("lists a bare npub once, with the rest of the text kept", () => {
+    const bare = encodeNpub(ALICE) as string;
+    expect(mentionedProfiles(`me ${bare} and ${npub(BOB)}`, true)).toEqual([
+      ALICE,
+      BOB,
+    ]);
   });
 });
 
@@ -142,6 +178,24 @@ describe("textSegments", () => {
     expect(textSegments("just words", nameOf)).toEqual([
       { kind: "text", text: "just words" },
     ]);
+  });
+
+  it("names a bare npub when the caller allows one", () => {
+    const bare = encodeNpub(ALICE) as string;
+    expect(read(textSegments(`hi ${bare} there`, nameOf, true))).toBe(
+      "hi Alice there",
+    );
+    // Without the caller's permission the same text is left alone.
+    expect(read(textSegments(`hi ${bare} there`, nameOf))).toBe(`hi ${bare} there`);
+  });
+
+  it("gives a bare npub the same spacing rules as a prefixed one", () => {
+    const bare = encodeNpub(ALICE) as string;
+    expect(read(textSegments(bare, nameOf, true))).toBe("Alice");
+    expect(read(textSegments(`end ${bare}`, nameOf, true))).toBe("end Alice");
+    expect(read(textSegments(`${bare}\nnext`, nameOf, true))).toBe(
+      "Alice\nnext",
+    );
   });
 });
 
