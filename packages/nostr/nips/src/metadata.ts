@@ -59,7 +59,8 @@ export function withMetadata(
       continue;
     }
     // Only text is trimmed and only text can be empty. `false` is a real answer
-    // for `bot`, and an empty birthday object says less than no field at all.
+    // for `bot`, so a falsy value is not a removal; an empty object is, because
+    // it says less than no field at all and no client reads anything out of it.
     if (typeof value === "string") {
       const text = value.trim();
       if (text === "") {
@@ -67,6 +68,14 @@ export function withMetadata(
         continue;
       }
       out[key] = text;
+      continue;
+    }
+    if (
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length === 0
+    ) {
+      delete out[key];
       continue;
     }
     out[key] = value;

@@ -154,12 +154,21 @@ async function sendToWriteRelays(event: NostrEvent): Promise<number> {
     urls.map(async (url) => {
       // A relay that accepts the socket and never answers (relay.damus.io
       // does) must not hold the button hostage, so every publish is raced.
-      return Promise.race([
-        getConnection(url).publish(event),
-        new Promise<null>((resolve) =>
-          setTimeout(() => resolve(null), PUBLISH_TIMEOUT_MS),
-        ),
-      ]);
+      //
+      // The deadline is cleared once the publish settles. Left running it fired
+      // against a promise nobody was awaiting any more, and every publish left
+      // one pending per write relay for the length of the timeout.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          getConnection(url).publish(event),
+          new Promise<null>((resolve) => {
+            timer = setTimeout(() => resolve(null), PUBLISH_TIMEOUT_MS);
+          }),
+        ]);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
     }),
   );
   let accepted = 0;

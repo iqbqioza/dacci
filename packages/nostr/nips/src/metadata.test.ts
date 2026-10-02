@@ -104,6 +104,18 @@ describe("withMetadata", () => {
   it("keeps a number field, zero included", () => {
     expect(withMetadata({}, { weight: 0 })).toEqual({ weight: 0 });
   });
+
+  it("removes an empty object, which says less than no field at all", () => {
+    // `false` is a real answer and stays, but `{}` is not an answer to anything:
+    // no client reads a field out of it, so publishing it is noise in a profile
+    // other people see in full.
+    expect(withMetadata({}, { birthday: {} })).toEqual({});
+    expect(withMetadata({ birthday: { year: 1990 } }, { birthday: {} })).toEqual({});
+    // An object with anything in it is a value, not an absence.
+    expect(
+      withMetadata({}, { birthday: { year: 1990 } }),
+    ).toEqual({ birthday: { year: 1990 } });
+  });
 });
 
 describe("NIP-24's birthday", () => {

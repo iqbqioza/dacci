@@ -179,6 +179,50 @@ describe("buildReply", () => {
     expect(tagged).toContain(AUTHOR);
   });
 
+  it("carries a thread's p tags over whole, hint and petname included", () => {
+    // A `p` tag may carry a relay hint and a petname after the key. Reducing it
+    // to a bare pubkey when a reply is published quietly strips both from
+    // everyone else in the conversation — and the relay hint is what a relay
+    // uses to route the notification.
+    const third = "4".repeat(64);
+    const inThread = note("e".repeat(64), AUTHOR, [
+      ["p", AUTHOR],
+      ["p", third, "wss://relay.example", "bob"],
+    ]);
+    const event = buildReply({
+      pubkey: ME,
+      text: "その記事を読んだ",
+      target: inThread,
+      createdAt: AT,
+    });
+    expect(event.tags.find((tag) => tag[0] === "p" && tag[1] === third)).toEqual([
+      "p",
+      third,
+      "wss://relay.example",
+      "bob",
+    ]);
+  });
+
+  it("keeps the hint the post being answered wrote for its own author", () => {
+    // The target names its own author, and that tag may carry the hint. A reply
+    // writing a bare pubkey instead strips it off the person it is answering.
+    const withHint = note("f".repeat(64), AUTHOR, [
+      ["p", AUTHOR, "wss://author.example", "self"],
+    ]);
+    const event = buildReply({
+      pubkey: ME,
+      text: "ふむ",
+      target: withHint,
+      createdAt: AT,
+    });
+    expect(event.tags.find((tag) => tag[0] === "p" && tag[1] === AUTHOR)).toEqual([
+      "p",
+      AUTHOR,
+      "wss://author.example",
+      "self",
+    ]);
+  });
+
   it("adds a NIP-18 address tag for a long-form post", () => {
     const article = note("c".repeat(64), AUTHOR, [["d", "my-article"]]);
     article.kind = 30023;

@@ -8,7 +8,11 @@ import {
 import type { AuthSigner } from "dacci-nostr-ws";
 import { createSignal } from "solid-js";
 import { eachConnection } from "./nostr.js";
-import { applyLoginProfile, restoreDefaults } from "./relays.js";
+import {
+  applyLoginProfile,
+  defaultQuery,
+  restoreDefaults,
+} from "./relays.js";
 import type { RelayQueryFn } from "./relays.js";
 
 export type LoginMethod = "nip07" | "nsec";
@@ -110,7 +114,15 @@ export async function loginWithExtension(): Promise<boolean> {
  * The secret stays in memory only and is cleared on logout.
  * Only the pubkey is persisted.
  */
-export async function loginWithNsec(input: string): Promise<boolean> {
+export async function loginWithNsec(
+  input: string,
+  /**
+   * How the relays are asked for this reader's profile, feed and relay list.
+   * Taken like `restoreSession`'s, so signing in is as testable as restoring —
+   * and so a test does not open real sockets to find out that a key is valid.
+   */
+  queryFn: RelayQueryFn = defaultQuery,
+): Promise<boolean> {
   setAuthError(null);
   const trimmed = input.trim();
   let secretHex: string | null = null;
@@ -134,7 +146,7 @@ export async function loginWithNsec(input: string): Promise<boolean> {
     // leaves the tab and is never written to localStorage.
     sessionStore()?.setItem(SECRET_KEY, secretHex);
     applySignerToConnections(signer);
-    await applyLoginProfile(key);
+    await applyLoginProfile(key, queryFn);
     return true;
   } catch (error) {
     setAuthError(

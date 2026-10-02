@@ -71,7 +71,15 @@ function removalRange(content: string, ref: TextReference): TextReference {
   }
   const opensLine = start === 0 || content[start - 1] === "\n";
   const closesLine = end === content.length || content[end] === "\n";
-  if (!opensLine || !closesLine) return ref;
+  if (!opensLine || !closesLine) {
+    // Mid-line, the whitespace the widening found is taken with the reference so
+    // the two words it sat between are left with the single space that separated
+    // them. Taking both sides would close the gap instead and run them together,
+    // which is why this is one side or the other and never both.
+    return start < ref.start
+      ? { id: ref.id, start, end: ref.end }
+      : { id: ref.id, start: ref.start, end };
+  }
   // The line's own break goes with it, or the next line would start a
   // paragraph that no longer exists.
   return { id: ref.id, start, end: closesLine && end < content.length ? end + 1 : end };

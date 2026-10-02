@@ -345,19 +345,22 @@ private readonly pendingPublishes = new Map<string, PendingPublish[]>();
   private waitOpen(timeoutMs: number): Promise<boolean> {
     if (this.isOpen) return Promise.resolve(true);
     return new Promise((resolve) => {
-      const timer = setTimeout(() => {
+      // Both entries leave when either settles. Leaving one behind parked a
+      // closure in the other list until the next open or drop, so every query
+      // and publish that started while the socket was connecting left something
+      // behind — on a relay that reconnects often, both lists grew for as long
+      // as the tab was open. Calling an already-settled resolver is a no-op, but
+      // the memory is real over a long session.
+      const settle = (opened: boolean): void => {
+        clearTimeout(timer);
         this.openWaiters = this.openWaiters.filter((w) => w !== done);
         this.failWaiters = this.failWaiters.filter((w) => w !== fail);
-        resolve(false);
-      }, timeoutMs);
-      const done = () => {
-        clearTimeout(timer);
-        resolve(true);
+        resolve(opened);
       };
-      const fail = () => {
-        clearTimeout(timer);
-        resolve(false);
-      };
+      let timer: ReturnType<typeof setTimeout>;
+      const done = (): void => settle(true);
+      const fail = (): void => settle(false);
+      timer = setTimeout(() => settle(false), timeoutMs);
       this.openWaiters.push(done);
       this.failWaiters.push(fail);
     });

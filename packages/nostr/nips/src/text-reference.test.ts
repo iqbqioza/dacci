@@ -84,6 +84,34 @@ describe("stripReferences", () => {
   it("leaves the content untouched when there is nothing to remove", () => {
     expect(stripReferences("plain text", [])).toBe("plain text");
   });
+
+  it("closes the gap a link left in the middle of a line", () => {
+    // Removing only the link left both spaces it was sitting between, so the
+    // words around it came out doubled, or with a line holding nothing but one
+    // space.
+    const between = `about ${link(QUOTED)} ok`;
+    expect(stripReferences(between, textReferences(between))).toBe("about ok");
+
+    const afterLineBreak = `before\n${link(QUOTED)} and after`;
+    expect(stripReferences(afterLineBreak, textReferences(afterLineBreak))).toBe(
+      "before\nand after",
+    );
+  });
+
+  it("does not run the words together when it takes the gap with it", () => {
+    // Taking whitespace on both sides would close the gap entirely, which reads
+    // as one word.
+    const spaced = `a ${link(QUOTED)} b`;
+    expect(stripReferences(spaced, textReferences(spaced))).toBe("a b");
+  });
+
+  it("takes a link glued to a word as prose, not as a reference", () => {
+    // The word boundary is what stops a bech32-shaped run inside a longer word
+    // from being cut out of it, so nothing is removed here at all.
+    const glued = `a${link(QUOTED)}b`;
+    expect(textReferences(glued)).toEqual([]);
+    expect(stripReferences(glued, textReferences(glued))).toBe(glued);
+  });
 });
 
 describe("displayContent", () => {

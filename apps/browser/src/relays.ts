@@ -111,10 +111,19 @@ export function useRelays() {
   };
 }
 
+/**
+ * How the relays are asked for one event list.
+ *
+ * `null` means the relay did not answer — it refused, or it was never reached.
+ * An empty array means it answered and had nothing. The difference decides when
+ * a lookup may stop waiting: a reader with no contact list and no relay list is
+ * the common case, and treating "answered with nothing" as "has not answered
+ * yet" made signing in sit out the whole deadline twice over.
+ */
 export type RelayQueryFn = (
   url: string,
   filter: Filter,
-) => Promise<NostrEvent[]>;
+) => Promise<NostrEvent[] | null>;
 
 const RELAYS_STORAGE_KEY = "dacci.relays";
 const FEED_STORAGE_KEY = "dacci.feed";
@@ -198,12 +207,16 @@ function loadPersistedFeed(): string[] | null {
  */
 const METADATA_TIMEOUT_MS = 4000;
 
-async function defaultQuery(url: string, filter: Filter): Promise<NostrEvent[]> {
+/** The relay lookup everything falls back to when the caller names none. */
+export async function defaultQuery(
+  url: string,
+  filter: Filter,
+): Promise<NostrEvent[] | null> {
   const result = await getConnection(url).query(
     filter,
     METADATA_TIMEOUT_MS,
   );
-  return result.failed ? [] : result.events;
+  return result.failed ? null : result.events;
 }
 
 /**
@@ -226,16 +239,30 @@ async function firstAnswer(
       resolve(events);
     };
     const deadline = setTimeout(() => finish([]), METADATA_TIMEOUT_MS);
+    // A relay that answered with nothing has answered. Once every one of them
+    // has, there is nothing left to wait for, and holding the reader on the
+    // deadline buys no answer — only a login that takes seconds and finds
+    // nothing, which is exactly what a new account's first sign-in looks like.
+    let outstanding = urls.length;
     for (const url of urls) {
       void queryFn(url, filter).then(
         (events) => {
-          if (events.length > 0) {
+          if (events !== null && events.length > 0) {
             clearTimeout(deadline);
             finish(events);
+            return;
+          }
+          if (--outstanding === 0) {
+            clearTimeout(deadline);
+            finish([]);
           }
         },
         () => {
-          // A failing relay is simply not the one that answers.
+          // A relay that refused is not one that answers.
+          if (--outstanding === 0) {
+            clearTimeout(deadline);
+            finish([]);
+          }
         },
       );
     }

@@ -122,16 +122,39 @@ describe("restoreSession", () => {
 });
 
 describe("loginWithNsec", () => {
+  // Signing in reads the reader's profile, feed and relay list from the relays.
+  // Left to the real lookup, this opened sockets to real relays, so the result
+  // depended on someone else's uptime — it failed on a slow network and passed
+  // on a fast one. Nothing here is about the relays.
+  const offline = { queryFn: async () => [] };
+
+  it("does not wait out the deadline when every relay has answered", async () => {
+    // A reader with no contact list and no relay list is the ordinary case, and
+    // every relay answering "nothing" is an answer. Treating it as "has not
+    // answered yet" made signing in sit out the full deadline for each of the
+    // three lookups, so a first sign-in took seconds to find nothing.
+    stubStorage();
+    const started = Date.now();
+    expect(await loginWithNsec("11".repeat(32), offline.queryFn)).toBe(true);
+    expect(Date.now() - started).toBeLessThan(1500);
+    logout();
+  });
+  // Signing in reads the reader's profile, feed and relay list from the relays.
+  // Left to the real lookup this test opened sockets to real relays, which is
+  // what made it fail on a slow network and pass on a fast one — a unit test
+  // whose result depended on someone else's uptime. Nothing here is about the
+  // relays, so they are asked through a stub that answers immediately.
+
   it("rejects invalid input", async () => {
     stubStorage();
-    expect(await loginWithNsec("not-a-key")).toBe(false);
+    expect(await loginWithNsec("not-a-key", offline.queryFn)).toBe(false);
     expect(useAuth().pubkey()).toBeNull();
   });
 
   it("restores the session after a reload", async () => {
     const { store, session } = stubStorage();
     const secret = "11".repeat(32);
-    expect(await loginWithNsec(secret)).toBe(true);
+    expect(await loginWithNsec(secret, offline.queryFn)).toBe(true);
     expect(useAuth().pubkey()).not.toBeNull();
     const pubkey = useAuth().pubkey();
     // Secret is session-scoped only, never in localStorage.

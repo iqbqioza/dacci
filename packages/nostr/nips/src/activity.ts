@@ -79,22 +79,32 @@ export interface ReplyInput {
 export function buildReply(input: ReplyInput): UnsignedEvent {
   const { pubkey, target, root, text, createdAt } = input;
   const tags: string[][] = [];
+  // A `p` tag may carry a relay hint and a petname after the key, and a relay
+  // uses that hint to route the notification. So the target's own tag for
+  // someone is the one that gets carried, not a bare pubkey written here: the
+  // post being answered names its own author, and a reply that reduced that to a
+  // key would strip the hint off the person it is answering.
+  const carried = (key: string): string[] => {
+    const own = target.tags.find((tag) => tag[0] === "p" && tag[1] === key);
+    return own === undefined ? ["p", key] : [...own];
+  };
   if (root !== undefined && root !== null && root.id !== target.id) {
     tags.push(["e", root.id, "", "root", root.pubkey]);
     tags.push(["e", target.id, "", "reply", target.pubkey]);
-    tags.push(["p", root.pubkey]);
-    tags.push(["p", target.pubkey]);
+    tags.push(carried(root.pubkey));
+    tags.push(carried(target.pubkey));
   } else {
     // A direct reply to the root: one marked tag, naming it as both the thread
     // it belongs to and the post being answered.
     tags.push(["e", target.id, "", "root", target.pubkey]);
-    tags.push(["p", target.pubkey]);
+    tags.push(carried(target.pubkey));
   }
-  // Everyone already in the thread, deduplicated against the tags above.
+  // Everyone else already in the thread, deduplicated against the tags above,
+  // each carried over whole for the same reason.
   for (const tagged of target.tags) {
     if (tagged[0] !== "p" || tagged[1] === undefined) continue;
     if (tags.some((tag) => tag[0] === "p" && tag[1] === tagged[1])) continue;
-    tags.push(["p", tagged[1]]);
+    tags.push([...tagged]);
   }
   const a = addressTag(target);
   if (a !== null) tags.push(a);
