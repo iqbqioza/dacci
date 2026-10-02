@@ -83,32 +83,92 @@ export function withMetadata(
   return out;
 }
 
+/** How long each month is, in order, and February where it is not a leap year. */
+const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+function isLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
 /**
- * NIP-24's birthday, as the object it is: a year, a month and a day, any of
- * which the NIP allows to be absent. An unreadable date is no date at all, so
- * the field is removed rather than published as something nobody can read.
+ * Whether a year, month and day name a date the calendar has.
+ *
+ * The range checks alone are not enough, and that was the whole of what was
+ * checked. `1990-02-31`, `1990-04-31` and `1990-02-29` are all inside 1..12 and
+ * 1..31, so all three were published as birthdays — dates no client can render,
+ * written by the reader's own hand and then read back by everyone else.
+ */
+/**
+ * The three parts as numbers, or null when they do not name a date the calendar
+ * has.
+ *
+ * One gate for both directions, so they cannot disagree about what a birthday
+ * is. It returns the parts rather than a yes, because "yes" leaves the caller
+ * reading three `unknown`s back out of the object it was handed.
+ */
+function realDate(
+  year: unknown,
+  month: unknown,
+  day: unknown,
+): { year: number; month: number; day: number } | null {
+  // A month written as a string and a month written as a fraction are both
+  // refused here, rather than by a second check beside this one that could
+  // disagree with it.
+  if (typeof year !== "number" || typeof month !== "number" || typeof day !== "number") {
+    return null;
+  }
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null;
+  }
+  if (month < 1 || month > 12 || day < 1 || year < 0) return null;
+  const last = month === 2 && isLeapYear(year) ? 29 : MONTH_DAYS[month - 1];
+  if (day > last) return null;
+  return { year, month, day };
+}
+
+/**
+ * NIP-24's birthday, as the object it is: a year, a month and a day.
+ *
+ * All three are required here even though the NIP lets a client publish one
+ * without a year, because the only thing that reads this is a date input and a
+ * date input cannot hold a partial date. A year-less birthday therefore does not
+ * come through this function — it stays in the published profile untouched
+ * unless the reader deliberately replaces it, and `birthdayTo` says so by
+ * answering empty. What this function will not do is invent the missing year.
+ *
+ * A date the calendar does not have is no date at all, so it is refused rather
+ * than published. The range checks that used to be all of it let `1990-02-31`,
+ * `1990-04-31` and `1990-02-29` through, so the reader could publish a birthday
+ * no client can render.
  */
 export function birthdayFrom(date: string): Record<string, number> | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date.trim());
   if (match === null) return null;
   const [year, month, day] = [match[1], match[2], match[3]].map(Number);
-  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
-  return { year, month, day };
+  return realDate(year, month, day);
 }
 
 /**
  * NIP-24's birthday object as a date input reads it. A birthday with no year is
  * not a date a form can hold, so it reads as empty rather than as a wrong one.
+ *
+ * Nothing is built out of parts that are not there. Padding whatever was found
+ * produced `"2024--20"` for a month written as a string — a malformed date, which
+ * a date input answers by showing nothing at all, so a profile that had a
+ * birthday read as one that had none. A short year is padded rather than
+ * dropped: the profile says 20, so `0020-05-06` is what it says.
  */
 export function birthdayTo(birthday: unknown): string {
   if (typeof birthday !== "object" || birthday === null || Array.isArray(birthday)) {
     return "";
   }
   const held = birthday as Record<string, unknown>;
-  if (typeof held.year !== "number") return "";
-  const pad = (key: string): string =>
-    typeof held[key] === "number" ? String(held[key]).padStart(2, "0") : "";
-  return `${held.year}-${pad("month")}-${pad("day")}`;
+  const parts = realDate(held.year, held.month, held.day);
+  // A date input has four digits for a year and no more.
+  if (parts === null || parts.year > 9999) return "";
+  const pad = (value: number, width: number): string =>
+    String(value).padStart(width, "0");
+  return `${pad(parts.year, 4)}-${pad(parts.month, 2)}-${pad(parts.day, 2)}`;
 }
 
 /**

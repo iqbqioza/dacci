@@ -127,8 +127,14 @@ describe("NIP-24's birthday", () => {
     });
   });
 
-  it("reads a partial date as the fields it has", () => {
+  it("will not invent the year a partial date leaves out", () => {
+    // The name of this used to claim the opposite — that a partial date reads as
+    // the fields it has — while the assertion underneath said it reads as null.
+    // Null is right: a date input cannot hold a partial date, and guessing a year
+    // would publish a birth year the reader never gave.
     expect(birthdayFrom("1990")).toBeNull();
+    expect(birthdayFrom("02-03")).toBeNull();
+    expect(birthdayFrom("--02-03")).toBeNull();
   });
 
   it("refuses a date nobody could have been born on", () => {
@@ -136,6 +142,24 @@ describe("NIP-24's birthday", () => {
     expect(birthdayFrom("1990-01-32")).toBeNull();
     expect(birthdayFrom("")).toBeNull();
     expect(birthdayFrom("not a date")).toBeNull();
+    // Inside 1..12 and 1..31, and still not a date. The range checks were the
+    // whole of what was checked, so each of these was published as a birthday:
+    // a date no client can render, written by the reader and read by everyone.
+    expect(birthdayFrom("1990-02-31")).toBeNull();
+    expect(birthdayFrom("1990-04-31")).toBeNull();
+    expect(birthdayFrom("1990-06-31")).toBeNull();
+    expect(birthdayFrom("1990-09-31")).toBeNull();
+    expect(birthdayFrom("1990-11-31")).toBeNull();
+    // February, which is 29 days only in a leap year — and not every year
+    // divisible by four is one.
+    expect(birthdayFrom("1990-02-29")).toBeNull();
+    expect(birthdayFrom("1900-02-29")).toBeNull();
+    expect(birthdayFrom("1992-02-29")).toEqual({ year: 1992, month: 2, day: 29 });
+    expect(birthdayFrom("2000-02-29")).toEqual({ year: 2000, month: 2, day: 29 });
+    // And the 31-day months keep their 31st.
+    expect(birthdayFrom("1990-01-31")).toEqual({ year: 1990, month: 1, day: 31 });
+    expect(birthdayFrom("1990-12-31")).toEqual({ year: 1990, month: 12, day: 31 });
+    expect(birthdayFrom("1990-04-30")).toEqual({ year: 1990, month: 4, day: 30 });
   });
 
   it("writes the object back as a date a form can hold", () => {
@@ -145,6 +169,32 @@ describe("NIP-24's birthday", () => {
     expect(birthdayTo({ month: 2, day: 3 })).toBe("");
     expect(birthdayTo(undefined)).toBe("");
     expect(birthdayTo("1990-02-03")).toBe("");
+  });
+
+  it("refuses to build a date out of parts that are not there", () => {
+    // Padding whatever was found gave `"2024--20"` for a month written as a
+    // string — a malformed date, which a date input answers by showing nothing.
+    // A profile with a birthday then read as one without, in the one field whose
+    // whole job is to say whether the reader published a birthday.
+    expect(birthdayTo({ year: 2024, month: "7", day: 20 })).toBe("");
+    expect(birthdayTo({ year: "2024", month: 7, day: 20 })).toBe("");
+    expect(birthdayTo({ year: 2024, month: 7 })).toBe("");
+    expect(birthdayTo({ year: 2024, month: 7, day: null })).toBe("");
+    // A short year is padded rather than dropped: the profile says 20, so
+    // `0020-05-06` is what it says, and answering empty would report a profile
+    // that has a birthday as one that has none.
+    expect(birthdayTo({ year: 20, month: 5, day: 6 })).toBe("0020-05-06");
+    // Beyond what a date input holds, and dates it cannot hold.
+    expect(birthdayTo({ year: 10000, month: 5, day: 6 })).toBe("");
+    expect(birthdayTo({ year: 2024, month: 13, day: 1 })).toBe("");
+    expect(birthdayTo({ year: 2024, month: 0, day: 1 })).toBe("");
+    expect(birthdayTo({ year: 2024, month: 2, day: 31 })).toBe("");
+    expect(birthdayTo({ year: 2023, month: 2, day: 29 })).toBe("");
+    // A fraction is not a birthday, and `2.5` would pad to `2.5`.
+    expect(birthdayTo({ year: 2024.5, month: 2, day: 3 })).toBe("");
+    expect(birthdayTo({ year: 2024, month: 2.5, day: 3 })).toBe("");
+    // And a leap day is a date, so it survives.
+    expect(birthdayTo({ year: 2024, month: 2, day: 29 })).toBe("2024-02-29");
   });
 });
 

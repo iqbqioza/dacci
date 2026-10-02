@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js";
 import { trapFocus } from "../focus-trap.js";
 import type { MetadataValue } from "dacci-nostr-nips";
 import { birthdayTo } from "dacci-nostr-nips";
@@ -38,6 +38,8 @@ export function ProfileEditor() {
   // NIP-24's two fields are not text: `birthday` is an object and `bot` a
   // boolean, so they are held apart rather than squeezed into a string.
   const [birthday, setBirthday] = createSignal<string | undefined>(undefined);
+  /** What the date field cannot show about the published birthday, if anything. */
+  const birthdayNote = createMemo(() => keptWithoutYear(published().birthday));
   const [bot, setBot] = createSignal<string | undefined>(undefined);
   const [uploadError, setUploadError] = createSignal<string | null>(null);
 
@@ -64,7 +66,25 @@ export function ProfileEditor() {
     setUploadError(message);
   };
 
-  /** The first field, so opening the editor can put the caret inside it. */
+  /**
+ * The month and day of a birthday the form cannot show, as a sentence.
+ *
+ * Empty unless the profile really does hold a birthday with no year. A birthday
+ * that is merely unreadable — a month written as a string, a February the
+ * calendar does not have — is not this: there is nothing to tell the reader, and
+ * the date input is already empty for it.
+ */
+function keptWithoutYear(birthday: unknown): string {
+  if (typeof birthday !== "object" || birthday === null || Array.isArray(birthday)) {
+    return "";
+  }
+  const held = birthday as Record<string, unknown>;
+  if (typeof held.year === "number" && birthdayTo(birthday) !== "") return "";
+  if (typeof held.month !== "number" || typeof held.day !== "number") return "";
+  return `${held.month} 月 ${held.day} 日を生年月日に公開しています（生年は非公開）`;
+}
+
+/** The first field, so opening the editor can put the caret inside it. */
   let firstField: HTMLInputElement | HTMLTextAreaElement | undefined;
   /** The panel, so the keyboard can be held inside it. */
   let panel: HTMLDivElement | undefined;
@@ -227,6 +247,19 @@ export function ProfileEditor() {
                 }
                 onInput={(e) => setBirthday(e.currentTarget.value)}
               />
+              {/* NIP-24 lets a client publish a birthday without a year, which is
+                  the point of the field: some people do not give their birth
+                  year away. A date input cannot hold one, so the value reads as
+                  empty — and an empty field says "you have no birthday", which
+                  is a different and untrue thing. It says it silently too: the
+                  reader sees nothing, and touching the field deletes what was
+                  there. So the month and day are named in words whenever the
+                  input cannot show them. */}
+              <Show when={birthdayNote()}>
+                <span class="mt-1 block text-xs text-(--ink-muted)">
+                  {birthdayNote()}
+                </span>
+              </Show>
             </label>
             <label class="flex items-center gap-2 text-sm">
               <input
