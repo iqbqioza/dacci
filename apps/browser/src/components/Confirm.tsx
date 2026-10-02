@@ -36,7 +36,18 @@ export function Confirm(props: {
         class="fixed inset-0 z-50 flex items-center justify-center bg-(--scrim)"
         // A click on the scrim is a change of mind; a click on the dialog is
         // not, so it is stopped from reaching the scrim.
-        onClick={props.onCancel}
+        //
+        // The scrim itself has to stop there as well. `Confirm` is opened from
+        // inside a post card, and `position: fixed` moves the box without
+        // moving the node, so the scrim is a descendant of the card that opens
+        // the question. A click that only means "never mind" would go on to
+        // open that post. `onCancel` tears the dialog down, and the click still
+        // travels the path it was dispatched along, so the card sees it whether
+        // or not the scrim is in the document by the time it gets there.
+        onClick={(e) => {
+          e.stopPropagation();
+          props.onCancel();
+        }}
       >
         <div
           class="w-full max-w-sm rounded-2xl bg-(--surface) p-4"
