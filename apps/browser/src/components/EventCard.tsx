@@ -47,10 +47,26 @@ export function EventCard(props: {
   return (
     <article
       class={surface()}
+      // Keyboard-reachable, so pressing Enter on the card does what clicking it
+      // does. The card is not given `role="link"`: a post's body carries links
+      // of its own, and a link inside a link is worse than no role at all. The
+      // overflow menu's "詳細を開く" remains the labelled route to the same page,
+      // which is what a screen reader is told about.
+      tabIndex={props.detailed === true ? undefined : 0}
       onClick={() => {
         // On its own page the post is already open, so clicking must not
         // navigate to the very same route.
         if (props.detailed !== true) props.onSelect(props.event);
+      }}
+      onKeyDown={(e) => {
+        if (props.detailed === true) return;
+        // Only when the card itself has focus. The key event of a button inside
+        // it bubbles here too, and answering that would open the post as well as
+        // do whatever the button was pressed for.
+        if (e.target !== e.currentTarget) return;
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        props.onSelect(props.event);
       }}
     >
       <ProfileAvatar pubkey={props.event.pubkey} />

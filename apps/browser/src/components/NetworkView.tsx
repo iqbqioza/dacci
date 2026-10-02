@@ -165,6 +165,9 @@ export function NetworkView() {
 
       <div class="mt-2 flex flex-wrap gap-2">
         <input
+          // A placeholder is not a name: this would be announced as a bare text
+          // field with nothing saying what belongs in it.
+          aria-label="追加するリレーのURL"
           class="min-w-0 flex-1 rounded-2xl border border-(--line-strong) px-3 py-2"
           placeholder="wss://relay.example"
           value={input()}

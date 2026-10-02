@@ -352,6 +352,9 @@ function AddRow(props: {
         <div class="px-2 pb-2">
           <div class="flex gap-1">
             <input
+              // A placeholder is not a name: the row's label above is what says
+              // what belongs here, and it is not associated with this field.
+              aria-label={props.label.replace(/^\+\s*/, "")}
               class="min-w-0 flex-1 rounded-2xl border border-(--line-strong) px-2 py-1 text-sm"
               placeholder={props.placeholder}
               value={props.draft}

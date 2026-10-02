@@ -18,6 +18,11 @@ export function Confirm(props: {
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  // The dialog is not in the DOM until `open` turns true, so its parts can only
+  // be named after the effect has run.
+  let cancelButton: HTMLButtonElement | undefined;
+  let panel: HTMLDivElement | undefined;
+
   createEffect(() => {
     if (!props.open) return;
     // Escape is the way out of anything that asks, so it has to work here too.
@@ -25,7 +30,41 @@ export function Confirm(props: {
       if (event.key === "Escape") props.onCancel();
     };
     document.addEventListener("keydown", onKey);
-    onCleanup(() => document.removeEventListener("keydown", onKey));
+    // The scrim covers the page, so focus has to come inside: left where it
+    // was, the next Tab walks the feed behind the question instead of the two
+    // answers in it. "やめる" is where it goes, because that is the answer that
+    // undoes nothing.
+    const before = document.activeElement;
+    // Named now, while the dialog is still in the document. By the time this
+    // effect cleans up the panel has been taken out of the page, and a detached
+    // node's ancestors are not worth walking: the card it belonged to is the
+    // thing the reader was working on, and it is focusable.
+    const card = panel?.closest<HTMLElement>("[tabindex]") ?? null;
+    queueMicrotask(() => {
+      cancelButton?.focus();
+    });
+    onCleanup(() => {
+      document.removeEventListener("keydown", onKey);
+      // And hand it back, so a reader who answered or dismissed is returned to
+      // the card they came from rather than dropped at the top of the page.
+      //
+      // The button that opened the question is usually gone by now: it was a row
+      // in an overflow menu, and taking the row closed the menu. So the card the
+      // dialog sits in is the fallback — it is focusable, and it is the thing
+      // the reader was working on.
+      const target =
+        before instanceof HTMLElement &&
+        before !== document.body &&
+        before.isConnected
+          ? before
+          : card;
+      // On the next tick, not now: removing the dialog takes the focused button
+      // with it, and the browser puts focus back on the body when that happens.
+      // Restoring first would simply be undone by the removal.
+      queueMicrotask(() => {
+        target?.focus();
+      });
+    });
   });
 
   return (
@@ -50,6 +89,7 @@ export function Confirm(props: {
         }}
       >
         <div
+          ref={panel}
           class="w-full max-w-sm rounded-2xl bg-(--surface) p-4"
           role="dialog"
           aria-modal="true"
@@ -60,6 +100,7 @@ export function Confirm(props: {
           <p class="mt-2 text-sm text-(--ink-muted)">{props.body}</p>
           <div class="mt-4 flex justify-end gap-2">
             <button
+              ref={cancelButton}
               type="button"
               class="rounded-2xl border border-(--line-strong) px-4 py-2"
               onClick={props.onCancel}

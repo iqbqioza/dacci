@@ -201,6 +201,9 @@ export function SettingsView() {
             </Show>
             <div class="mt-3 flex gap-2">
               <input
+                // A placeholder is not a name: this field would be announced as
+                // "password" with nothing saying what belongs in it.
+                aria-label="秘密鍵 (nsec)"
                 class="min-w-0 flex-1 rounded-2xl border border-(--line-strong) px-3 py-2"
                 type="password"
                 placeholder="nsec1… または64桁hex"

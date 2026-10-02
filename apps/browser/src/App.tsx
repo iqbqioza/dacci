@@ -379,6 +379,9 @@ let composeInput: HTMLTextAreaElement | undefined;
               ref={(el) => {
                 composeInput = el;
               }}
+              // A placeholder is not a name: a screen reader announces a bare
+              // field as "edit text" with nothing saying what goes in it.
+              aria-label="投稿の内容"
               class="mt-2 h-32 w-full rounded-2xl border border-(--line-strong) p-2"
               value={draft()}
               onInput={(e) => setDraft(e.currentTarget.value)}

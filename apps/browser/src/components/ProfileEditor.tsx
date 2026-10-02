@@ -63,6 +63,9 @@ export function ProfileEditor() {
     setUploadError(message);
   };
 
+  /** The first field, so opening the editor can put the caret inside it. */
+  let firstField: HTMLInputElement | HTMLTextAreaElement | undefined;
+
   // Escape is the way out of anything that asks, and the scrim already closes
   // this, so the keyboard offers nothing new that a click does not.
   createEffect(() => {
@@ -71,7 +74,18 @@ export function ProfileEditor() {
       if (event.key === "Escape") closeProfileEditor();
     };
     document.addEventListener("keydown", onKey);
-    onCleanup(() => document.removeEventListener("keydown", onKey));
+    // This is the worst case in the app for focus: a dozen fields sit behind the
+    // scrim, so a Tab left where the reader was walks the page being covered
+    // rather than the form. The first field is where the caret belongs, and
+    // closing hands focus back to whatever opened the editor.
+    const before = document.activeElement;
+    queueMicrotask(() => {
+      firstField?.focus();
+    });
+    onCleanup(() => {
+      document.removeEventListener("keydown", onKey);
+      if (before instanceof HTMLElement) before.focus();
+    });
   });
 
   return (
@@ -100,11 +114,20 @@ export function ProfileEditor() {
 
           <div class="mt-3 grid gap-3">
             <For each={PROFILE_FIELDS}>
-              {(field) => (
+              {(field, index) => (
                 <label class="block">
                   <span class="text-xs text-(--ink-muted)">{field.label}</span>
                   {field.long ? (
                     <textarea
+                      // Solid calls a ref it is given, so this has to be a
+                      // callback that keeps the element rather than a getter.
+                      ref={
+                        index() === 0
+                          ? (el) => {
+                              firstField = el as HTMLTextAreaElement | undefined;
+                            }
+                          : undefined
+                      }
                       class={`mt-1 w-full rounded-2xl border border-(--line-strong) p-2 text-sm ${
                         field.key === "about" ? "h-24" : "h-10"
                       }`}
@@ -113,6 +136,13 @@ export function ProfileEditor() {
                     />
                   ) : (
                     <input
+                      ref={
+                        index() === 0
+                          ? (el) => {
+                              firstField = el as HTMLInputElement | undefined;
+                            }
+                          : undefined
+                      }
                       class="mt-1 w-full rounded-2xl border border-(--line-strong) px-3 py-2 text-sm"
                       value={valueOf(field.key)}
                       onInput={(e) => type(field.key, e.currentTarget.value)}
