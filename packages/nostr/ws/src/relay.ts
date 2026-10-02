@@ -97,6 +97,12 @@ interface PendingSub {
   authRequired: boolean;
   timer: ReturnType<typeof setTimeout>;
   resolve: (outcome: SubOutcome) => void;
+  /**
+   * What was asked for. A relay may answer with anything on the open id, and
+   * these events are merged into the caller's page and sorted in, so the filter
+   * has to be re-checked here rather than trusted to the relay.
+   */
+  filter: Filter;
 }
 
 interface PendingPublish {
@@ -364,7 +370,20 @@ export class RelayConnection {
       // link and dedupe keyed on that id would be describing a different event.
       // It costs one hash per event and it is the only place every inbound event
       // passes through.
-      if (sub && isValidEventStructure(msg[2]) && hasValidId(msg[2] as NostrEvent)) {
+      if (
+        sub &&
+        isValidEventStructure(msg[2]) &&
+        hasValidId(msg[2] as NostrEvent) &&
+        // And what it has to do with this subscription, which is the same check
+        // the live branch below makes. A relay can put anything on an open id,
+        // and a query's events are merged into the page and sorted in, so a kind
+        // 4 answering a feed that asked for notes — or one event dated far in the
+        // future — would be taken as part of the answer. The filters that can be
+        // pinned to a time only bound time when they carry `until`, and a
+        // `since`-only filter cannot hold a future-dated post back: NIP-01 gives
+        // no upper bound, so every conforming relay will happily store one.
+        matchesFilter(msg[2] as NostrEvent, sub.filter)
+      ) {
         sub.events.push(msg[2] as NostrEvent);
       } else if (
         live &&
@@ -482,7 +501,7 @@ export class RelayConnection {
         this.pendingSubs.delete(subId);
         resolve("failed");
       }, timeoutMs);
-      entryRef = { events: [], authRequired: false, timer, resolve };
+      entryRef = { events: [], authRequired: false, timer, resolve, filter };
       this.pendingSubs.set(subId, entryRef);
       this.safeSend(socket, JSON.stringify(["REQ", subId, filter]));
     });

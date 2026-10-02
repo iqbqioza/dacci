@@ -97,14 +97,21 @@ const WRITTEN_KEY = "dacci.servers.written";
 // not theirs to configure, and are added to every view of the list.
 const [servers, setServers] = createSignal<UploadServer[]>(read());
 /**
- * Whether the account's published list has been read at all.
+ * Whose published list has been read at all, and whether it has.
  *
  * BUD-03 replaces the whole list on every write, so publishing a list that was
  * never read would publish whatever happened to be on this device and delete
  * every server the reader configured elsewhere. A read that no relay answered
- * leaves this false, which is the only thing that keeps a write off.
+ * leaves the account unanswered, which is the only thing that keeps a write off.
+ *
+ * This is keyed by account rather than being a plain flag because the list
+ * behind it is this device's, which survives a sign-out. One flag for the whole
+ * app is therefore wrong for the second account of a session: signing out reads
+ * no list but has nothing to publish, and marking it read left the gate open,
+ * so signing back in during a failing read published this device's list under
+ * an account whose own list had never been asked for.
  */
-const [readList, setReadList] = createSignal(false);
+const [readFor, setReadFor] = createSignal<string | null>(null);
 
 function read(): UploadServer[] {
   try {
@@ -192,8 +199,8 @@ export async function publishServers(): Promise<boolean> {
   if (pubkey === null) return false;
   // The list on this device may be all this device ever saw. Writing it as the
   // account's list would delete the servers the reader added elsewhere, so a
-  // list that has not been read is not published.
-  if (!readList()) {
+  // list that has not been read **for this account** is not published.
+  if (readFor() !== pubkey) {
     showNotice("サーバー一覧を読み込んでから保存してください");
     return false;
   }
@@ -244,24 +251,35 @@ export async function removeServerAndPublish(url: string): Promise<void> {
  */
 /** The read in flight, so overlapping calls share one round of queries. */
 let inFlight: Promise<void> | null = null;
+/** The account that in-flight read belongs to. */
+let inFlightFor: string | null = null;
 
 export async function loadServers(): Promise<void> {
   // A relay round is not cheap, and the start of the app can ask more than
   // once (the session restore and the identity change overlap). One read
   // serves every caller that arrives while it runs.
-  if (inFlight !== null) return inFlight;
+  //
+  // Keyed by account, because a read that is still out belongs to the account
+  // that asked for it: handing it to whoever signs in next would answer the new
+  // account with the old account's list, or with nothing at all.
+  const key = useAuth().pubkey();
+  if (inFlight !== null && inFlightFor === key) return inFlight;
+  inFlightFor = key;
   inFlight = loadServersInner().finally(() => {
     inFlight = null;
+    inFlightFor = null;
   });
   return inFlight;
 }
 
 async function loadServersInner(): Promise<void> {
   const pubkey = useAuth().pubkey();
+  // Whatever was read last belongs to another account, and this device's list is
+  // not that account's list, so the gate closes until this account has answered.
+  setReadFor(null);
   if (pubkey === null) {
     setServers(read());
     // A signed-out reader has no list to publish, so there is nothing to read.
-    setReadList(true);
     return;
   }
   // Snapshot before the round: a reply that is stale compared with what the
@@ -272,7 +290,10 @@ async function loadServersInner(): Promise<void> {
     // Asked and answered: whatever this device holds can be published without
     // losing a server the reader configured elsewhere. An answer with nothing
     // in it is still an answer — it says the account has published no list.
-    setReadList(true);
+    // Guarded by the account again, so an answer that lands after a sign-out
+    // or a sign-in cannot open the gate for whoever is here now.
+    if (useAuth().pubkey() !== pubkey) return;
+    setReadFor(pubkey);
     // Nothing published leaves the reader with what they had.
     if (list.servers.length === 0) return;
     // A relay can still be answering with a list older than the edit the

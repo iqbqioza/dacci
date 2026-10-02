@@ -85,6 +85,90 @@ describe("TimelinePaginator", () => {
     expect(seen.size).toBe(200);
   });
 
+  it("reaches history behind a relay that serves fewer events than asked", async () => {
+    // NIP-01 lets a relay cap what it will serve, so a relay whose `max_limit`
+    // is under the request answers with a short page every single time. Reading
+    // that as "run out" ends the relay's history on the first round: the cursor
+    // never moves down and `coverage` claims the reader has reached the end.
+    const store = makeStore(400, 2000);
+    const capped = new RelayConnection("wss://capped", () => {
+      throw new Error("no socket in unit test");
+    });
+    vi.spyOn(capped, "query").mockImplementation(async (filter) => {
+      const matches = store.filter(
+        (e) =>
+          (filter.until === undefined || e.created_at <= filter.until) &&
+          (filter.kinds === undefined || filter.kinds.includes(e.kind)),
+      );
+      matches.sort((a, b) =>
+        a.created_at !== b.created_at
+          ? b.created_at - a.created_at
+          : a.id < b.id
+            ? -1
+            : 1,
+      );
+      // The relay's own cap, well under anything the paginator requests.
+      return {
+        events: matches.slice(0, 25),
+        eose: true,
+        failed: false,
+        authRequired: false,
+      };
+    });
+    const paginator = new TimelinePaginator([capped], { kinds: [1] }, {
+      pageSize: 30,
+      maxRounds: 40,
+    });
+    const seen = new Set<string>();
+    for (let i = 0; i < 60 && paginator.hasMore(); i++) {
+      const page = await paginator.loadNextPage();
+      for (const e of page.events) seen.add(e.id);
+      if (page.events.length === 0 && page.coverage === "complete") break;
+    }
+    expect(seen.size).toBe(400);
+  });
+
+  it("keeps the events a relay sent before its deadline ran out", async () => {
+    // The transport holds on to whatever arrived so it can survive a timeout,
+    // and each of those events passed the same checks as any other. Dropping
+    // the batch because it was late means a relay under load contributes
+    // nothing at all, however much it did manage to send.
+    const store = makeStore(300, 2000);
+    const slow = new RelayConnection("wss://slow", () => {
+      throw new Error("no socket in unit test");
+    });
+    vi.spyOn(slow, "query").mockImplementation(async (filter) => {
+      const matches = store.filter(
+        (e) =>
+          (filter.until === undefined || e.created_at <= filter.until) &&
+          (filter.kinds === undefined || filter.kinds.includes(e.kind)),
+      );
+      matches.sort((a, b) =>
+        a.created_at !== b.created_at
+          ? b.created_at - a.created_at
+          : a.id < b.id
+            ? -1
+            : 1,
+      );
+      // A full page, then no EOSE before the deadline: the honest report of a
+      // relay that ran out of time mid-round.
+      return {
+        events: matches.slice(0, filter.limit ?? 100),
+        eose: false,
+        failed: true,
+        authRequired: false,
+      };
+    });
+    const paginator = new TimelinePaginator([slow], { kinds: [1] }, {
+      pageSize: 30,
+      maxRounds: 3,
+    });
+    const page = await paginator.loadNextPage();
+    expect(page.events.length).toBeGreaterThan(0);
+    // More may still be coming, so the reader is not told this is everything.
+    expect(page.coverage).toBe("partial");
+  });
+
   it("does not wait for a relay that never answers", async () => {
     const good = stubConnection("wss://fast", makeStore(40, 2000));
     // Accepts the connection but never resolves.

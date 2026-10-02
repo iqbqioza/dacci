@@ -6,7 +6,12 @@ import {
 import { createSignal } from "solid-js";
 import type { LiveSubscription } from "dacci-nostr-ws";
 import { rememberEvents } from "./event-cache.js";
-import { HOME_KINDS, NOTIFICATION_KINDS, getConnection } from "./nostr.js";
+import {
+  HOME_KINDS,
+  NOTIFICATION_KINDS,
+  PROFILE_KINDS,
+  getConnection,
+} from "./nostr.js";
 import { useRelays } from "./relays.js";
 
 const MAX_BUFFERED = 200;
@@ -64,7 +69,11 @@ export function watchProfileSubject(pubkey: string | null): void {
   profileSubs.push(
     getConnection(url).subscribe(
       {
-        kinds: [1],
+        // The same kinds the profile's paginator asks for. A kind only this one
+        // left out can never reach the reader: the paginator's `until` moves
+        // backwards only, so a comment published after it was built would sit
+        // off the end of the list until a reset.
+        kinds: PROFILE_KINDS,
         authors: [pubkey],
         since: Math.floor(Date.now() / 1000),
       },

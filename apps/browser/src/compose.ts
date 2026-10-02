@@ -219,8 +219,9 @@ export async function publishReply(
     () => undefined,
   );
   if (sent === null) return { failure: "rejected" };
-  // Remember the action, so the post's row shows it was answered.
-  markReplied(target.id);
+  // Remember the action, so the post's row shows it was answered. Recorded
+  // against the account that signed, not against whoever is signed in now.
+  markReplied(target.id, pubkey);
   showNotice("リプライしました");
   return { sent };
 }
@@ -265,8 +266,8 @@ export async function submitCompose(text: string): Promise<boolean> {
       // Remember the action on the post, so its row shows it was taken and
       // can be undone from another tab or after a reload.
       if (current !== null) {
-        if (mode() === "quote") markQuoted(current.id, sent.id);
-        else markReplied(current.id);
+        if (mode() === "quote") markQuoted(current.id, sent.id, pubkey);
+        else markReplied(current.id, pubkey);
       }
       showNotice(
         current === null
@@ -290,6 +291,29 @@ export async function submitCompose(text: string): Promise<boolean> {
  * NIP-18 repost, as a toggle: a second press publishes a NIP-09 deletion for
  * the repost, so the row and every other client agree it is gone.
  */
+/**
+ * Reposts and reactions in flight, so a second press cannot start another.
+ *
+ * Both actions read what the reader has already done, publish, and only then
+ * record it. The action bar does not disable its buttons while that runs, and
+ * the publish is a signing prompt plus up to five seconds of relay time, so a
+ * double press starts two publishes that both see "not done yet". Two kind 6
+ * (or kind 7) events go out, only the second id is kept, and taking the action
+ * back deletes one while the other stays on the relays for good.
+ */
+const acting = new Set<string>();
+
+/** Runs `act` unless the same action on the same post is already in flight. */
+async function once(key: string, act: () => Promise<boolean>): Promise<boolean> {
+  if (acting.has(key)) return false;
+  acting.add(key);
+  try {
+    return await act();
+  } finally {
+    acting.delete(key);
+  }
+}
+
 export async function toggleRepost(event: NostrEvent): Promise<boolean> {
   const pubkey = useAuth().pubkey();
   if (pubkey === null) {
@@ -300,33 +324,37 @@ export async function toggleRepost(event: NostrEvent): Promise<boolean> {
     showNotice("自分の投稿はリポストできません");
     return false;
   }
-  const existing = activityFor(event.id).repost;
-  setBusy(true);
-  try {
-    const sent =
-      existing === undefined
-        ? await publishEvent(buildRepost({ pubkey, target: event, createdAt: now() }))
-        : await publishEvent(
-            buildDeletion({
-              pubkey,
-              eventIds: [existing],
-              kinds: [REPOST_KIND],
-              createdAt: now(),
-            }),
-          );
-    if (sent === null) {
-      showNotice(
-        existing === undefined ? "リポストに失敗しました" : "リポストを取り消せませんでした",
-      );
-      return false;
+  return once(`repost:${event.id}`, async () => {
+    const existing = activityFor(event.id).repost;
+    setBusy(true);
+    try {
+      const sent =
+        existing === undefined
+          ? await publishEvent(buildRepost({ pubkey, target: event, createdAt: now() }))
+          : await publishEvent(
+              buildDeletion({
+                pubkey,
+                eventIds: [existing],
+                kinds: [REPOST_KIND],
+                createdAt: now(),
+              }),
+            );
+      if (sent === null) {
+        showNotice(
+          existing === undefined
+            ? "リポストに失敗しました"
+            : "リポストを取り消せませんでした",
+        );
+        return false;
+      }
+      if (existing === undefined) markReposted(event.id, sent.id, pubkey);
+      else clearReposted(event.id, pubkey);
+      showNotice(existing === undefined ? "リポストしました" : "リポストを取り消しました");
+      return true;
+    } finally {
+      setBusy(false);
     }
-    if (existing === undefined) markReposted(event.id, sent.id);
-    else clearReposted(event.id);
-    showNotice(existing === undefined ? "リポストしました" : "リポストを取り消しました");
-    return true;
-  } finally {
-    setBusy(false);
-  }
+  });
 }
 
 /**
@@ -394,7 +422,9 @@ export async function deleteEvent(event: NostrEvent): Promise<boolean> {
     }
     // The post is gone from every list the app shows before any of them has
     // been refetched, so the reader sees the result of what they just did.
-    markDeleted([event.id]);
+    // Recorded against the account that signed it, so signing out mid-publish
+    // does not install this deletion for whoever signs in next.
+    markDeleted([event.id], pubkey);
     // The request is the reader's own event, so a reload finds it again and
     // keeps the post out of sight without the reader doing anything.
     showNotice("削除しました");
@@ -411,37 +441,39 @@ export async function toggleReaction(event: NostrEvent): Promise<boolean> {
     showNotice("リアクションするにはログインしてください");
     return false;
   }
-  const existing = activityFor(event.id).react;
-  setBusy(true);
-  try {
-    const sent =
-      existing === undefined
-        ? await publishEvent(
-            buildReaction({ pubkey, target: event, createdAt: now() }),
-          )
-        : await publishEvent(
-            buildDeletion({
-              pubkey,
-              eventIds: [existing],
-              kinds: [REACTION_KIND],
-              createdAt: now(),
-            }),
-          );
-    if (sent === null) {
-      showNotice(
+  return once(`react:${event.id}`, async () => {
+    const existing = activityFor(event.id).react;
+    setBusy(true);
+    try {
+      const sent =
         existing === undefined
-          ? "リアクションに失敗しました"
-          : "リアクションを取り消せませんでした",
+          ? await publishEvent(
+              buildReaction({ pubkey, target: event, createdAt: now() }),
+            )
+          : await publishEvent(
+              buildDeletion({
+                pubkey,
+                eventIds: [existing],
+                kinds: [REACTION_KIND],
+                createdAt: now(),
+              }),
+            );
+      if (sent === null) {
+        showNotice(
+          existing === undefined
+            ? "リアクションに失敗しました"
+            : "リアクションを取り消せませんでした",
+        );
+        return false;
+      }
+      if (existing === undefined) markReacted(event.id, sent.id, pubkey);
+      else clearReacted(event.id, pubkey);
+      showNotice(
+        existing === undefined ? "リアクションしました" : "リアクションを取り消しました",
       );
-      return false;
+      return true;
+    } finally {
+      setBusy(false);
     }
-    if (existing === undefined) markReacted(event.id, sent.id);
-    else clearReacted(event.id);
-    showNotice(
-      existing === undefined ? "リアクションしました" : "リアクションを取り消しました",
-    );
-    return true;
-  } finally {
-    setBusy(false);
-  }
+  });
 }

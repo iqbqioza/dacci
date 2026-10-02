@@ -13,6 +13,8 @@ export type UploadFailure =
   /** The reader dismissed the signature prompt, so nothing was signed. */
   | "cancelled"
   | "network"
+  /** The server was reached but did not answer in the time allowed. */
+  | "timeout"
   | "too-large"
   | "unsupported-type"
   | "rejected"
@@ -265,14 +267,32 @@ function refusalText(status: number): string | null {
   return null;
 }
 
-/** True when the browser refused the request rather than the server. */
+/** True for the abort a deadline raises, as opposed to a transport fault. */
+function isTimeout(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    ((error as { name?: unknown }).name === "TimeoutError" ||
+      (error as { name?: unknown }).name === "AbortError")
+  );
+}
+
+/**
+ * True when the request never reached the server.
+ *
+ * A fetch that never finishes its preflight fails with a TypeError, and a
+ * transport fault fails the same way; either way nothing crossed the network,
+ * so a cross-origin refusal is the likeliest cause and the one the reader can
+ * act on by picking a different server.
+ *
+ * A deadline is not that. The server was reached and simply did not answer
+ * within the time allowed, which happens to a busy or half-open host, and
+ * telling the reader their upload was refused for CORS sends them looking for a
+ * problem they do not have.
+ */
 function isBrowserRefusal(error: unknown): boolean {
-  // A fetch that never completes its preflight throws a TypeError here, and
-  // a transport fault does too; either way the request never reached the
-  // server, so the cross-origin refusal is the likeliest cause and the one
-  // the reader can act on by picking a different server.
-  void error;
-  return true;
+  return !isTimeout(error);
 }
 
 /**
@@ -339,7 +359,7 @@ export async function uploadFile(
           failure: "network",
           message: "サーバーがこのoriginからのアップロードを受け付けません (CORS)",
         }
-      : { failure: "network" };
+      : { failure: "timeout" };
   }
 
   if (response.status === 413) return { failure: "too-large" };
@@ -425,6 +445,8 @@ export function uploadFailureText(failure: UploadFailure): string {
       return "署名をキャンセルしました";
     case "network":
       return "サーバーに接続できませんでした";
+    case "timeout":
+      return "サーバーが時間内に応答しませんでした";
     case "too-large":
       return "ファイルが大きすぎます";
     case "unsupported-type":

@@ -5,7 +5,7 @@ import { rememberEvents } from "./event-cache.js";
 import { postsForTab, type FeedTab } from "./feed-tabs.js";
 import { planFlush } from "./flush.js";
 import { clearProfileBuffer, useProfileLive } from "./live.js";
-import { createTimeline } from "./nostr.js";
+import { createTimeline, PROFILE_KINDS } from "./nostr.js";
 import { useRelays } from "./relays.js";
 import { preservingViewport } from "./viewport.js";
 
@@ -24,9 +24,6 @@ const [coverage, setCoverage] = createSignal("partial");
 const [authRelays, setAuthRelays] = createSignal<string[]>([]);
 const [pendingRelays, setPendingRelays] = createSignal<string[]>([]);
 const [hasMore, setHasMore] = createSignal(true);
-
-/** Kinds a profile shows: text notes and NIP-22 comments. */
-const PROFILE_KINDS = [1, 1111];
 
 let paginator = createTimeline(useRelays().readRelays(), {
   kinds: PROFILE_KINDS,

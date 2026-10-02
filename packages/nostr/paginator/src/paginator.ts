@@ -9,6 +9,12 @@ export type PageCoverage = "complete" | "partial";
 
 /** Sentinel for "the relay did not answer within the round deadline". */
 const TIMEOUT = Symbol("relay-timeout");
+/**
+ * Extra time the backstop waits past the transport's own deadline, so the
+ * transport's answer — including whatever events reached it in time — is the
+ * one that is used.
+ */
+const TIMEOUT_MARGIN_MS = 250;
 
 export interface TimelinePage {
   events: NostrEvent[];
@@ -204,6 +210,7 @@ export class TimelinePaginator {
     const queriedUntil = state.cursor.until;
     const queriedLimit = state.cursor.limit;
     const timeoutMs = Math.min(this.roundTimeoutMs, this.queryTimeoutMs);
+    let guardTimer: ReturnType<typeof setTimeout> | undefined;
     // The deadline is enforced here rather than trusted to the transport:
     // a relay that accepts the socket and then goes quiet must not hold the
     // whole page hostage. It is marked offline for this round (Section 23)
@@ -213,8 +220,17 @@ export class TimelinePaginator {
         { ...this.baseFilter, until: queriedUntil, limit: queriedLimit },
         timeoutMs,
       ),
+      // A backstop for a transport that fails to honour its own deadline, and
+      // only that. It gets a margin because the transport is the only thing
+      // that knows which events made it before the deadline expired, and racing
+      // it to the same instant would throw those away whenever this timer
+      // happened to be scheduled first.
       new Promise<typeof TIMEOUT>((resolve) => {
-        const timer = setTimeout(() => resolve(TIMEOUT), timeoutMs);
+        const timer = setTimeout(
+          () => resolve(TIMEOUT),
+          timeoutMs + TIMEOUT_MARGIN_MS,
+        );
+        guardTimer = timer;
         // Do not keep the process alive for the deadline.
         (timer as unknown as { unref?: () => void }).unref?.();
       }),
@@ -224,6 +240,7 @@ export class TimelinePaginator {
       failed: true,
       authRequired: false,
     }));
+    if (guardTimer !== undefined) clearTimeout(guardTimer);
     if (result === TIMEOUT) {
       return {
         relay: state.url,
@@ -256,7 +273,13 @@ export class TimelinePaginator {
   }
 
   private merge(batch: RelayBatch): void {
-    if (batch.failed) return;
+    // A batch that failed is not a batch to throw away. The transport keeps the
+    // events that arrived before the deadline and hands them over precisely so
+    // they survive, and each one passed the same checks as any other: a relay
+    // that streamed a page and then went quiet has still sent real events, and
+    // dropping them means a relay a little under load contributes nothing, ever.
+    // The cursor is left alone by `updateCursor`, so the range is asked again and
+    // nothing is skipped.
     for (const event of batch.events) {
       this.events.set(event.id, event);
     }
@@ -297,19 +320,31 @@ export class TimelinePaginator {
     state.nextRetryAt = 0;
 
     if (batch.receivedCount === 0) {
-      state.exhausted = true;
-      return;
-    }
-    if (batch.receivedCount < batch.queriedLimit) {
+      // Nothing came back, so there is nothing older to ask for.
       state.exhausted = true;
       return;
     }
     const oldest = batch.oldestTimestamp ?? batch.queriedUntil;
     if (oldest < batch.queriedUntil) {
+      // Older ground was covered, so there may be more below it. This is what
+      // keeps a capped relay's history reachable: NIP-01 lets a relay limit what
+      // it will serve, so a relay whose `max_limit` is under the request answers
+      // with fewer events than asked on every single round. Reading the page
+      // length alone ended its history on the first round, left the cursor at
+      // the top, and had `coverage` report "complete" while everything older
+      // than that first page was unreachable.
       cursor.until = oldest;
       cursor.limit = this.baseLimit;
       cursor.seenAtBoundary = new Set();
       cursor.noProgressRounds = 0;
+      return;
+    }
+    if (batch.receivedCount < batch.queriedLimit) {
+      // Less than was asked for, and nothing older came back with it: the relay
+      // gave everything it had. Both halves matter. A short page on its own
+      // only means the relay has a cap, while no progress on its own is the
+      // same-second burst below, which is answered by asking again.
+      state.exhausted = true;
       return;
     }
     let progressed = false;

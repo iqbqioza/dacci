@@ -361,6 +361,42 @@ describe("loadServers", () => {
     expect(own(store)).toEqual(["https://my.blossom.example"]);
   });
 
+  it("does not publish one account's read on behalf of the next", async () => {
+    // The gate has to belong to the account, not to the app. Signing out reads
+    // no list but has nothing to publish, and treating that as "read" left the
+    // gate open for whoever signed in next — so an account whose own list was
+    // never read could publish this device's list and lose their own servers.
+    let pubkey: string | null = "a".repeat(64);
+    const sent: unknown[] = [];
+    vi.resetModules();
+    vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
+    vi.doMock("./compose.js", () => ({
+      publishEvent: async (template: Record<string, unknown>) => {
+        sent.push(template);
+        return { ...template, id: "f".repeat(64), sig: "e".repeat(128) };
+      },
+    }));
+    vi.doMock("./nostr.js", () => ({
+      getConnection: () => ({
+        url: "wss://read.example",
+        query: async () => ({ failed: true, events: [] }),
+      }),
+    }));
+    const store = await import("./servers.js");
+
+    // The first account is read successfully, so its gate opens.
+    pubkey = null;
+    await store.loadServers();
+
+    // A different account signs in, and its own list never gets answered.
+    pubkey = "b".repeat(64);
+    await store.loadServers();
+    await store.addServerAndPublish("https://my.blossom.example");
+
+    // The second account's list was never read, so nothing goes out under it.
+    expect(sent).toEqual([]);
+  });
+
   it("publishes once the list has been read, even when nothing was published", async () => {
     // Asked and answered with nothing is an answer: it says the account has no
     // list, so publishing one cannot lose anything.

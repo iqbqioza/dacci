@@ -1,4 +1,5 @@
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
+import { Portal } from "solid-js/web";
 import { Icon } from "./Icon.jsx";
 import {
   addServerAndPublish,
@@ -47,15 +48,29 @@ export function UploadPicker(props: {
   const { all } = useUploadServers();
   // The picker is a popup: a click anywhere else, or Escape, closes it.
   let root: HTMLDivElement | undefined;
+  /**
+   * The list itself, held directly. It is mounted into the body, so it is no
+   * longer inside `root` and cannot be found by asking `root` for it.
+   */
+  let list: HTMLDivElement | undefined;
   // Solid calls a ref it is given, so this has to be a callback that keeps
   // the element rather than a getter: a getter would be invoked with no
   // argument and the input would never be found.
   let input: HTMLInputElement | undefined;
 
   const onDocumentClick = (event: MouseEvent): void => {
-    if (open() && root !== undefined && !root.contains(event.target as Node)) {
-      setOpen(false);
+    if (!open()) return;
+    const target = event.target as Node;
+    // The list counts as inside even though it is mounted into the body: it
+    // holds the field for adding a server, so treating a click in it as a click
+    // elsewhere would close the picker over the reader's first keystroke.
+    if (
+      (root !== undefined && root.contains(target)) ||
+      (list !== undefined && list.contains(target))
+    ) {
+      return;
     }
+    setOpen(false);
   };
   const onKey = (event: KeyboardEvent): void => {
     if (event.key === "Escape") setOpen(false);
@@ -76,9 +91,7 @@ export function UploadPicker(props: {
   // it scroll instead of running off the top: a reply form sits near the top
   // of a note's page, where a list that always opened upwards left the screen.
   createEffect(() => {
-    if (!open() || root === undefined) return;
-    const list = root.querySelector<HTMLElement>("[data-list]");
-    if (list === null) return;
+    if (!open() || root === undefined || list === undefined) return;
     const icon = root.getBoundingClientRect();
     // The layout size, not the painted one: a transform moves the list without
     // changing it, and measuring the moved box would move it further.
@@ -108,7 +121,10 @@ export function UploadPicker(props: {
       beside === "below"
         ? keepInside(icon.bottom + gap, height, window.innerHeight)
         : keepInside(centred, height, window.innerHeight);
-    setAt({ x: x - icon.left, y: y - icon.top });
+    // The list is fixed to the window and placed with a transform, so the place
+    // chosen above is already the window coordinate it should sit at — no longer
+    // a distance from the icon, which it no longer hangs off.
+    setAt({ x, y });
 
     /** The place a box of this size takes, kept clear of the window's edges. */
     function keepInside(wanted: number, size: number, limit: number): number {
@@ -206,11 +222,20 @@ export function UploadPicker(props: {
       </button>
 
       <Show when={open()}>
-        <div
-          data-list
-          class="absolute top-0 left-0 z-30 max-h-[calc(100dvh-1rem)] w-72 overflow-y-auto overscroll-contain rounded-2xl border border-(--line) bg-(--surface) p-1 shadow-lg"
-          style={{ transform: `translate(${at().x}px, ${at().y}px)` }}
-        >
+        {/* Into the body, because the list is placed in window coordinates and
+            the reader may open this inside something that clips. The profile
+            editor's dialog scrolls, and a scrolling box clips on both axes even
+            when only one was asked for, so an absolutely positioned list a
+            little to the right of its button was cut to a few pixels of its
+            edge — every server row unreachable. Nothing here is styled relative
+            to where it is mounted, so moving it out costs nothing. */}
+        <Portal mount={document.body}>
+          <div
+            ref={list}
+            data-list
+            class="fixed top-0 left-0 z-50 max-h-[calc(100dvh-1rem)] w-72 overflow-y-auto overscroll-contain rounded-2xl border border-(--line) bg-(--surface) p-1 shadow-lg"
+            style={{ transform: `translate(${at().x}px, ${at().y}px)` }}
+          >
           <p class="px-3 pt-2 pb-1 text-xs font-bold text-(--ink-quiet)">
             Media upload(Blossom)
           </p>
@@ -220,21 +245,22 @@ export function UploadPicker(props: {
             onRemove={(url) => void removeServerAndPublish(url)}
           />
           <AddRow
-            label="+ Blossom サーバーを追加"
-            active={adding()}
-            onToggle={() => {
-              setAdding(!adding());
-              setAddError(null);
-              setDraft("");
-            }}
-            draft={draft()}
-            error={addError()}
-            saving={saving()}
-            placeholder="https://blossom.example"
-            onDraft={setDraft}
-            onAdd={() => void add()}
-          />
-        </div>
+              label="+ Blossom サーバーを追加"
+              active={adding()}
+              onToggle={() => {
+                setAdding(!adding());
+                setAddError(null);
+                setDraft("");
+              }}
+              draft={draft()}
+              error={addError()}
+              saving={saving()}
+              placeholder="https://blossom.example"
+              onDraft={setDraft}
+              onAdd={() => void add()}
+            />
+          </div>
+        </Portal>
       </Show>
 
       {/* One input for the whole picker: whichever server was clicked is

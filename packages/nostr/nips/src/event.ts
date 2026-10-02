@@ -1,5 +1,6 @@
+import { schnorr } from "@noble/curves/secp256k1";
 import { sha256 } from "@noble/hashes/sha256";
-import { bytesToHex } from "@noble/hashes/utils";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
 
 /** NIP-01 event object as transmitted on the wire. */
 export interface NostrEvent {
@@ -74,6 +75,33 @@ export function hasValidId(event: NostrEvent): boolean {
     computeEventId(event) === event.id.toLowerCase() &&
     event.id === event.id.toLowerCase()
   );
+}
+
+/**
+ * True when the signature is the key's own Schnorr signature over the id.
+ *
+ * `hasValidId` only proves the id is the hash of the fields the author chose,
+ * and `pubkey` is one of those fields. That is enough to catch an event whose
+ * body was rewritten under an id someone else signed, and not enough to catch
+ * an event whose author was swapped: recompute the id after changing `pubkey`
+ * and it still matches. Only this says the key named signed it.
+ *
+ * Verification costs roughly 50µs, so it is applied where it buys something —
+ * to an event that never crossed a socket, where no relay has vouched for it —
+ * rather than to everything received.
+ */
+export function hasValidSignature(event: NostrEvent): boolean {
+  try {
+    return schnorr.verify(
+      hexToBytes(event.sig),
+      hexToBytes(event.id),
+      hexToBytes(event.pubkey),
+    );
+  } catch {
+    // A malformed hex or an out-of-range point is a signature that does not
+    // verify, not a crash on the reader's feed.
+    return false;
+  }
 }
 
 /** Newest-first order: created_at desc, id asc (NIP-01 tie-break). */

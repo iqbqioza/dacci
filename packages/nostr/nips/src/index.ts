@@ -3,6 +3,7 @@ export {
   compareEvents,
   computeEventId,
   hasValidId,
+  hasValidSignature,
   isHex64,
   isValidEventStructure,
 } from "./event.js";

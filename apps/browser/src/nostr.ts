@@ -43,6 +43,17 @@ export function createTimeline(
 export const HOME_KINDS = [1, 1111];
 
 /**
+ * Kinds a profile shows: text notes and NIP-22 comments.
+ *
+ * Shared with the profile's live stream on purpose. The two read the same
+ * timeline, and a kind the paginator asks for but the stream does not is one
+ * that can never arrive: the paginator's `until` only ever moves backwards, so
+ * a comment published after it was built has exactly one route in, and filtering
+ * it out here left the "Replies and notes" tab short of it until a full reset.
+ */
+export const PROFILE_KINDS = [1, 1111];
+
+/**
  * Home feed: own posts when signed in, otherwise the global firehose. Notes
  * and NIP-22 comments come in one query because the tabs need both and no
  * relay can filter "has no e tag".

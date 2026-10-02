@@ -115,6 +115,70 @@ describe("deleteEvent", () => {
   });
 });
 
+describe("reposting and reacting", () => {
+  /** A publish the test releases by hand, so a second press can land inside it. */
+  function deferredRelay(): void {
+    let release: (() => void) | null = null;
+    vi.doMock("./nostr.js", () => ({
+      getConnection: () => ({
+        publish: async (event: unknown) => {
+          published.push(event);
+          await new Promise<void>((r) => {
+            release = r;
+          });
+          return { accepted };
+        },
+      }),
+    }));
+    (globalThis as { __release?: () => void }).__release = () => release?.();
+  }
+
+  it("does not publish a second event when the reader presses twice", async () => {
+    // The action bar's buttons stay live while a publish runs, and publishing is
+    // a signing prompt plus up to five seconds of relay time. Two presses both
+    // read "not done yet", so two kind 7 events go out; only the second id is
+    // kept, and taking the reaction back deletes that one while the other stays
+    // on the relays for good.
+    deferredRelay();
+    const release = () => (globalThis as { __release?: () => void }).__release?.();
+    const compose = await import("./compose.js");
+    const target = post(OTHER);
+
+    const first = compose.toggleReaction(target);
+    await Promise.resolve();
+    // The second press lands while the first is still signing and publishing.
+    expect(await compose.toggleReaction(target)).toBe(false);
+    release?.();
+    await first;
+
+    expect(published.filter((e) => (e as { kind: number }).kind === 7)).toHaveLength(1);
+
+    // The same for a repost.
+    published = [];
+    const reposted = compose.toggleRepost(target);
+    await Promise.resolve();
+    expect(await compose.toggleRepost(target)).toBe(false);
+    release?.();
+    await reposted;
+    expect(published.filter((e) => (e as { kind: number }).kind === 6)).toHaveLength(1);
+  });
+
+  it("still allows a second press once the first has finished", async () => {
+    // The guard is about the window while publishing, not about the post.
+    const compose = await import("./compose.js");
+    // The activity store learns who is signed in on login, and records the
+    // action under that key; without it nothing is recorded and the second
+    // press would see "not done yet" again.
+    const actions = await import("./my-actions.js");
+    actions.adoptMyActivity(ME);
+    const target = post(OTHER);
+    expect(await compose.toggleReaction(target)).toBe(true);
+    expect(await compose.toggleReaction(target)).toBe(true);
+    // Once, then a NIP-09 taking it back.
+    expect(published.map((e) => (e as { kind: number }).kind)).toEqual([7, 5]);
+  });
+});
+
 describe("broadcastEvent", () => {
   it("sends someone else's post as it stands, without signing it again", async () => {
     // The id and the signature are the author's. Re-signing would make a

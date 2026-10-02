@@ -59,6 +59,77 @@ describe("RelayConnection.query", () => {
     expect(result.events).toHaveLength(1);
   });
 
+  it("refuses a query event the filter did not ask for", async () => {
+    // A relay may answer a query with anything on the open id, and a query's
+    // events are merged into the page and sorted in, so whatever arrives becomes
+    // part of the answer. The live branch already checks this; the query branch
+    // did not, so a kind 4 delivered to a feed that asked for notes was taken
+    // as one of its answers.
+    //
+    // The `until` half matters just as much. A feed's filter is built with
+    // `until` set to now, and NIP-01 puts no upper bound on `created_at`, so a
+    // note dated centuries ahead is one every conforming relay will store and
+    // serve — and without the check it sorts to the top of the feed, where
+    // loading more pages never passes it.
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+    });
+    const now = Math.floor(Date.now() / 1000);
+    const pending = conn.query({
+      kinds: [1],
+      authors: ["a".repeat(64)],
+      until: now,
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    const sent = vi.mocked(socket.send).mock.calls[0][0];
+    const subId = JSON.parse(sent)[1] as string;
+    const author = "a".repeat(64);
+
+    // A direct message, and a note by an author the filter did not name.
+    socket.peer([
+      "EVENT",
+      subId,
+      relayEvent({ pubkey: author, created_at: now - 10, kind: 4, tags: [], content: "" }),
+    ]);
+    socket.peer([
+      "EVENT",
+      subId,
+      relayEvent({ pubkey: "b".repeat(64), created_at: now - 10, kind: 1, tags: [], content: "hi" }),
+    ]);
+    // And one dated centuries ahead.
+    socket.peer([
+      "EVENT",
+      subId,
+      relayEvent({ pubkey: author, created_at: 2 ** 31, kind: 1, tags: [], content: "later" }),
+    ]);
+    socket.peer(["EOSE", subId]);
+    expect((await pending).events).toEqual([]);
+  });
+
+  it("still returns what the query filter did ask for", async () => {
+    // The check above is only worth having if it keeps the real answer.
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+    });
+    const now = Math.floor(Date.now() / 1000);
+    const author = "a".repeat(64);
+    const pending = conn.query({ kinds: [1], authors: [author], until: now });
+    await new Promise((r) => setTimeout(r, 0));
+    const sent = vi.mocked(socket.send).mock.calls[0][0];
+    const subId = JSON.parse(sent)[1] as string;
+    socket.peer([
+      "EVENT",
+      subId,
+      relayEvent({ pubkey: author, created_at: now - 10, kind: 1, tags: [], content: "hi" }),
+    ]);
+    socket.peer(["EOSE", subId]);
+    const result = await pending;
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0].content).toBe("hi");
+  });
+
   it("marks CLOSED as failed", async () => {
     const socket = makeSocket();
     const conn = new RelayConnection("wss://example", () => socket, {

@@ -56,14 +56,26 @@ function stubFetch(options: {
   documentFrom?: string;
   status?: number;
   body?: unknown;
+  /** What the stubbed fetch rejects with, for the upload request itself. */
   throwOn?: "wellknown" | "upload";
+  /** Reject with a deadline instead of a transport fault. */
+  timeoutOn?: "wellknown" | "upload";
 }) {
   const calls: Call[] = [];
+  const deadline = (what: "wellknown" | "upload"): Error => {
+    // What `AbortSignal.timeout` raises, and what a fetch abort rejects with.
+    const error = new Error("The operation was aborted due to timeout");
+    error.name = "TimeoutError";
+    void what;
+    return error;
+  };
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
     calls.push({ url, init });
     if (options.throwOn === "upload") throw new TypeError("Failed to fetch");
+    if (options.timeoutOn === "upload") throw deadline("upload");
     if (url.includes(".well-known")) {
       if (options.throwOn === "wellknown") throw new TypeError("Failed to fetch");
+      if (options.timeoutOn === "wellknown") throw deadline("wellknown");
       if (options.document === null) return new Response("", { status: 404 });
       return document(
         options.document ?? {},
@@ -246,6 +258,19 @@ describe("uploadFile", () => {
     const { uploadFile: upload } = await import("./upload.js");
     const result = await upload({ url: HOST }, file());
     expect((result as { message?: string }).message).toContain("CORS");
+  });
+
+  it("tells a server that stopped answering from one that refused the origin", async () => {
+    // A deadline is not a cross-origin refusal. The server was reached and did
+    // not answer in the time allowed — a busy or half-open host — and telling
+    // the reader their upload was refused for CORS sends them looking for a
+    // problem they do not have, on a server that would have worked.
+    stubFetch({ timeoutOn: "upload" });
+    const { uploadFile: upload } = await import("./upload.js");
+    const result = await upload({ url: HOST }, file());
+    expect(result).toEqual({ failure: "timeout" });
+    const { uploadFailureText } = await import("./upload.js");
+    expect(uploadFailureText("timeout")).not.toContain("CORS");
   });
 
   it("refuses a server that needs a signature when there is none", async () => {

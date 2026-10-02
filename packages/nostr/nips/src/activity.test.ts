@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { schnorr } from "@noble/curves/secp256k1";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
 import { computeEventId, type NostrEvent } from "./event.js";
 import {
   buildDeletion,
@@ -18,10 +20,23 @@ import {
   summarizeMyActivity,
 } from "./activity.js";
 
-const ME = "1".repeat(64);
-const AUTHOR = "2".repeat(64);
-const ROOT_AUTHOR = "3".repeat(64);
 const AT = 1_700_000_000;
+
+/**
+ * Real keys, so a test can produce a signature that actually verifies. A note
+ * whose id matches its own fields but whose signature belongs to nobody is the
+ * forgery `embeddedNote` has to refuse, and a fake 128-character string is not
+ * enough to tell one apart from a real note.
+ */
+const ME_SECRET = "11".repeat(32);
+const AUTHOR_SECRET = "22".repeat(32);
+const ME = bytesToHex(schnorr.getPublicKey(hexToBytes(ME_SECRET)));
+const AUTHOR = bytesToHex(schnorr.getPublicKey(hexToBytes(AUTHOR_SECRET)));
+const ROOT_AUTHOR = "3".repeat(64);
+const SECRETS = new Map<string, string>([
+  [ME, ME_SECRET],
+  [AUTHOR, AUTHOR_SECRET],
+]);
 
 function note(
   id: string,
@@ -38,7 +53,10 @@ function buildComment(kind: number, tags: string[][]): NostrEvent {
   return { ...base, id: computeEventId(base), sig: "s".repeat(128) };
 }
 
-/** A signed event whose id follows from its own content. */
+/**
+ * A genuinely signed event: the signature is the named key's own, so a note that
+ * only rewrites its own fields cannot pass for one that author published.
+ */
 function signed(
   kind: number,
   pubkey: string,
@@ -46,7 +64,14 @@ function signed(
   created_at: number,
 ): NostrEvent {
   const base = { pubkey, created_at, kind, tags, content: "" };
-  return { ...base, id: computeEventId(base), sig: "s".repeat(128) };
+  const id = computeEventId(base);
+  const secret = SECRETS.get(pubkey);
+  if (secret === undefined) return { ...base, id, sig: "s".repeat(128) };
+  return {
+    ...base,
+    id,
+    sig: bytesToHex(schnorr.sign(hexToBytes(id), hexToBytes(secret))),
+  };
 }
 
 const target = note("a".repeat(64), AUTHOR);
@@ -479,6 +504,51 @@ describe("quote and repost references", () => {
       sig: "s".repeat(128),
     };
     expect(embeddedNote(repost)).toBeNull();
+  });
+
+  it("refuses an inline note that borrows another author's name", () => {
+    // The attack the id check does not see. `pubkey` is one of the fields the
+    // id is computed over, so an author who writes a note under someone else's
+    // key and recomputes the id produces a note whose id matches perfectly. The
+    // feed would then draw that person's real avatar and display name next to
+    // words the attacker typed, inside a card the reader trusts. Only the
+    // signature says the named key signed it.
+    const victim = signed(1, AUTHOR, [], AT);
+    const stolen = {
+      pubkey: AUTHOR,
+      created_at: AT,
+      kind: 1,
+      tags: [],
+      content: "this is not what they said",
+    };
+    // Same fields, a correct id, and a signature that belongs to the attacker.
+    const forgery: NostrEvent = {
+      ...stolen,
+      id: computeEventId(stolen),
+      sig: bytesToHex(schnorr.sign(hexToBytes(computeEventId(stolen)), hexToBytes(ME_SECRET))),
+    };
+    expect(forgery.id === computeEventId(forgery)).toBe(true);
+    const repost: NostrEvent = {
+      id: "c".repeat(64),
+      pubkey: ME,
+      created_at: AT,
+      kind: 6,
+      tags: [["e", forgery.id], ["p", AUTHOR]],
+      content: JSON.stringify(forgery),
+      sig: "s".repeat(128),
+    };
+    expect(embeddedNote(repost)).toBeNull();
+    // The genuine note by that author is still unwrapped.
+    const honest: NostrEvent = {
+      id: "d".repeat(64),
+      pubkey: ME,
+      created_at: AT,
+      kind: 6,
+      tags: [["e", victim.id], ["p", AUTHOR]],
+      content: JSON.stringify(victim),
+      sig: "s".repeat(128),
+    };
+    expect(embeddedNote(honest)).toEqual(victim);
   });
 
   it("has no embedded note when the content is prose or broken JSON", () => {

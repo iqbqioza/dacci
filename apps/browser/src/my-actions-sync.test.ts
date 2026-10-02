@@ -47,6 +47,15 @@ function undo(at = 1100): NostrEvent {
 
 const tick = (ms = 0): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+/** A promise the test settles by hand, so a round can be held open. */
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
 beforeEach(() => {
   const storage = new MemoryStorage();
   (globalThis as { localStorage?: Storage }).localStorage =
@@ -86,6 +95,73 @@ async function signedIn(
 }
 
 describe("reconciling with the relays", () => {
+  it("throws away an answer that lands after the reader changed", async () => {
+    // The round is raced against a 5 s deadline, so signing out and back in
+    // while it is out is an ordinary outcome. This account's posts would then
+    // carry the previous reader's reactions, and the next edit would write that
+    // mixture under this account's key for good.
+    let who: string | null = ME;
+    vi.doMock("./auth.js", () => ({
+      useAuth: () => ({ pubkey: () => who }),
+    }));
+    vi.doMock("./relays.js", () => ({
+      useRelays: () => ({ readRelays: () => ["wss://a"] }),
+    }));
+    const gate = deferred<{ failed: boolean; events: NostrEvent[] }>();
+    vi.doMock("./nostr.js", () => ({
+      getConnection: () => ({ url: "wss://a", query: () => gate.promise }),
+    }));
+    const store = await import("./my-actions.js");
+    store.adoptMyActivity(ME);
+
+    const round = store.syncMyActivity();
+    await tick();
+    // The reader signs out and someone else signs in while the round is out.
+    who = null;
+    store.adoptMyActivity(null);
+    who = OTHER;
+    store.adoptMyActivity(OTHER);
+    gate.resolve({ failed: false, events: [reaction()] });
+    await round;
+
+    // The answer was about ME and belongs to nobody here.
+    expect(store.hasDone("react", POST)).toBe(false);
+  });
+
+  it("records an action under the account that signed, not the one on screen", async () => {
+    // The publish resolves after a signing prompt and up to five seconds of
+    // relay time. Recording against whoever signed in meanwhile would put an id
+    // this account never signed into this account's stored map, and its action
+    // row would offer to undo it with a NIP-09 under the wrong key.
+    let who: string | null = ME;
+    vi.doMock("./auth.js", () => ({
+      useAuth: () => ({ pubkey: () => who }),
+    }));
+    vi.doMock("./relays.js", () => ({
+      useRelays: () => ({ readRelays: () => ["wss://a"] }),
+    }));
+    vi.doMock("./nostr.js", () => ({
+      getConnection: () => ({
+        url: "wss://a",
+        query: async () => ({ failed: true, events: [] }),
+      }),
+    }));
+    const store = await import("./my-actions.js");
+    store.adoptMyActivity(ME);
+
+    // ME signs the reaction, then OTHER is on screen by the time it resolves.
+    who = OTHER;
+    store.adoptMyActivity(OTHER);
+    store.markReacted(POST, REACTION, ME);
+
+    expect(store.hasDone("react", POST)).toBe(false);
+    // Recorded with the account it belongs to, the same account's own use does.
+    who = ME;
+    store.adoptMyActivity(ME);
+    store.markReacted(POST, REACTION, ME);
+    expect(store.hasDone("react", POST)).toBe(true);
+  });
+
   it("keeps an action when one relay answers with nothing and another is silent", async () => {
     // One relay has nothing of the reader's; the other never answers. Neither
     // of them has seen the reader's whole history, so neither may say the

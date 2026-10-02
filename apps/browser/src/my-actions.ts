@@ -28,6 +28,12 @@ const SYNC_TIMEOUT_MS = 5000;
 const [activity, setActivity] = createSignal<MyActivityMap>(new Map());
 const [pubkey, setPubkey] = createSignal<string | null>(null);
 
+/**
+ * Bumped whenever the account changes, so a round that is still out belongs to
+ * the account that asked for it and cannot answer for the next one.
+ */
+let readGeneration = 0;
+
 export const myActivity = activity;
 export const myActivityPubkey = pubkey;
 
@@ -89,8 +95,28 @@ export function hasDone(
   return activityFor(eventId)[kind] !== undefined;
 }
 
-export function markReplied(eventId: string): void {
+/**
+ * The account an action belongs to, or null when it is not that account's.
+ *
+ * These are recorded only once the publish has resolved, which is after a
+ * signing prompt and up to five seconds of relay time. Reading the viewer at
+ * that point records it against whoever signed in meanwhile: an event the
+ * previous account signed would sit in this account's map, be written to this
+ * account's storage for good, and its action row would then offer to undo it by
+ * publishing a NIP-09 under a key that never signed it.
+ *
+ * `signedAs` is the account that signed. Left out, the current viewer is taken
+ * as the signer, which is what every caller within one account's session wants.
+ */
+function ownerFor(signedAs?: string | null): string | null {
   const key = pubkey();
+  if (key === null) return null;
+  if (signedAs !== undefined && signedAs !== key) return null;
+  return key;
+}
+
+export function markReplied(eventId: string, signedAs?: string | null): void {
+  const key = ownerFor(signedAs);
   if (key === null) return;
   update(key, (map) => {
     entry(map, eventId).replied = true;
@@ -98,8 +124,12 @@ export function markReplied(eventId: string): void {
   });
 }
 
-export function markReposted(eventId: string, repostEventId: string): void {
-  const key = pubkey();
+export function markReposted(
+  eventId: string,
+  repostEventId: string,
+  signedAs?: string | null,
+): void {
+  const key = ownerFor(signedAs);
   if (key === null) return;
   update(key, (map) => {
     entry(map, eventId).repost = repostEventId;
@@ -107,8 +137,12 @@ export function markReposted(eventId: string, repostEventId: string): void {
   });
 }
 
-export function markQuoted(eventId: string, quoteEventId: string): void {
-  const key = pubkey();
+export function markQuoted(
+  eventId: string,
+  quoteEventId: string,
+  signedAs?: string | null,
+): void {
+  const key = ownerFor(signedAs);
   if (key === null) return;
   update(key, (map) => {
     entry(map, eventId).quote = quoteEventId;
@@ -116,8 +150,12 @@ export function markQuoted(eventId: string, quoteEventId: string): void {
   });
 }
 
-export function markReacted(eventId: string, reactionEventId: string): void {
-  const key = pubkey();
+export function markReacted(
+  eventId: string,
+  reactionEventId: string,
+  signedAs?: string | null,
+): void {
+  const key = ownerFor(signedAs);
   if (key === null) return;
   update(key, (map) => {
     entry(map, eventId).react = reactionEventId;
@@ -125,8 +163,8 @@ export function markReacted(eventId: string, reactionEventId: string): void {
   });
 }
 
-export function clearReposted(eventId: string): void {
-  const key = pubkey();
+export function clearReposted(eventId: string, signedAs?: string | null): void {
+  const key = ownerFor(signedAs);
   if (key === null) return;
   update(key, (map) => {
     const current = map.get(eventId);
@@ -136,8 +174,8 @@ export function clearReposted(eventId: string): void {
   });
 }
 
-export function clearReacted(eventId: string): void {
-  const key = pubkey();
+export function clearReacted(eventId: string, signedAs?: string | null): void {
+  const key = ownerFor(signedAs);
   if (key === null) return;
   update(key, (map) => {
     const current = map.get(eventId);
@@ -149,6 +187,9 @@ export function clearReacted(eventId: string): void {
 
 /** Called on login: paint from the cache, then reconcile with the relays. */
 export function adoptMyActivity(next: string | null): void {
+  // A read in flight belongs to the account that asked for it, so the new
+  // account makes that answer stale rather than current.
+  readGeneration += 1;
   setPubkey(next);
   if (next === null) {
     setActivity(new Map());
@@ -172,6 +213,7 @@ export function adoptMyActivity(next: string | null): void {
 export async function syncMyActivity(): Promise<void> {
   const key = pubkey();
   if (key === null) return;
+  const generation = readGeneration;
   const urls = useRelays().readRelays();
   const filter = {
     kinds: ACTIVITY_KINDS,
@@ -197,6 +239,12 @@ export async function syncMyActivity(): Promise<void> {
       events.push(...result.value.events);
     }
   }
+  // A round that is still out when the reader changes accounts answers about
+  // the account that asked for it. Applying it would put the previous reader's
+  // actions on this one's posts, and the next edit would write that mixture
+  // under this one's key for good — an action row offering to undo an event
+  // this account never signed.
+  if (generation !== readGeneration || pubkey() !== key) return;
   if (answered === 0) return;
   const fresh = summarizeMyActivity(events);
   // Every relay answered and the window was not full, so this really is the

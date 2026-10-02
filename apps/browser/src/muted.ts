@@ -143,6 +143,12 @@ export async function toggleMute(pubkey: string): Promise<void> {
     return;
   }
   const was = mutedIn(tags(), pubkey);
+  // The publish is a signing prompt plus up to five seconds of relay time, so
+  // the reader can change accounts while it is out. The list being written was
+  // the previous reader's, and `setLoaded(true)` would claim it is resolved for
+  // whoever is on screen — whose next mute would publish this list under their
+  // own key and un-mute everyone they muted elsewhere.
+  const generation = readGeneration;
   setPending(true);
   try {
     const next = withMuted(tags(), pubkey, !was);
@@ -160,11 +166,14 @@ export async function toggleMute(pubkey: string): Promise<void> {
       showNotice(was ? "ミュート解除に失敗しました" : "ミュートに失敗しました");
       return;
     }
+    if (generation !== readGeneration || useAuth().pubkey() !== key) return;
     setTags(next);
     setLoaded(true);
     showNotice(was ? "ミュートを解除しました" : "ミュートしました");
   } finally {
-    setPending(false);
+    // Only the call that queued the round clears the flag; a newer read has
+    // taken it over by now and is the one that should release it.
+    if (generation === readGeneration) setPending(false);
   }
 }
 

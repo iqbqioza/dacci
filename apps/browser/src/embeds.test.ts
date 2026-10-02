@@ -1,30 +1,35 @@
 import type { NostrEvent } from "dacci-nostr-nips";
 import { computeEventId, encodeNote } from "dacci-nostr-nips";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { NsecSigner } from "dacci-nostr-signer";
 import { clearEventCache, rememberEvents } from "./event-cache.js";
 import { markDeleted, resetDeleted } from "./deleted.js";
 import { createEmbeds } from "./embeds.js";
 
-const AUTHOR = "a".repeat(64);
+/** A real key, so a fixture can carry a signature that actually verifies. */
+const signer = new NsecSigner("11".repeat(32));
+const AUTHOR = await signer.getPublicKey();
 const NOTE_ID = "b".repeat(64);
 const OTHER_ID = "c".repeat(64);
 
 const link = (id: string): string => `nostr:${encodeNote(id)}`;
 
 /**
- * A note whose id follows from its own fields, which is what a repost carrying
- * the note inline must have: that content never crossed a socket, so the id is
- * the only thing tying the object to the note it claims to be.
+ * A note whose id follows from its own fields and whose signature is its
+ * author's, which is what a repost carrying the note inline must have: that
+ * content never crossed a socket, so nothing has vouched for it. The id alone
+ * is not enough — it is the hash of fields the author chose, `pubkey` among
+ * them — so a note that borrows someone else's key and recomputes the id passes
+ * it, and the card would be drawn under that person's name.
  */
-function inlineNote(content: string): NostrEvent {
-  const fields = {
+async function inlineNote(content: string): Promise<NostrEvent> {
+  return signer.signEvent({
     pubkey: AUTHOR,
     created_at: 100,
     kind: 1,
-    tags: [["t", "nostr"]] as string[][],
+    tags: [["t", "nostr"]],
     content,
-  };
-  return { ...fields, id: computeEventId(fields), sig: "s".repeat(128) };
+  });
 }
 
 function note(id: string, content: string): NostrEvent {
@@ -82,7 +87,7 @@ describe("embed wiring", () => {
     try {
       const quoted = quoteRepost(NOTE_ID);
       // The repost carries the note inline, so no query is needed to draw it.
-      const secret = inlineNote("secret");
+      const secret = await inlineNote("secret");
       const withBody = { ...quoted, content: JSON.stringify(secret) };
       const embeds = createEmbeds(async () => [secret], FAST);
       embeds.requestEmbeds([quoted, withBody]);
@@ -121,9 +126,9 @@ describe("embed wiring", () => {
     expect(embeds.useEmbed(linker).event?.id).toBe(NOTE_ID);
   });
 
-  it("shows the note inline when the repost carries it as JSON", () => {
+  it("shows the note inline when the repost carries it as JSON", async () => {
     const embeds = createEmbeds(async () => [], FAST);
-    const inner = inlineNote("the original");
+    const inner = await inlineNote("the original");
     const repost = {
       ...quoteRepost(inner.id),
       content: JSON.stringify(inner),
@@ -132,12 +137,12 @@ describe("embed wiring", () => {
     expect(embeds.useEmbed(repost).event).toEqual(inner);
   });
 
-  it("shows nothing for an inline note that does not match its id", () => {
+  it("shows nothing for an inline note that does not match its id", async () => {
     // The outer repost is signed by whoever wrote it and passes every check,
     // so the card would otherwise draw a post that looks like the victim's own
     // and says whatever the attacker typed.
     const embeds = createEmbeds(async () => [], FAST);
-    const victim = inlineNote("the original");
+    const victim = await inlineNote("the original");
     const repost = {
       ...quoteRepost(victim.id),
       content: JSON.stringify({ ...victim, content: "TRUST ME" }),

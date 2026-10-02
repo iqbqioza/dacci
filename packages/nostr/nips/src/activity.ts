@@ -1,6 +1,7 @@
 import type { UnsignedEvent } from "./auth.js";
 import {
   hasValidId,
+  hasValidSignature,
   isHex64,
   isValidEventStructure,
   type NostrEvent,
@@ -209,11 +210,17 @@ export function embeddedEventId(event: NostrEvent): string | null {
 /**
  * The note a NIP-18 repost carries in its own content.
  *
- * The id is checked as well as the shape. This object never crossed a socket, so
- * nothing has vouched for it, and a repost's content is attacker-chosen text: an
- * inline note claiming someone else's id would be drawn as that person's post,
- * with words the attacker wrote, inside a card the reader trusts. Checking the
- * id is what ties the note to the fields it claims to have.
+ * The id is checked as well as the shape, and so is the signature. This object
+ * never crossed a socket, so nothing has vouched for it, and a repost's content
+ * is attacker-chosen text: an inline note claiming someone else's id would be
+ * drawn as that person's post, with words the attacker wrote, inside a card the
+ * reader trusts.
+ *
+ * The id alone is not enough. It is the hash of the fields the author chose, and
+ * `pubkey` is one of those fields, so an author who swaps in someone else's key
+ * and recomputes the id produces a note that passes the id check while claiming
+ * another person's name and avatar beside the attacker's words. Only the
+ * signature says the named key signed it.
  */
 export function embeddedNote(event: NostrEvent): NostrEvent | null {
   if (event.content.length === 0) return null;
@@ -223,7 +230,8 @@ export function embeddedNote(event: NostrEvent): NostrEvent | null {
   } catch {
     return null;
   }
-  return isValidEventStructure(parsed) && hasValidId(parsed) ? parsed : null;
+  if (!isValidEventStructure(parsed) || !hasValidId(parsed)) return null;
+  return hasValidSignature(parsed) ? parsed : null;
 }
 
 /**

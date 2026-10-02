@@ -40,8 +40,18 @@ export function isDeleted(id: string): boolean {
  * Takes posts away, which is what a published deletion request does here too.
  * The reader's own events are remembered by the activity store, which sends
  * the kind 5 that this list stands for.
+ *
+ * `signedAs` is the account whose deletion this is. The caller publishes first
+ * and records afterwards, which is after a signing prompt and up to five seconds
+ * of relay time — long enough for the reader to sign out. Recording then would
+ * install the previous reader's deletions into the set that has just been
+ * cleared for the next one, and their posts would silently vanish from it.
+ *
+ * A set nobody has claimed yet is not at risk: it is empty, and refusing the
+ * write there would only stop a reader seeing their own deletion take effect.
  */
-export function markDeleted(ids: Iterable<string>): void {
+export function markDeleted(ids: Iterable<string>, signedAs?: string | null): void {
+  if (signedAs !== undefined && owner !== null && signedAs !== owner) return;
   setDeleted((prev) => {
     const next = new Set(prev);
     let added = false;
