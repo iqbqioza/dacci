@@ -105,7 +105,12 @@ export {
   REPLY_KIND,
   summarizeMyActivity,
 } from "./activity.js";
-export type { MyActivity, MyActivityMap, ReplyInput } from "./activity.js";
+export type {
+  MyActivity,
+  MyActivityMap,
+  ReplyInput,
+  RootRef,
+} from "./activity.js";
 export { bech32Decode, bech32Encode } from "./bech32.js";
 export {
   decodeEventReference,

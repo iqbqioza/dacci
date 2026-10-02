@@ -4,6 +4,7 @@ import {
   buildQuoteRepost,
   buildReaction,
   buildReply,
+  type RootRef,
   buildRepost,
   REACTION_KIND,
   REPOST_KIND,
@@ -72,15 +73,25 @@ export function closeCompose(): void {
 }
 
 /**
- * The thread root of a post, when the relay told us (NIP-10 marker) and the
- * event is cached. Replies need it to keep the thread intact for others.
+ * The thread root of a post, when the post says it has one.
+ *
+ * The *id* is on the target's own `root` tag, so it is known even when the root
+ * event is not — and it is all the `root` tag needs. This used to answer `null`
+ * when the event was not in the cache, which `buildReply` could not tell apart
+ * from "this post is its own thread's root", so the reply marked its own target
+ * as the root and every client placed it at the top of a thread rooted in the
+ * middle of the real one.
+ *
+ * A deep link to a reply is the ordinary way to arrive without the root loaded,
+ * and the cache evicts under pressure, so the miss is routine rather than rare.
  */
-function rootOf(event: NostrEvent): NostrEvent | null {
+function rootOf(event: NostrEvent): RootRef | null {
   const marker = event.tags.find(
     (tag) => tag[0] === "e" && tag[3] === "root" && isHex64(tag[1]),
   );
   if (marker === undefined || marker[1] === event.id) return null;
-  return lookupEvent(marker[1]);
+  const cached = lookupEvent(marker[1]);
+  return cached === null ? { id: marker[1] } : cached;
 }
 
 function isHex64(value: string | undefined): value is string {
@@ -230,15 +241,6 @@ function now(): number {
   return Math.floor(Date.now() / 1000);
 }
 
-/** The thread root of a post, for a reply sent from a form. */
-function rootForReply(target: NostrEvent): NostrEvent | null {
-  const marker = target.tags.find(
-    (tag) => tag[0] === "e" && tag[3] === "root" && isHex64(tag[1]),
-  );
-  if (marker === undefined || marker[1] === target.id) return null;
-  return lookupEvent(marker[1]);
-}
-
 /**
  * Publishes a NIP-10 reply to one post, from the reply form on a detail
  * page. The dialog does the same work, but it owns modal state, so a form
@@ -261,7 +263,7 @@ export async function publishReply(
     buildReply({
       pubkey,
       target,
-      root: rootForReply(target),
+      root: rootOf(target),
       text: body,
       createdAt: now(),
     }),

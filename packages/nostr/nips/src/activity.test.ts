@@ -121,6 +121,63 @@ describe("buildReply", () => {
     expect(tagValue(event, "p")?.[1]).toBe(AUTHOR);
   });
 
+  it("names the root by id even when the root event is not held", () => {
+    // The miss is routine: a reply opened from a deep link has one whose root was
+    // never loaded, and the cache evicts under pressure. Answering `null` there
+    // was indistinguishable from "this post is its own thread's root", so the
+    // reply marked its own target as the root — every client then placed it at the
+    // top of a thread rooted in a reply from the middle of the real one, and the
+    // real thread split in two.
+    //
+    // The id is on the target's own `root` tag, so it is known either way, and it
+    // is all the tag requires.
+    const event = buildReply({
+      pubkey: ME,
+      text: "x",
+      target,
+      root: { id: root.id },
+      createdAt: AT,
+    });
+    // Still the root, still the reply — the two marked tags, with the marker in
+    // the position NIP-10 says to read it from.
+    expect(tagValue(event, "e", "root")?.[1]).toBe(root.id);
+    expect(tagValue(event, "e", "reply")?.[1]).toBe(target.id);
+    // Four entries rather than five: the pubkey is recommended, not required, and
+    // a hole where the author should be is worse than its absence.
+    const rootTag = event.tags.find((t) => t[1] === root.id);
+    expect(rootTag).toEqual(["e", root.id, "", "root"]);
+    // What is given up: the root's author is not named by a `p` tag, so this
+    // reply does not notify them. It is very likely among the target's own `p`
+    // tags — NIP-10 says a reply carries everyone already in the thread — but not
+    // guaranteed, and not here, where the target names nobody.
+    //
+    // That is the trade: a root marker that is right, at the cost of possibly not
+    // notifying one participant when the root event was not in the cache. The
+    // other order notified everyone and marked the wrong post as the root, which
+    // split the thread for every reader.
+    expect(
+      event.tags.some((t) => t[0] === "p" && t[1] === ROOT_AUTHOR),
+    ).toBe(false);
+    // And the target's author, who is in hand, is notified as before.
+    expect(tagValue(event, "p")?.[1]).toBe(AUTHOR);
+  });
+
+  it("marks its own target as the root only when the target really is one", () => {
+    // The other half, and the one a fix written as "always write two marked
+    // tags" would break: a direct reply to a thread's root carries a *single*
+    // `root` tag, which is what NIP-10 asks for.
+    const direct = buildReply({
+      pubkey: ME,
+      text: "x",
+      target,
+      root: { id: target.id, pubkey: AUTHOR },
+      createdAt: AT,
+    });
+    expect(direct.tags.filter((t) => t[0] === "e")).toHaveLength(1);
+    expect(tagValue(direct, "e", "root")?.[1]).toBe(target.id);
+    expect(tagValue(direct, "e", "reply")).toBeUndefined();
+  });
+
   it("puts the marker where NIP-10 says to read it", () => {
     // The whole tag: id, then the relay hint (left empty), then the marker,
     // then the author. Reading the marker at any other index is what made a

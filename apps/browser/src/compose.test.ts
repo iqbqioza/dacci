@@ -309,6 +309,48 @@ describe("why a publish failed", () => {
     expect(seen).toEqual(["署名をキャンセルしました"]);
   });
 
+  it("keeps the thread root when replying to a reply whose root is not cached", async () => {
+    // A reply opened from a deep link has one whose root was never loaded, and
+    // the cache evicts under pressure, so the miss is routine. `rootOf` used to
+    // answer nothing there, which `buildReply` could not tell apart from "this
+    // post is its own thread's root" — so the reply marked its own target as the
+    // root, and every client placed it at the top of a thread rooted in a reply
+    // from the middle of the real one.
+    vi.resetModules();
+    stubRelay();
+    const compose = await import("./compose.js");
+    const ROOT = "9".repeat(64);
+    const middle: NostrEvent = {
+      ...post(OTHER),
+      id: "b".repeat(64),
+      tags: [
+        ["e", ROOT, "", "root", "8".repeat(64)],
+        ["p", "8".repeat(64)],
+      ],
+    };
+    // The root event is deliberately never put in the cache.
+    expect((await import("./event-cache.js")).lookupEvent(ROOT)).toBeNull();
+
+    await compose.publishReply(middle, " answering the middle");
+    expect(published).toHaveLength(1);
+    const sent = published[0] as { tags: string[][] };
+    const marked = sent.tags.filter((t) => t[0] === "e");
+    // Two marked tags: the real root, and the post being answered. Not one, and
+    // not the middle reply standing in for the root.
+    expect(marked).toHaveLength(2);
+    expect(marked.find((t) => t[3] === "root")?.[1]).toBe(ROOT);
+    expect(marked.find((t) => t[3] === "reply")?.[1]).toBe(middle.id);
+    // A direct answer to a thread's root still gets the single `root` tag NIP-10
+    // asks for — the case a fix written as "always two" would break.
+    published.length = 0;
+    await compose.publishReply(post(OTHER), " answering the root");
+    const direct = (published[0] as { tags: string[][] }).tags.filter(
+      (t) => t[0] === "e",
+    );
+    expect(direct).toHaveLength(1);
+    expect(direct[0][3]).toBe("root");
+  });
+
   it("returns the real reason from a reply instead of assuming a rejection", async () => {
     // `publishReply` reports why it failed through the reply form, and it used to
     // hand back a hardcoded "rejected" for every failure.

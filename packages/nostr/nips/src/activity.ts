@@ -49,13 +49,30 @@ export function mentionedPubkeys(text: string, exclude: string[]): string[] {
   return mentionedProfiles(text).filter((key) => !skip.has(key));
 }
 
+/**
+ * A thread root, known by id alone.
+ *
+ * The root event is not always in the cache: a reply opened from a deep link has
+ * one whose root was never loaded, and the cache evicts under pressure. The id is
+ * on the target's own `root` tag either way, and the id is all the `root` tag
+ * requires. Answering a reply with the root event *or with nothing* made those
+ * two cases indistinguishable here, and the nothing-branch marked the reply's own
+ * target as the root — so every other client placed the reply at the top of a
+ * thread whose root is a reply in the middle, and the real thread split in two.
+ */
+export interface RootRef {
+  id: string;
+  /** The root's author, when the event itself is held. */
+  pubkey?: string;
+}
+
 export interface ReplyInput {
   pubkey: string;
   text: string;
   /** The post being answered. */
   target: NostrEvent;
   /** The thread root, when the target is itself a reply. */
-  root?: NostrEvent | null;
+  root?: NostrEvent | RootRef | null;
   createdAt: number;
 }
 
@@ -88,10 +105,26 @@ export function buildReply(input: ReplyInput): UnsignedEvent {
     const own = target.tags.find((tag) => tag[0] === "p" && tag[1] === key);
     return own === undefined ? ["p", key] : [...own];
   };
-  if (root !== undefined && root !== null && root.id !== target.id) {
-    tags.push(["e", root.id, "", "root", root.pubkey]);
+  const rootId = root === undefined || root === null ? undefined : root.id;
+  const rootPubkey = root?.pubkey;
+  if (rootId !== undefined && rootId !== target.id) {
+    // The pubkey is the fifth entry and NIP-10 recommends rather than requires
+    // it, so a root known by id alone is written in the four-entry form rather
+    // than with a hole where the author should be. Every client reads the marker
+    // at the fourth position either way.
+    tags.push(
+      rootPubkey === undefined
+        ? ["e", rootId, "", "root"]
+        : ["e", rootId, "", "root", rootPubkey],
+    );
     tags.push(["e", target.id, "", "reply", target.pubkey]);
-    tags.push(carried(root.pubkey));
+    // The root's author is notified only when the root's event was held. It is
+    // very likely among the target's own `p` tags, which are carried over below,
+    // so a root known by id alone usually still reaches them — but not always, and
+    // that is the trade: a root marker that is right, against possibly not
+    // notifying one participant. The other order notified everyone and named the
+    // wrong post as the root, which split the thread for every reader.
+    if (rootPubkey !== undefined) tags.push(carried(rootPubkey));
     tags.push(carried(target.pubkey));
   } else {
     // A direct reply to the root: one marked tag, naming it as both the thread
