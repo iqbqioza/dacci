@@ -1,5 +1,6 @@
 import type { NostrEvent } from "dacci-nostr-nips";
 import { describe, expect, it } from "vitest";
+import { DEADLINE_MS as DEADLINE } from "./event-cache.js";
 import {
   clearEventCache,
   fetchEventById,
@@ -47,6 +48,75 @@ describe("event cache", () => {
     expect(lookupEvent(event.id)).toBe(event);
     clearEventCache();
   });
+
+  it("does not wait out the deadline once every relay has answered", async () => {
+    // A deleted post is answered by *every* relay with nothing, so this is the
+    // commonest shape there is — and it used to cost the whole five seconds,
+    // because only a hit settled the question. One dead relay held a deep link
+    // open for the same five seconds even when another had answered in twenty
+    // milliseconds, which is not what the function's own comment said it did.
+    clearEventCache();
+    const never = makeEvent("e".repeat(64));
+    const slow = (): Promise<NostrEvent[]> =>
+      new Promise((resolve) => setTimeout(() => resolve([never]), 30));
+    const started = Date.now();
+    const found = await fetchEventById(never.id, ["wss://a", "wss://b"], async (url) =>
+      url === "wss://a" ? slow() : new Promise<NostrEvent[]>(() => undefined),
+    );
+    const waited = Date.now() - started;
+    // Found, from the one relay that had it, without waiting for the other.
+    expect(found).not.toBeNull();
+    expect(waited).toBeLessThan(1000);
+
+    // And nobody holding it is an answer in its own right, so it does not wait
+    // either.
+    const goneId = "f".repeat(64);
+    const asked = Date.now();
+    expect(
+      await fetchEventById(goneId, ["wss://a"], async () => []),
+    ).toBeNull();
+    expect(Date.now() - asked).toBeLessThan(1000);
+    clearEventCache();
+  });
+
+  // Two deadlines' worth of waiting, because the claim is about a relay that
+  // answers *after* the deadline — which cannot be shown without letting it.
+  it(
+    "keeps an answer that arrives after the deadline, rather than losing it",
+    { timeout: 20_000 },
+    async () => {
+    // The reader was told the post does not exist, which this client cannot know:
+    // a relay five and a half seconds in is slow, not absent. The answer used to
+    // be written into a variable nobody read again — not returned, and not even
+    // cached, so the next attempt asked everyone the same question.
+    clearEventCache();
+    const late = makeEvent("9".repeat(64));
+    const started = Date.now();
+    const found = await fetchEventById(
+      late.id,
+      ["wss://slow"],
+      async () => {
+        await new Promise((r) => setTimeout(r, DEADLINE + 200));
+        return [late];
+      },
+    );
+    expect(found).toBeNull();
+    // Given up on, on time.
+    expect(Date.now() - started).toBeLessThan(DEADLINE + 500);
+    // And what arrived afterwards is kept, so the next attempt needs no relay.
+    await new Promise((r) => setTimeout(r, DEADLINE + 400));
+    expect(lookupEvent(late.id)).not.toBeNull();
+    let asked = false;
+    expect(
+      await fetchEventById(late.id, ["wss://slow"], async () => {
+        asked = true;
+        return [];
+      }),
+    ).not.toBeNull();
+    expect(asked).toBe(false);
+    clearEventCache();
+    },
+  );
 
   it("keeps what the reader is looking at, and forgets what they are not", () => {
     // The queue was insertion order and never moved, so the post a reader had

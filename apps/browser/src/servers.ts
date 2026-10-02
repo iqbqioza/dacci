@@ -425,7 +425,17 @@ async function fetchServerPreference(pubkey: string): Promise<FetchedList> {
     const tags = (event as { tags?: unknown }).tags;
     if (Array.isArray(tags)) {
       for (const tag of tags) {
-        if (Array.isArray(tag) && tag[0] === "server" && typeof tag[1] === "string") {
+        if (
+          Array.isArray(tag) &&
+          tag[0] === "server" &&
+          typeof tag[1] === "string" &&
+          // Checked, because the other two ways a server enters this list check
+          // it: the stored one and the one a reader typed. An entry read off the
+          // wire was the one way through, so a `server` tag of `not-a-url` or
+          // `javascript:…` became a row the reader could pick and be told the
+          // signature was cancelled for.
+          isHttpUrl(tag[1])
+        ) {
           out.push({ url: tag[1].replace(/\/+$/, "") });
         }
       }

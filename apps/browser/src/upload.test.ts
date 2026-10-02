@@ -534,6 +534,30 @@ describe("file extension", () => {
     expect(calls).toHaveLength(2);
   });
 
+  it("keeps the extension a server chose, which may not be the file's", async () => {
+    // NIP-96's delayed processing: "if the file processing would change a file
+    // from 'jpg' to 'webp', use '.webp' extension on the `nip94_event.tags.*.url`
+    // field value." A client that rewrote that to the uploaded file's `.jpg`
+    // named a resource the server never advertised, so the link 404s.
+    stubFetch({
+      document: { api_url: `${NIP96}/upload` },
+      body: {
+        status: "success",
+        nip94_event: {
+          tags: [["url", `https://nip96.example/${"9".repeat(64)}.webp`]],
+        },
+      },
+    });
+    const { uploadFile: upload } = await import("./upload.js");
+    const result = await upload(
+      { url: NIP96 },
+      file("photo.jpg", "image/jpeg", 8),
+    );
+    expect(result).toEqual({
+      url: `https://nip96.example/${"9".repeat(64)}.webp`,
+    });
+  });
+
   it("leaves a url that already ends in an extension alone", async () => {
     const hash = "a".repeat(64);
     stubFetch({ document: null, body: { url: `${HOST}/${hash}.png` } });

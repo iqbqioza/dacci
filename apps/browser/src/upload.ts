@@ -467,11 +467,19 @@ function withExtension(url: string, extension: string): string {
   // A url with a query or a fragment already says which resource it names.
   if (/[?#]/.test(url)) return url;
   const last = url.slice(url.lastIndexOf("/") + 1);
-  // A blob is named by its hash, and a server that stored the file under a
-  // generic `.bin` has told the client nothing about the type. Both cases
-  // are rewritten, since a link a browser cannot type is no use.
+  // A blob is named by its hash. When the url carries no extension, or the
+  // server used the generic `.bin`, it has told the client nothing about the
+  // type and the local file's extension is a better guess than none — a link a
+  // browser cannot type is no use.
   const named = /^([0-9a-f]{64})(\.[a-z0-9]{1,8})?$/i.exec(last);
   if (named === null) return url;
+  // An extension the server wrote is one the server chose, and it is kept.
+  // NIP-96's delayed processing asks for exactly this: "if the file processing
+  // would change a file from 'jpg' to 'webp', use '.webp' extension on the
+  // `nip94_event.tags.*.url` field value". Rewriting that to the uploaded file's
+  // `.jpg` names a resource the server never advertised, so the link 404s.
+  const advertised = named[2];
+  if (advertised !== undefined && advertised.toLowerCase() !== ".bin") return url;
   return `${url.slice(0, url.length - last.length)}${named[1]}${extension}`;
 }
 

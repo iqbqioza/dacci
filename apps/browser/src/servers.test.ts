@@ -553,6 +553,34 @@ describe("publishServers", () => {
     expect(own(store)).toEqual([]);
   });
 
+  it("takes only server addresses off the wire, like the other two doors", async () => {
+    // This list is where the reader's uploads — and their signed Blossom and
+    // NIP-98 authorizations — are sent. An address read off the wire was the one
+    // way in that was not checked, while the stored list and the one a reader
+    // typed both were, so a signed `server` tag of `not-a-url` became a row they
+    // could pick and be told the signature was cancelled for.
+    vi.resetModules();
+    vi.doMock("./auth.js", () => ({
+      useAuth: () => ({ pubkey: () => READER }),
+    }));
+    answerWith([
+      listEvent(
+        [
+          "javascript:alert(1)",
+          "not-a-url",
+          "ftp://files.example",
+          "https://ok.example",
+          "https://ok.example/path/",
+        ],
+        { at: 3000 },
+      ),
+    ]);
+    const store = await import("./servers.js");
+    await store.loadServers();
+    // Only the http one, with its trailing slash taken off as the other doors do.
+    expect(own(store)).toEqual(["https://ok.example", "https://ok.example/path"]);
+  });
+
   it("reads a second account's own list, whatever the first one wrote", async () => {
     // The note of when this browser published a list was one key for the whole
     // app, while the gate that protects the account's list was per account. Two
