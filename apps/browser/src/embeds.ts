@@ -68,9 +68,9 @@ export function createEmbeds(
   options: { flushDelayMs?: number } = {},
 ): {
   store: EmbedStore;
-  useEmbed: (event: NostrEvent) => { event: NostrEvent | null; loading: boolean };
+  useEmbed: (event: NostrEvent) => { event: NostrEvent | null };
   requestEmbeds: (events: Iterable<NostrEvent>) => void;
-  useEmbedLoading: (event: NostrEvent) => () => boolean;
+  useEmbedLoading: (getEvent: () => NostrEvent) => () => boolean;
   reset: () => void;
 } {
   const [version, setVersion] = createSignal(0);
@@ -90,16 +90,14 @@ export function createEmbeds(
    * fetched for it. Without this check the author deletes their post and its
    * text goes on being drawn inside everything that referenced it.
    */
-  const useEmbed = (
-    event: NostrEvent,
-  ): { event: NostrEvent | null; loading: boolean } => {
+  const useEmbed = (event: NostrEvent): { event: NostrEvent | null } => {
     version();
     const id = embeddedEventIdWithText(event);
-    if (id === null || isDeleted(id)) return { event: null, loading: false };
+    if (id === null || isDeleted(id)) return { event: null };
     // NIP-18 lets a repost carry the note inline; that needs no query.
     const inline = inlineNoteOf(event);
-    if (inline !== null && inline.id === id) return { event: inline, loading: false };
-    return { event: store.peek(id), loading: store.isLoading(id) };
+    if (inline !== null && inline.id === id) return { event: inline };
+    return { event: store.peek(id) };
   };
 
   /**
@@ -108,11 +106,20 @@ export function createEmbeds(
    * The placeholder needs the flag, not the note, and the note is what costs a
    * signature verification. Asking the full question here ran that work a second
    * time for every card on screen, on every render.
+   *
+   * The event arrives as a getter and is read inside the accessor, never in the
+   * component body. A body read is untracked, and the card list is a `<For>`,
+   * which reuses its rows *positionally* — so a body read pins the placeholder to
+   * whichever post that row held when it was created. After a prepend every card
+   * is showing a different post, and the row would go on asking about the old one:
+   * a loading line under a card whose own embed is long since here, and none at
+   * all under one that is still fetching.
    */
-  const useEmbedLoading = (event: NostrEvent): (() => boolean) => {
-    const id = embeddedEventIdWithText(event);
+  const useEmbedLoading = (getEvent: () => NostrEvent): (() => boolean) => {
     return () => {
       version();
+      const event = getEvent();
+      const id = embeddedEventIdWithText(event);
       if (id === null || isDeleted(id)) return false;
       if (inlineNoteOf(event) !== null) return false;
       return store.peek(id) === null && store.isLoading(id);
@@ -166,5 +173,9 @@ export const useEmbed = app.useEmbed;
 export const useEmbedLoading = app.useEmbedLoading;
 export const requestEmbeds = app.requestEmbeds;
 
-/** Drops the cache, e.g. after a relay set change. */
+/**
+ * Drops the store, e.g. after a relay set change. The inline-note memo is keyed
+ * by the post's own id and is a pure function of its fields, so an answer from
+ * before a relay change is still the right one and it is left alone.
+ */
 export const resetEmbeds = app.reset;

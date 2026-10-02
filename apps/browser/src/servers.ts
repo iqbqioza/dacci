@@ -1,6 +1,6 @@
 import type { Filter } from "dacci-nostr-nips";
 import type { NostrEvent } from "dacci-nostr-nips";
-import { signedBy } from "./authored.js";
+import { isSignedBy } from "./authored.js";
 import { createSignal } from "solid-js";
 import { useAuth } from "./auth.js";
 import { publishEvent, publishFailureText } from "./compose.js";
@@ -380,17 +380,19 @@ async function fetchServerPreference(pubkey: string): Promise<FetchedList> {
   // No `limit`: the read relays disagree about which kinds they store, so
   // asking each for a single event can lose the whole list to one relay that
   // happens to answer first with nothing. Every reply is merged.
-  // These events are where the app sends the reader's uploads, signed with the
-  // reader's key. A forged list is therefore a redirect, so it is read only if
-  // the reader signed it — and an answer made entirely of forgeries is no
-  // answer, which leaves the device's own list in place.
-  const events = signedBy(
-    (await oneQuery({
-      kinds: SERVER_LIST_KINDS,
-      authors: [pubkey],
-    })) as NostrEvent[],
-    pubkey,
-  );
+  //
+  // Which makes the answer the one unbounded thing here, and it decides the order
+  // of the two steps below. Verifying first looked like the obvious reading, and
+  // it let a single relay spend the reader's main thread: a signature check is
+  // hundreds of times the cost of the id check, a few hundred forged events is
+  // over a second of blocked tab, and this runs on every app start. So the list is
+  // narrowed to the few events that could actually be used, and only those are
+  // verified.
+  const answer = (await oneQuery({
+    kinds: SERVER_LIST_KINDS,
+    authors: [pubkey],
+  })) as NostrEvent[];
+  const events = signedCandidates(answer, pubkey);
   // A replaceable event: relays lag behind each other, so only the newest
   // answer describes the list the reader has now. The newer kind wins over
   // an older one even when its copy was published earlier, because the
@@ -426,8 +428,49 @@ function kindOf(event: unknown): number {
  * The newest copy of each replaceable kind. Both list kinds are read, so a
  * reader who published under the old one still gets their servers.
  */
-function newestPerKind(events: unknown[]): unknown[] {
-  const byKind = new Map<number, { at: number; event: unknown }>();
+/**
+ * The signed events of a replaceable list, newest per kind, and how many of each
+ * kind were looked at.
+ *
+ * The store only ever reads the newest event of each kind, so verifying the whole
+ * answer verified events nothing could use — and the answer is unbounded, since
+ * the filter carries no `limit`. A bounded walk per kind instead: the newest that
+ * the reader signed, out of a few candidates. The bound matters because the second
+ * candidate is not a formality — relays merge, so a forgery timestamped newer than
+ * the truth is picked first and dropping it outright would throw away the real
+ * event another relay had already sent.
+ */
+const CANDIDATES_PER_KIND = 3;
+
+function signedCandidates(events: NostrEvent[], pubkey: string): NostrEvent[] {
+  const byKind = new Map<number, NostrEvent[]>();
+  for (const event of events) {
+    const kind = event.kind;
+    if (!SERVER_LIST_KINDS.includes(kind)) continue;
+    const list = byKind.get(kind) ?? [];
+    list.push(event);
+    byKind.set(kind, list);
+  }
+  const out: NostrEvent[] = [];
+  for (const list of byKind.values()) {
+    list.sort((a, b) =>
+      b.created_at !== a.created_at
+        ? b.created_at - a.created_at
+        : a.id < b.id
+          ? -1
+          : 1,
+    );
+    for (const event of list.slice(0, CANDIDATES_PER_KIND)) {
+      if (isSignedBy(event, pubkey)) {
+        out.push(event);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+function newestPerKind(events: unknown[]): unknown[] {  const byKind = new Map<number, { at: number; event: unknown }>();
   for (const event of events) {
     const kind = (event as { kind?: unknown }).kind;
     const at = (event as { created_at?: unknown }).created_at;

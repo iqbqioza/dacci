@@ -68,14 +68,16 @@ export function signAuthEvent(
  * True for the CLOSED machine-readable prefix "auth-required:".
  *
  * The reason is optional in NIP-01, so a relay may send `["CLOSED", <id>]` with
- * nothing after it. Reading the prefix off a missing reason threw, and the throw
- * came from inside the relay's message handler — which meant every step after it
- * was skipped: the query hung for its whole timeout instead of failing at once,
- * no CLOSE went back for the subscription the client had given up on, and the
- * live stream was neither dropped nor reported.
+ * nothing after it — and nothing checks that what is there is a string, so it may
+ * be a number or an object too. Reading the prefix off either threw, and the
+ * throw came from inside the relay's message handler, which meant every step
+ * after it was skipped: the query hung for its whole timeout instead of failing
+ * at once, no CLOSE went back for the subscription the client had given up on,
+ * and the live stream was neither dropped nor reported. A missing reason and a
+ * reason of the wrong type are the same accident, so both are covered here.
  */
-export function isAuthRequiredMessage(message: string | undefined): boolean {
-  return message?.startsWith("auth-required:") === true;
+export function isAuthRequiredMessage(message: unknown): boolean {
+  return typeof message === "string" && message.startsWith("auth-required:");
 }
 
 /** NIP-98 HTTP API auth event kind. */

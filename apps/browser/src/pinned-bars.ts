@@ -1,21 +1,27 @@
-import { preservingViewport } from "./viewport.js";
-
 /**
  * The scroll corrections a paged feed owes its reader.
  *
- * A feed has two controls that come and go inside the flow: the "new arrivals"
- * row, which is only there while something has arrived, and the load-more button,
- * which is there until the history runs out. Either one appearing or
- * disappearing moves everything below it, and a reader scrolled into the feed
- * watches the post they were reading slide away.
+ * A feed has one control that comes and goes inside the flow: the "new arrivals"
+ * row, which is only there while something has arrived. Appearing or disappearing
+ * moves everything below it, and a reader scrolled into the feed watches the post
+ * they were reading slide away.
  *
  * Appearing is corrected here, by the height the control pushed down. Disappearing
  * is corrected in the flush path, which removes the control and inserts the new
  * posts in the same step, so one `preservingViewport` covers both.
  *
- * The home timeline and the profile feed have the same pair, and the profile feed
- * had neither — a profile is where a reader is most likely to be scrolled, having
- * arrived from a link to somebody they already know.
+ * The home timeline and the profile feed have the same row, and the profile feed
+ * had no correction for it at all — on the view a reader is most likely to be
+ * scrolled, having arrived from a link to somebody they already know.
+ *
+ * The load-more control also comes and goes, and used to be listed here as though
+ * it needed the same care. It does not: it is the last child of the list on all
+ * three feeds, so its appearing and its disappearing both happen below anything
+ * the reader is looking at, and there is nothing to correct. The correction that
+ * stood here was `preservingViewport` with an empty `change`, called after the
+ * effect had already applied the move it was meant to compensate — so it measured
+ * a layout that had not shifted, found nothing to restore, and returned. It read
+ * as protection and was not.
  */
 export interface PinnedBars {
   /** The list the controls sit above; the anchor for any correction. */
@@ -28,8 +34,6 @@ export interface PinnedBars {
   headerHeight: () => number;
   /** Call when the arrivals row appears, with whether it is appearing now. */
   noteBarVisibility: (visible: boolean) => void;
-  /** Call when the load-more control appears or disappears. */
-  noteLoadMoreVisibility: (shown: boolean) => void;
   /** Call from the flush, which accounts for the row's own removal. */
   barRemoved: () => void;
   /** The list element, for anchoring a correction that changes the list. */
@@ -41,7 +45,6 @@ export function createPinnedBars(): PinnedBars {
   let header: HTMLDivElement | undefined;
   let bar: HTMLButtonElement | undefined;
   let barWasVisible = false;
-  let loadMoreWasVisible = false;
 
   return {
     listRef: (el) => {
@@ -66,11 +69,6 @@ export function createPinnedBars(): PinnedBars {
       const height = bar?.offsetHeight ?? 0;
       if (height <= 0 || window.scrollY <= 0) return;
       window.scrollBy({ top: height, behavior: "instant" });
-    },
-    noteLoadMoreVisibility: (shown) => {
-      if (shown === loadMoreWasVisible) return;
-      loadMoreWasVisible = shown;
-      preservingViewport(list, () => undefined, header?.offsetHeight ?? 0);
     },
     barRemoved: () => {
       barWasVisible = false;

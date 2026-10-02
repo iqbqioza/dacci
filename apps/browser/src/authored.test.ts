@@ -1,8 +1,10 @@
 import {
+  computeEventId,
   hasValidId,
   hasValidSignature,
   type NostrEvent,
 } from "dacci-nostr-nips";
+import { isSignedBy } from "./authored.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fixturePubkey,
@@ -450,5 +452,81 @@ describe("a relay that answers first with a forgery", () => {
     // is what made a login take as long as the worst connection.
     const relays = await withHostileFirst(false);
     expect(relays.useRelays().writeRelays()).toEqual(["wss://mine.example"]);
+  });
+});
+
+describe("an event signed by somebody else entirely", () => {
+  it("is not accepted for the author it is offered as", () => {
+    // The half of the check that testing the signature alone cannot reach: a real
+    // event, genuinely signed, offered as somebody else's. A relay can serve the
+    // kind 10002 that author A really published in answer to a question about B.
+    // The signature verifies — it is not a forgery, it is the wrong author's — and
+    // a relay list is acted on rather than read, so taking it would move every
+    // publish the reader makes.
+    const impostor = fixturePubkey("impostor");
+    const theirOwn = signAs("impostor", {
+      created_at: 1700000000,
+      kind: 10002,
+      content: "",
+      tags: [["r", "wss://impostor.example"]],
+    });
+    // Genuinely signed, and genuinely theirs.
+    expect(hasValidSignature(theirOwn)).toBe(true);
+    expect(theirOwn.pubkey).toBe(impostor);
+    // Offered as the reader's, it is not the reader's.
+    expect(isSignedBy(theirOwn, READER)).toBe(false);
+    // And the signature check on its own cannot see that, which is why both
+    // comparisons are made.
+    expect(theirOwn.pubkey).not.toBe(READER);
+  });
+});
+
+describe("relay names and descriptions", () => {
+  it("are only read from a list the reader signed", async () => {
+    // NIP-66 information is shown next to each relay, so a forged list does not
+    // take anything away here — but a name and a description are the two fields a
+    // reader is most likely to believe, and they are drawn from the same
+    // replaceable event as the addresses.
+    //
+    // The answer is mixed, which is the realistic shape: four relays, one hostile,
+    // and the forgery timestamped newest so it would win a "newest answer" rule on
+    // its own. An answer of nothing but forgeries is already handled by the round
+    // deciding that no relay answered at all.
+    const relays = await withRelays();
+    relays.restoreDefaults();
+    await relays.loadRelayInfo(READER, async () => [
+      signAs("reader", {
+        created_at: 1700000000,
+        kind: 10002,
+        content: "",
+        tags: [["r", "wss://mine.example"]],
+      }),
+      {
+        ...signAs("reader", {
+          created_at: 1900000000,
+          kind: 10002,
+          content: "",
+          // The shape `parseRelayList` reads a name and a description from: the
+          // marker, then a labelled pair. The app never publishes this itself — it
+          // only ever writes addresses — so it is another client's list landing
+          // here, which is exactly the case worth checking.
+          tags: [
+            [
+              "r",
+              "wss://evil.example",
+              "",
+              "n",
+              "Totally Legit Relay",
+              "d",
+              "Runs on your machine",
+            ],
+          ],
+        }),
+        sig: "0".repeat(128),
+      },
+    ]);
+    const info = Object.values(relays.useRelays().relayInfo());
+    expect(info.map((i) => i?.name)).not.toContain("Totally Legit Relay");
+    expect(info.map((i) => i?.description)).not.toContain("Runs on your machine");
   });
 });

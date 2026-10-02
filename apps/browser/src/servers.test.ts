@@ -1,7 +1,11 @@
 import type { NostrEvent } from "dacci-nostr-nips";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { addServer, BUILTIN_SERVERS, removeServer } from "./servers.js";
-import { fixturePubkey, signAs } from "./fixture-event.js";
+import {
+  fixturePubkey,
+  forgedAs,
+  signAs,
+} from "./fixture-event.js";
 
 /** The account whose BUD-03 list these tests publish. */
 const READER = fixturePubkey("reader");
@@ -540,5 +544,98 @@ describe("publishServers", () => {
     // holds for this browser.
     expect(await store.publishServers()).toBe(false);
     expect(own(store)).toEqual(["https://files.example"]);
+  });
+});
+
+describe("an answer that is not worth verifying in full", () => {
+  /** How many times the expensive check ran, which is what this is about. */
+  let verified: number;
+
+  beforeEach(() => {
+    verified = 0;
+    vi.doMock("./authored.js", async (importOriginal) => {
+      const real = await importOriginal<typeof import("./authored.js")>();
+      return {
+        ...real,
+        isSignedBy: (event: NostrEvent, pubkey: string): boolean => {
+          verified += 1;
+          return real.isSignedBy(event, pubkey);
+        },
+      };
+    });
+  });
+
+  it("does not spend the tab on a relay's worth of forgeries", { timeout: 20_000 }, async () => {
+    // The filter carries no `limit` on purpose — relays disagree about which
+    // kinds they store, so every reply is merged. That makes the answer the one
+    // unbounded input here, and a signature check is hundreds of times the cost
+    // of the id check. Verifying before narrowing meant one relay could spend the
+    // reader's main thread on every app start, for events nothing would read.
+    //
+    // The budget is generous because building a hundred signed fixtures is real
+    // work, and a test that fails when the machine is busy is not a test.
+    const READER = fixturePubkey("reader");
+    const forged = Array.from({ length: 100 }, (_, i) =>
+      forgedAs("reader", {
+        created_at: 2000 + i,
+        kind: 10063,
+        content: "",
+        tags: [["server", `https://forged-${i}.example`]],
+      }),
+    );
+    vi.resetModules();
+    vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => READER }) }));
+    vi.doMock("./nostr.js", () => ({
+      getConnection: () => ({
+        url: "wss://a",
+        query: async () => ({ failed: false, events: forged }),
+      }),
+    }));
+    const store = await import("./servers.js");
+
+    await store.loadServers();
+
+    // Nothing forged is used, and the tab was not held. The budget is counted
+    // rather than timed: a wall-clock assertion here would only say which machine
+    // the suite ran on, and would pass on a fast one however wrong the order is.
+    expect(
+      store.useUploadServers().all().map((s: { url: string }) => s.url),
+    ).not.toContain("https://forged-0.example");
+    // A handful, not a hundred: the walk is bounded per kind, whatever the
+    // relay chose to send.
+    expect(verified).toBeLessThanOrEqual(4 * 2);
+  });
+
+  it("still uses the real list when a newer forgery is merged in beside it", async () => {
+    // Relays merge, so a forgery timestamped newer arrives alongside the truth.
+    // Narrowing to the newest per kind and stopping there would drop the forgery
+    // and throw the real event away with it, leaving the reader on the built-in
+    // servers for no reason at all.
+    const READER = fixturePubkey("reader");
+    vi.resetModules();
+    vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => READER }) }));
+    vi.doMock("./nostr.js", () => ({
+      getConnection: () => ({
+        url: "wss://a",
+        query: async () => ({
+          failed: false,
+          events: [
+            listEvent(["https://mine.example"], { at: 1000 }),
+            forgedAs("reader", {
+              created_at: 9000,
+              kind: 10063,
+              content: "",
+              tags: [["server", "https://attacker.example"]],
+            }),
+          ],
+        }),
+      }),
+    }));
+    const store = await import("./servers.js");
+    await store.loadServers();
+
+    const urls = store.useUploadServers().all().map((s: { url: string }) => s.url);
+    expect(urls).toContain("https://mine.example");
+    expect(urls).not.toContain("https://attacker.example");
   });
 });

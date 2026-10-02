@@ -12,7 +12,6 @@ import {
   flushNotificationArrivals,
   loadMoreNotifications,
   noteBarVisibility,
-  noteLoadMoreVisibility,
   useNotifications,
 } from "../notifications-feed.js";
 import { retryWhilePending } from "../feed-retry.js";
@@ -90,11 +89,6 @@ export function NotificationsView(props: {
   createEffect(() => {
     const arriving = pubkey() !== null && buffered().length > 0;
     untrack(() => noteBarVisibility(arriving));
-  });
-
-  createEffect(() => {
-    const more = feed.hasMore() && !feed.loading();
-    untrack(() => noteLoadMoreVisibility(more));
   });
 
   return (

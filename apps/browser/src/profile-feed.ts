@@ -76,10 +76,6 @@ export function noteBarVisibility(visible: boolean): void {
   bars.noteBarVisibility(visible);
 }
 
-export function noteLoadMoreVisibility(shown: boolean): void {
-  bars.noteLoadMoreVisibility(shown);
-}
-
 /** Switches tab without touching the network: the list is already there. */
 export function selectProfileTab(next: FeedTab): void {
   setTab(next);

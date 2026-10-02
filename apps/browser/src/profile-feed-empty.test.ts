@@ -125,7 +125,7 @@ describe("a profile whose post could not be fetched", () => {
     expect(store.useProfileFeed().failed()).toBe(false);
   });
 
-  it("forgets the failure when the profile is opened again", async () => {
+  it("does not carry one subject's failure over to the next", async () => {
     // Otherwise the next reader of the same person is told their posts could not
     // be fetched, from a round that is long over.
     let refuse = true;
@@ -137,7 +137,10 @@ describe("a profile whose post could not be fetched", () => {
     store.openProfile(AUTHOR);
     await tick();
     expect(store.useProfileFeed().failed()).toBe(true);
-    // The relays come back; the next person opened must not inherit the verdict.
+    // The relays come back, and the next subject's own round succeeds — so this
+    // is about a second author, not about re-opening the first. Re-opening the
+    // same subject is a no-op by design, and the reset between subjects is what
+    // the test above covers.
     refuse = false;
     store.openProfile("8".repeat(64));
     await tick();

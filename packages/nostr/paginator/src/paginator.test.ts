@@ -172,9 +172,13 @@ describe("TimelinePaginator", () => {
   it("stops offering more once a burst exceeds what one page can hold", async () => {
     // More events than `maxLimit` sharing one second cannot be paged past: the
     // cursor asks for the same boundary again and gets the same wall back. The
-    // relay is then never asked again, so leaving it counted as "has more" made
-    // every further press do a full round of queries and return nothing, and
-    // the timeline's background retry woke up on that state every 15 seconds.
+    // relay is stepped below that second rather than parked on it, so this also
+    // pins the part that used to go wrong — `hasMore` cannot stay true for the
+    // rest of the session, or every press would do a full round of queries,
+    // return nothing, and wake the background retry every fifteen seconds.
+    //
+    // What the step-down reaches *below* the boundary, and the honest "this
+    // history has a hole in it" that follows, are the two tests after it.
     const burst = Array.from({ length: 600 }, (_, i) =>
       makeEvent(1000, `d${i.toString().padStart(5, "0")}`),
     );
@@ -408,6 +412,44 @@ describe("a second too crowded to page through", () => {
     while (paginator.hasMore()) {
       coverage = (await paginator.loadNextPage()).coverage;
     }
+    expect(coverage).toBe("complete");
+  });
+});
+
+describe("a second that fits inside the widest request", () => {
+  it("is received whole, and the history is not called partial", async () => {
+    // The step-down fires when the raised limit reaches the ceiling, which is the
+    // *next* request's width rather than the one that just came back. Testing the
+    // raised limit marked a boundary the client had never asked the full width of:
+    // a second holding exactly `maxLimit / 2` arrived complete, every event was
+    // committed, and nothing was lost — and the timeline still told the reader the
+    // end of their history was unconfirmed, for the rest of the session.
+    const burstAt = 1000;
+    const events = [
+      ...Array.from({ length: 400 }, (_, i) =>
+        makeEvent(burstAt, `h${i.toString().padStart(5, "0")}`),
+      ),
+      ...Array.from({ length: 20 }, (_, i) =>
+        makeEvent(burstAt - 1, `l${i.toString().padStart(5, "0")}`),
+      ),
+    ];
+    const paginator = new TimelinePaginator(
+      [stubConnection("wss://a", events)],
+      { kinds: [1] },
+      { baseLimit: 100, maxLimit: 500, pageSize: 100 },
+      () => 1001_000,
+    );
+    const seen = new Set<string>();
+    let coverage = "";
+    let guard = 0;
+    while (paginator.hasMore() && guard++ < 40) {
+      const page = await paginator.loadNextPage();
+      coverage = page.coverage;
+      for (const e of page.events) seen.add(e.id);
+    }
+    // Every event arrived, and so the history is whole: the footer must not say
+    // otherwise, which is the only thing a reader would act on.
+    expect(seen.size).toBe(events.length);
     expect(coverage).toBe("complete");
   });
 });

@@ -84,7 +84,28 @@ export function ProfileEditor() {
     });
     onCleanup(() => {
       document.removeEventListener("keydown", onKey);
-      if (before instanceof HTMLElement) before.focus();
+      if (
+        before instanceof HTMLElement &&
+        before !== document.body &&
+        before.isConnected
+      ) {
+        before.focus();
+        return;
+      }
+      // The trigger is usually gone. The editor is mounted at the app's top level
+      // and outlives the route behind it, so a change of route while it is open —
+      // the browser's own Back, which works with a dialog up — takes the button
+      // that opened it out of the page. `focus()` on a detached element is a
+      // silent no-op, so without this the reader was left with focus on the body
+      // and their next Tab restarted at the top of the document.
+      //
+      // The page itself is then the right place: they asked to be somewhere else,
+      // and that somewhere else is where they now are. `tabindex="-1"` keeps it
+      // out of the tab order and only makes it reachable on purpose.
+      const main = document.querySelector<HTMLElement>("main");
+      if (main === null) return;
+      if (!main.hasAttribute("tabindex")) main.setAttribute("tabindex", "-1");
+      main.focus();
     });
   });
 

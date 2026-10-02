@@ -56,8 +56,8 @@ interface RelayState {
   exhausted: boolean;
   offline: boolean;
   /**
-   * One second of this relay's timeline held more events than the client will
-   * ever be handed, so a slice of it cannot be reached. The relay keeps paging
+   * One second of this relay's timeline held more events than the client asked
+   * for even at its largest limit, so a slice of it cannot be reached. The relay keeps paging
    * below that second — everything under it is still reachable — but the
    * history is no longer whole, and `coverage` says so for the rest of the
    * session rather than calling a timeline with a hole in it complete.
@@ -174,14 +174,10 @@ export class TimelinePaginator {
 
   hasMore(): boolean {
     return (
-      // A relay parked for a split is not counted. It answered with more events
-      // than `maxLimit` sharing one second, and there is no way to page past a
-      // boundary the relay will not break up, so it is never asked again.
-      // Counting it pinned `hasMore` true for the rest of the session: every
-      // press did a full round of queries and returned nothing, and the
-      // timeline's background retry — which polls while anything is pending —
-      // woke up on exactly this state, forever. `coverage` still reads
-      // "partial", which is the honest answer here.
+      // A relay that ran out of history is not counted. One that stepped below a
+      // second it could not page through is still counted, because there is older
+      // ground below that it can reach and does: parking it there is what used to
+      // make everything under the crowded second unreachable too.
       [...this.relays.values()].some((r) => !r.exhausted) ||
       this.countCommittable() > 0
     );
@@ -380,7 +376,12 @@ export class TimelinePaginator {
     }
     cursor.limit = Math.min(cursor.limit * 2, this.maxLimit);
     cursor.noProgressRounds += 1;
-    if (cursor.limit < this.maxLimit) return;
+    // The limit that reaches the ceiling is the *next* request's, not the one that
+    // just came back. Testing the raised limit here stepped below a boundary the
+    // client had never actually asked the full width of — so a second holding
+    // exactly `maxLimit / 2` was received whole, nothing was lost, and `coverage`
+    // still said "partial" for a history that was complete.
+    if (batch.queriedLimit < this.maxLimit) return;
     // A single second held more events than the client will ever be handed, and
     // the relay will not break that second up: NIP-01 pages by `until`, so there
     // is no way to ask for the rest of one. Everything *below* it is still

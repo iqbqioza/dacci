@@ -49,6 +49,13 @@ export function UploadPicker(props: {
   // The picker is a popup: a click anywhere else, or Escape, closes it.
   let root: HTMLDivElement | undefined;
   /**
+   * The button that opens the list.
+   *
+   * Held apart from `root`, which wraps it: a `div` with no `tabindex` cannot
+   * take focus, so handing focus back to the wrapper would do nothing.
+   */
+  let trigger: HTMLButtonElement | undefined;
+  /**
    * The list itself, held directly. It is mounted into the body, so it is no
    * longer inside `root` and cannot be found by asking `root` for it.
    */
@@ -73,7 +80,23 @@ export function UploadPicker(props: {
     setOpen(false);
   };
   const onKey = (event: KeyboardEvent): void => {
-    if (event.key === "Escape") setOpen(false);
+    if (event.key !== "Escape") return;
+    setOpen(false);
+    // Hand focus back to the button the list belongs to. The list is mounted into
+    // the body and lands after everything else in the tab order, so Escape from
+    // inside it used to leave the reader on the body, with their next Tab
+    // restarting from the top of the page.
+    //
+    // Escape with the focus still on the button needs nothing: it is already
+    // there. A click elsewhere closes the list too, and that must not steal
+    // focus from whatever the reader just clicked.
+    if (
+      trigger !== undefined &&
+      trigger.isConnected &&
+      document.activeElement !== trigger
+    ) {
+      trigger.focus();
+    }
   };
   if (typeof document !== "undefined") {
     document.addEventListener("click", onDocumentClick);
@@ -206,6 +229,9 @@ export function UploadPicker(props: {
     >
       <button
         type="button"
+        ref={(el) => {
+          trigger = el;
+        }}
         class="flex size-8 items-center justify-center rounded-full text-(--ink-muted) hover:bg-(--fill-soft) hover:text-(--accent)"
         aria-label={props.label ?? "画像をアップロード"}
         aria-expanded={open()}

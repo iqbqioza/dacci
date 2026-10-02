@@ -62,7 +62,7 @@ export interface ProfileStoreOptions {
 type Entry =
   | { status: "loaded"; profile: Profile }
   | { status: "absent" }
-  | { status: "loading" }
+  | { status: "loading"; attempts: number }
   | { status: "failed"; attempts: number; retryAt: number };
 
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -75,7 +75,12 @@ export function parseProfile(event: NostrEvent): Profile | null {
   } catch {
     return null;
   }
-  if (typeof raw !== "object" || raw === null) return null;
+  // A JSON array is an object as far as `typeof` is concerned, and it parses. A
+  // profile that is `[1,2,3]` is not a profile: carrying it through would spread
+  // its indices into the next save, publishing `{"0":1,"1":2,…}` as the author's
+  // metadata. The same guard is in `metadata.ts` and `nip11.ts`; this one was
+  // missing.
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
   const meta = raw as Record<string, unknown>;
   const text = (key: string): string | undefined =>
     typeof meta[key] === "string" && (meta[key] as string).length > 0
@@ -197,7 +202,14 @@ export class ProfileStore {
       }
       if (this.queued.has(pubkey)) continue;
       this.queued.add(pubkey);
-      this.entries.set(pubkey, { status: "loading" });
+      // The count of attempts so far travels with the entry. Dropping it here
+      // reset the counter to zero on every caller-driven retry, so `maxAttempts`
+      // was a number nothing could reach: a view that re-requested on a timer
+      // asked forever, and the author was never resolved and never given up on.
+      this.entries.set(pubkey, {
+        status: "loading",
+        attempts: entry !== undefined && entry.status === "failed" ? entry.attempts : 0,
+      });
       added = true;
     }
     if (added) {
@@ -257,14 +269,23 @@ export class ProfileStore {
 
       for (const pubkey of authors) {
         const event = newest.get(pubkey);
-        const profile = event === undefined ? null : parseProfile(event);
-        if (profile !== null) {
-          this.entries.set(pubkey, { status: "loaded", profile });
+        if (event === undefined) {
+          // Asked and answered: this author has no profile. That is an answer,
+          // not a gap, so it is recorded as one and never re-asked.
+          this.entries.set(pubkey, { status: "absent" });
           continue;
         }
-        // Asked and answered: this author has no profile. That is an answer,
-        // not a gap, so it is recorded as one and never re-asked.
-        this.entries.set(pubkey, { status: "absent" });
+        const profile = parseProfile(event);
+        if (profile === null) {
+          // Answered, with something that is not a profile. Recording that as
+          // "no profile" resolves the author with nothing to show — and
+          // `resolved` is exactly what lets the editor write, so the next save
+          // would replace a real profile the app merely failed to read. Kept as a
+          // question instead, which is the direction that cannot destroy anything.
+          this.failOnce(pubkey);
+          continue;
+        }
+        this.entries.set(pubkey, { status: "loaded", profile });
       }
       return;
     }
@@ -273,7 +294,16 @@ export class ProfileStore {
       const previous = this.entries.get(pubkey);
       // A resolved author keeps its answer: a quiet relay must not turn
       // "this person has no profile" back into a question.
-      if (previous !== undefined && previous.status !== "loading") continue;
+      // Only a settled author keeps its answer. A queued retry is `failed`, not
+      // `loading`, and skipping it here is what made the retry queue retry once
+      // and then go quiet: the attempt was never counted, no timer was armed,
+      // and the author stayed unresolved for the rest of the session.
+      if (
+        previous !== undefined &&
+        (previous.status === "loaded" || previous.status === "absent")
+      ) {
+        continue;
+      }
       this.failOnce(pubkey);
     }
   }
@@ -281,10 +311,11 @@ export class ProfileStore {
   /** Records one unanswered attempt for an author and queues the retry. */
   private failOnce(pubkey: string): void {
     const previous = this.entries.get(pubkey);
+    // Every unresolved state carries its count, so this is one more than however
+    // many have already been tried. A settled author is never failed, so the
+    // loaded and absent states cannot reach here.
     const attempts =
-      previous !== undefined && previous.status === "failed"
-        ? previous.attempts + 1
-        : 1;
+      previous !== undefined && "attempts" in previous ? previous.attempts + 1 : 1;
     if (attempts > this.maxAttempts) {
       // Give up; request() will not resurrect it on its own.
       this.entries.set(pubkey, {

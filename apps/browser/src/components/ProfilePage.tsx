@@ -12,7 +12,6 @@ import {
   flushProfileArrivals,
   loadMoreProfile,
   noteBarVisibility,
-  noteLoadMoreVisibility,
   openProfile,
   selectProfileTab,
   useProfileFeed,
@@ -180,11 +179,6 @@ export function ProfilePage(props: {
     // jump.
     const arriving = subject() === feed.subject() && buffered().length > 0;
     untrack(() => noteBarVisibility(arriving));
-  });
-
-  createEffect(() => {
-    const more = feed.hasMore() && !feed.loading();
-    untrack(() => noteLoadMoreVisibility(more));
   });
 
   return (

@@ -1,6 +1,10 @@
 import type { NostrEvent } from "dacci-nostr-nips";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fixturePubkey, signAs } from "./fixture-event.js";
+import {
+  fixturePubkey,
+  forgedAs,
+  signAs,
+} from "./fixture-event.js";
 
 const ME = fixturePubkey("me");
 const ALICE = fixturePubkey("alice");
@@ -244,5 +248,45 @@ describe("which posts a mute covers", () => {
     await settled();
     expect(store.isMutedAuthor(ALICE)).toBe(true);
     expect(store.isMutedAuthor(BOB)).toBe(false);
+  });
+});
+describe("a mute list nobody signed", () => {
+  it("leaves the reader's mutes unknown rather than empty", async () => {
+    // The forgery guard at the query, and the half that is easy to get backwards:
+    // a relay that answers with nothing the reader signed has not said the reader
+    // mutes nobody, and recording that would unhide every muted post while looking
+    // like the reader's own choice.
+    // Registered before the store is imported, which is how every other test in
+    // this file overrides the default answer the `beforeEach` installs.
+    answerWith([
+      forgedAs("me", {
+        kind: 10000,
+        created_at: 2000,
+        content: "",
+        tags: [["p", ALICE]],
+      }),
+    ]);
+    const store = await freshStore();
+    store.requestMyMutes();
+    await settled();
+    // `null` and not `false`: unknown is the honest answer, and `false` would be
+    // the reader's own decision to mute nobody, which is exactly what a forged
+    // list would be taken for.
+    expect(store.useMuteState(ALICE).muted()).toBeNull();
+  });
+
+  it("still records a list the reader really published as empty", async () => {
+    // The other half: a working relay saying "nothing here" is a fact about the
+    // reader, and treating every empty answer as unanswerable would leave the row
+    // unresolved forever.
+    answerWith([
+      signAs("me", { kind: 10000, created_at: 2000, content: "", tags: [] }),
+    ]);
+    const store = await freshStore();
+    store.requestMyMutes();
+    await settled();
+    // An answered-and-empty list is a fact about the reader, so the button is no
+    // longer a guess.
+    expect(store.useMuteState(ALICE).muted()).toBe(false);
   });
 });

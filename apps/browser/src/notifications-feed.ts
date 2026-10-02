@@ -32,7 +32,8 @@ const [pendingRelays, setPendingRelays] = createSignal<string[]>([]);
 const [hasMore, setHasMore] = createSignal(false);
 
 /**
- * The arrivals row and the load-more control, shared with the other two feeds.
+ * The arrivals row and the load-more control. The other two feeds use the same
+ * helper with their own state; nothing is shared between them.
  *
  * This view has a pinned header too — the page bar and the arrivals row share one
  * sticky container — so the list is pushed down when the row appears and when the
@@ -51,10 +52,6 @@ const bars = createPinnedBars();
  */
 export function noteBarVisibility(visible: boolean): void {
   bars.noteBarVisibility(visible);
-}
-
-export function noteLoadMoreVisibility(shown: boolean): void {
-  bars.noteLoadMoreVisibility(shown);
 }
 // Guard for late async completions from a discarded generation.
 let generation = 0;

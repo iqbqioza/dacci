@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   contentSegments,
+  emojisIn,
   imagesIn,
   urlSpans,
   type ContentSegment,
@@ -250,5 +251,42 @@ describe("the gap between two images", () => {
       contentSegments(note("https://a.example/1.png  \n  \n  https://a.example/2.png")),
     );
     expect(runs.some((t) => /[ \t]+\n/.test(t))).toBe(false);
+  });
+});
+
+describe("a custom emoji", () => {
+  const base = { pubkey: "b".repeat(64), created_at: 1, kind: 1, sig: "c".repeat(128) };
+  const withTag = (tag: string[]): NostrEvent => ({
+    ...base,
+    id: "a".repeat(64),
+    tags: [tag],
+    content: "",
+  });
+
+  it("is drawn when the address is absent, which NIP-30 allows", () => {
+    expect(
+      emojisIn(withTag(["emoji", "soap", "https://x.example/s.png"])),
+    ).toHaveLength(1);
+  });
+
+  it("is still drawn when the address is not a real set address", () => {
+    // The address is optional and only ever names the set the emoji came from.
+    // Requiring it to parse cost the author the emoji over a field that is not
+    // part of the definition, and a slightly wrong address lost the picture as
+    // well as the attribution.
+    for (const address of ["30030:nothex:", "", "npub1abc", "30030"]) {
+      expect(
+        emojisIn(
+          withTag(["emoji", "soap", "https://x.example/s.png", address]),
+        ),
+        address,
+      ).toHaveLength(1);
+    }
+  });
+
+  it("is not drawn when there is no shortcode or no image", () => {
+    // The two fields the emoji is actually made of.
+    expect(emojisIn(withTag(["emoji", "", "https://x.example/s.png"]))).toEqual([]);
+    expect(emojisIn(withTag(["emoji", "soap", ""]))).toEqual([]);
   });
 });

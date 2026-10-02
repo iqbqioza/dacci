@@ -8,6 +8,13 @@ import { THEME_CHOICES } from "./Views.jsx";
  * discards a declaration it cannot parse — it does not fall back — so a value
  * that is valid CSS text but invalid for the property it is given renders as
  * nothing at all, silently. The check below is the same one the parser makes.
+ *
+ * Scope, stated so the next reader does not assume more: this covers the property
+ * the value is given. The other half of that bug was in the markup — the render
+ * prop of a `Show` is handed whatever `when` holds, so testing it for `!== undefined`
+ * handed it a boolean and every swatch was painted `background: true`. There is
+ * no DOM in this package, so that half cannot be rendered here; it was confirmed
+ * against the running app, where all three swatches now paint.
  */
 
 /** What the parser accepts for a `<color>`, which is all `background-color` takes. */

@@ -33,7 +33,19 @@ const secrets = new Map<string, string>();
 function secretFor(label: string): string {
   const cached = secrets.get(label);
   if (cached !== undefined) return cached;
-  const seed = `dacci.fixture.${label}`;
+  // The length goes in front, which makes the seed injective: two labels of the
+  // same length differ somewhere in it, and two of different lengths differ in
+  // the first characters. Repeating the label alone was not — any label sharing
+  // its first 18 characters with another got the same key, so two authors in one
+  // file could quietly become the same person. A label too long for the field to
+  // hold the whole of it is refused rather than truncated, because truncation is
+  // what the collision was.
+  const seed = `${label.length}:${label}:`;
+  if (seed.length > 32) {
+    throw new Error(
+      `fixture label is too long to key a secret from: "${label}"`,
+    );
+  }
   const filled = seed.repeat(Math.ceil(32 / seed.length)).slice(0, 32);
   // The labels are ASCII by construction, so the code point is the byte.
   const secret = Array.from(filled, (c) =>
@@ -77,11 +89,12 @@ export function forgedAs(label: string, fields: UnsignedFixture): NostrEvent {
 }
 
 /**
- * The same claim, carrying a signature made over a *different* event.
+ * The same claim, carrying a signature someone else made.
  *
- * Worth testing apart from a zeroed signature, because it is what a relay
- * replaying somebody else's event looks like, and it fails for a different
- * reason inside the curve code.
+ * Worth having beside `forgedAs` because it is what a relay replaying an event
+ * from another account looks like, rather than one inventing a signature. Both
+ * are rejected by the same single check, so a test cannot tell them apart by the
+ * outcome — the point is that neither is accepted.
  */
 export function replayedAs(
   label: string,
@@ -92,18 +105,4 @@ export function replayedAs(
     content: "signed by somebody else",
   });
   return { ...signAs(label, fields), sig: borrowed.sig };
-}
-
-/** A claimed author with no signature at all, as a careless relay sends. */
-export function unsignedAs(
-  label: string,
-  fields: UnsignedFixture,
-): NostrEvent {
-  const pubkey = fixturePubkey(label);
-  return {
-    ...fields,
-    pubkey,
-    id: computeEventId({ ...fields, pubkey }),
-    sig: "",
-  };
 }

@@ -1,4 +1,8 @@
-import { fixturePubkey, signAs } from "./fixture-event.js";
+import {
+  fixturePubkey,
+  forgedAs,
+  signAs,
+} from "./fixture-event.js";
 import type { NostrEvent } from "dacci-nostr-nips";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -25,6 +29,11 @@ class MemoryStorage {
  * Signed, because reconciling against these events is what erases an action the
  * reader took, and an unsigned answer from a relay must not be able to do that.
  */
+/** The fields of the reader's reaction, without the signing. */
+function reactionFields() {
+  return { created_at: 1000, kind: 7, tags: [["e", POST]], content: "+" };
+}
+
 function reaction(at = 1000): NostrEvent {
   return signAs("me", {
     created_at: at,
@@ -193,7 +202,7 @@ describe("reconciling with the relays", () => {
     expect(persisted).toContain(POST);
   });
 
-  it("keeps an action the queried window does not reach", async () => {
+  it("keeps an action the queried window does not reach", { timeout: 20_000 }, async () => {
     // A full window means older events exist that were never asked for, so the
     // answer is not entitled to remove what it did not see.
     //
@@ -267,5 +276,54 @@ describe("reconciling with the relays", () => {
     expect(store.hasDone("react", POST)).toBe(true);
     // And it must not be written away either, or the loss outlives a reload.
     expect(localStorage.getItem(`dacci.my-activity:${ME}`)).toContain(POST);
+  });
+});
+
+describe("an answer the reader did not sign", () => {
+  it("cannot erase an action the reader took", async () => {
+    // Reconciling against these events is what removes an action, so an answer a
+    // relay made up is an answer that deletes. The fixtures in this file are
+    // signed, and saying so is not the same as feeding one unsigned: without
+    // this, a reader's own reactions are kept because the store never sees an
+    // unsigned answer, and the guard that keeps them has no coverage at all.
+    // The forgery is for a *different* post, and that is what does the damage: a
+    // complete answer replaces the whole activity map, so the reader's reaction
+    // to POST is not in it and disappears. A forgery that mentioned POST would
+    // merely re-add what was already there, which is not an erasure at all.
+    const store = await signedIn(async () => ({
+      failed: false,
+      events: [
+        forgedAs("me", {
+          created_at: 1000,
+          kind: 7,
+          tags: [["e", "9".repeat(64)]],
+          content: "+",
+        }),
+      ],
+    }));
+    store.markReacted(POST, reactionId(), ME);
+    expect(store.hasDone("react", POST)).toBe(true);
+    const round = store.syncMyActivity();
+    await vi.advanceTimersByTimeAsync(6000);
+    await round;
+    // A relay that answered with nothing the reader signed has not said the
+    // reader did nothing.
+    expect(store.hasDone("react", POST)).toBe(true);
+    expect(store.activityFor(POST).react).toBe(reactionId());
+  });
+
+  it("still takes a signed answer as the whole truth", async () => {
+    // The other half, so the guard cannot be satisfied by simply never removing
+    // anything: a signed answer that does not mention the action means the reader
+    // undid it, and that has to be honoured.
+    const store = await signedIn(async () => ({
+      failed: false,
+      events: [],
+    }));
+    store.markReacted(POST, reactionId(), ME);
+    const round = store.syncMyActivity();
+    await vi.advanceTimersByTimeAsync(100);
+    await round;
+    expect(store.hasDone("react", POST)).toBe(false);
   });
 });

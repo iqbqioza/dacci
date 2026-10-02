@@ -1,6 +1,10 @@
 import type { NostrEvent } from "dacci-nostr-nips";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fixturePubkey, signAs } from "./fixture-event.js";
+import {
+  fixturePubkey,
+  forgedAs,
+  signAs,
+} from "./fixture-event.js";
 
 const ME = fixturePubkey("me");
 const ALICE = fixturePubkey("alice");
@@ -336,5 +340,38 @@ describe("my follows", () => {
     await settled();
     store.resetMyFollows();
     expect(store.useFollowState(ALICE).following()).toBeNull();
+  });
+});
+describe("a follow list nobody signed", () => {
+  it("leaves the reader's follows unknown rather than empty", async () => {
+    // A relay that answers with nothing the reader signed has not said the reader
+    // follows nobody. Recording that would publish an empty contact list over the
+    // reader's real one — the same shape of loss as a mute list, on a list that is
+    // replaced rather than merely consulted.
+    answerWith([
+      forgedAs("me", {
+        kind: 3,
+        created_at: 2000,
+        content: "",
+        tags: [["p", ALICE]],
+      }),
+    ]);
+    const store = await freshStore();
+    store.requestMyFollows();
+    await settled();
+    // `null` and not `false`: unknown is the honest answer.
+    expect(store.useFollowState(ALICE).following()).toBeNull();
+  });
+
+  it("still records a list the reader really published as empty", async () => {
+    // The other half: a working relay saying "follows nobody" is a fact about the
+    // reader, and the button is then a fact too rather than a guess.
+    answerWith([
+      signAs("me", { kind: 3, created_at: 2000, content: "", tags: [] }),
+    ]);
+    const store = await freshStore();
+    store.requestMyFollows();
+    await settled();
+    expect(store.useFollowState(ALICE).following()).toBe(false);
   });
 });

@@ -67,9 +67,13 @@ export function NoteImage(props: {
         referrerpolicy="no-referrer"
         onError={onError}
         onClick={(e) => {
-          // The card opens the post, so the image opens the file instead.
+          if (props.plain === true) return; // Plain: the embed opens the post.
+          // The card opens the post, so the image opens the file instead. Stopping
+          // has to happen *after* that decision, and only for this case: stopping
+          // first and then returning swallowed the tap entirely, so inside a
+          // quotation a picture did nothing at all — not the file, and not the
+          // quoted post either.
           e.stopPropagation();
-          if (props.plain === true) return;
           window.open(source(), "_blank", "noopener,noreferrer");
         }}
       />

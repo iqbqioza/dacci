@@ -216,20 +216,52 @@ describe("ProfileStore", () => {
   });
 
   it("gives up after maxAttempts instead of hammering", async () => {
-    const query = vi.fn(async () => []);
+    // The query has to *fail*, not answer with nothing. An empty array is the
+    // store's word for "asked, and this author has no profile", which resolves
+    // the author on the first round and leaves nothing to retry — so a test
+    // written that way asserted that a queue nobody used stayed quiet.
+    const query = vi.fn(async () => {
+      throw new Error("no relay answered");
+    });
     const store = new ProfileStore(query, {
       flushDelayMs: 1,
       baseRetryMs: 1,
+      maxRetryMs: 4,
       maxAttempts: 2,
     });
     store.request([A]);
-    await tick(20);
-    await tick(40);
-    await tick(40);
+    await tick(30);
     const callsAtGiveUp = query.mock.calls.length;
     await tick(60);
     // No further attempts once it gave up.
     expect(query.mock.calls.length).toBe(callsAtGiveUp);
+    // And it tried more than once first, or "gave up" would mean nothing.
+    expect(callsAtGiveUp).toBeGreaterThan(1);
+    store.clear();
+  });
+
+  it("keeps retrying while a relay is quiet, up to the limit", async () => {
+    // The reason the queue exists: a relay that is briefly unreachable while a
+    // feed loads. It has to retry, and the count of attempts has to be kept —
+    // reset on each round, and the author would be asked forever.
+    let attempts = 0;
+    const query = vi.fn(async () => {
+      attempts += 1;
+      // Quiet for the first two rounds, then the relay comes back.
+      if (attempts < 3) throw new Error("no relay answered");
+      return [metaEvent(A, JSON.stringify({ name: "late" }), 100)];
+    });
+    const store = new ProfileStore(query, {
+      flushDelayMs: 1,
+      baseRetryMs: 1,
+      maxRetryMs: 4,
+      maxAttempts: 5,
+    });
+    store.request([A]);
+    await tick(60);
+    expect(store.peek(A)?.name).toBe("late");
+    expect(store.resolved(A)).toBe(true);
+    expect(attempts).toBe(3);
     store.clear();
   });
 
@@ -272,5 +304,45 @@ describe("ProfileStore", () => {
     });
     store.put({ ...metaEvent(A, "{}"), kind: 1 });
     expect(store.peek(A)).toBeNull();
+  });
+});
+
+describe("an answer that is not a profile", () => {
+  it("refuses a JSON array rather than carrying its indices through", () => {
+    // An array is an object as far as `typeof` goes, and it parses. Carried
+    // through, the next save spreads its indices into the metadata: the author's
+    // profile would be republished as `{"0":1,"1":2,…}`.
+    expect(parseProfile(metaEvent(A, "[1,2,3]"))).toBeNull();
+    expect(parseProfile(metaEvent(A, '"just a string"'))).toBeNull();
+    expect(parseProfile(metaEvent(A, "not json at all"))).toBeNull();
+  });
+
+  it("does not resolve an author whose profile it merely failed to read", async () => {
+    // The dangerous half. "Answered with something unparseable" and "this author
+    // has no profile" are different facts, and the store kept only one of them.
+    // Resolving the author with nothing to show is what lets the profile editor
+    // write — so a kind 0 the app could not parse became a reason to overwrite a
+    // real profile with an empty one.
+    const store = new ProfileStore(
+      async () => [metaEvent(A, "not json at all", 100)],
+      { flushDelayMs: 1, baseRetryMs: 1, maxRetryMs: 2, maxAttempts: 1 },
+    );
+    store.request([A]);
+    await tick(40);
+    expect(store.peek(A)).toBeNull();
+    expect(store.resolved(A)).toBe(false);
+    store.clear();
+  });
+
+  it("still records an author nobody has written a profile for", async () => {
+    // The other half, and the one that would be lost by treating every empty
+    // answer as unanswerable: a working relay saying "nothing here" is a fact
+    // about the author, and it is what lets the editor open on a blank profile.
+    const store = new ProfileStore(async () => [], { flushDelayMs: 1 });
+    store.request([A]);
+    await tick(20);
+    expect(store.peek(A)).toBeNull();
+    expect(store.resolved(A)).toBe(true);
+    store.clear();
   });
 });

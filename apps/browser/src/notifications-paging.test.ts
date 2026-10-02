@@ -148,11 +148,18 @@ describe("notifications paging", () => {
 });
 
 describe("the fixtures these tests page through", () => {
-  it("are events the transport could actually have delivered", () => {
-    // A relay serves 64 hex characters, and `relay.ts` rejects anything else
-    // before an event reaches a store. A fixture that does not is not a smaller
-    // case of the same thing — it is a case the real code never sees, so a test
-    // paging through it is not paging through anything the app would show.
+  it("have ids that are well formed and distinct, which the dedupe needs", () => {
+    // The obvious id for an indexed fixture — the index repeated to fill 64
+    // characters — is 128 characters for every index past 9, so a hundred
+    // notifications were ninety of them not even the right shape. Distinctness
+    // matters just as much: a fixture set sharing ids would make the "never shows
+    // the same one twice" assertion below a test of the fixture rather than of the
+    // code.
+    //
+    // What these are not is deliverable: every fixture in this suite is synthetic,
+    // and the transport checks an id against the hash of the event's own fields,
+    // which no hand-written id can satisfy. That is why the ids are real hex here
+    // rather than real hashes.
     const many = Array.from({ length: 200 }, (_, i) => notification(1000 + i, i));
     expect(many.length).toBe(200);
     for (const event of many) {

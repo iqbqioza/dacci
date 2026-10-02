@@ -54,10 +54,15 @@ export function emojisIn(event: NostrEvent | null): Emoji[] {
     const url = tag[2];
     if (typeof code !== "string" || !SHORTCODE.test(code)) continue;
     if (typeof url !== "string" || url === "") continue;
-    // A tag whose address is neither absent nor a real set is a mistake, and
-    // the image is still the one the author wrote.
+    // NIP-30 makes the address optional, and the emoji is defined by the
+    // shortcode and the image — the address only ever says which set it came
+    // from. The comment above used to say a tag with an unusable address was "a
+    // mistake, and the image is still the one the author wrote", and then drop it,
+    // so an author who wrote a slightly wrong address lost the emoji entirely
+    // rather than the attribution. The address is read for nothing else, so it is
+    // not read at all.
     const address = tag[3];
-    if (address !== undefined && !isEmojiSetAddress(address)) continue;
+    if (address !== undefined && typeof address !== "string") continue;
     if (seen.has(code)) continue;
     seen.add(code);
     out.push({ code, url });

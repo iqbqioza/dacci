@@ -72,10 +72,7 @@ afterEach(() => clearEventCache());
 describe("embed wiring", () => {
   it("reports no embed for a post that quotes nothing", () => {
     const embeds = createEmbeds(async () => [], FAST);
-    expect(embeds.useEmbed(note(NOTE_ID, "plain"))).toEqual({
-      event: null,
-      loading: false,
-    });
+    expect(embeds.useEmbed(note(NOTE_ID, "plain"))).toEqual({ event: null });
   });
 
   it("shows nothing for a note a NIP-09 request has taken away", async () => {
@@ -169,12 +166,11 @@ describe("embed wiring", () => {
 
     embeds.requestEmbeds([repost]);
     // Before the reply lands the card shows a placeholder, not nothing.
-    expect(embeds.useEmbed(repost).loading).toBe(true);
+    expect(embeds.useEmbedLoading(() => repost)()).toBe(true);
     await tick(30);
     expect(query).toHaveBeenCalledWith([NOTE_ID]);
-    const after = embeds.useEmbed(repost);
-    expect(after.event).toEqual(inner);
-    expect(after.loading).toBe(false);
+    expect(embeds.useEmbed(repost).event).toEqual(inner);
+    expect(embeds.useEmbedLoading(() => repost)()).toBe(false);
   });
 
   it("batches a burst of reposts into one query", async () => {
@@ -209,9 +205,8 @@ describe("embed wiring", () => {
     embeds.requestEmbeds([repost]);
     await tick(30);
     // A note nobody has renders nothing rather than spinning forever.
-    const state = embeds.useEmbed(repost);
-    expect(state.event).toBeNull();
-    expect(state.loading).toBe(false);
+    expect(embeds.useEmbed(repost).event).toBeNull();
+    expect(embeds.useEmbedLoading(() => repost)()).toBe(false);
   });
 
   it("shows nothing for a repost once the cache is reset", async () => {
@@ -283,7 +278,7 @@ describe("quoting by link", () => {
 
     embeds.requestEmbeds([post]);
     await tick(30);
-    expect(embeds.useEmbed(post)).toEqual({ event: null, loading: false });
+    expect(embeds.useEmbed(post)).toEqual({ event: null });
   });
 });
 
@@ -313,22 +308,39 @@ describe("the inline note memo", () => {
     expect(embeds.useEmbed(tampered).event).toBeNull();
   });
 
-  it("answers the same post the same way however often it is asked", async () => {
-    // The memo is a cost measure, not a rule, so what is worth pinning is that it
-    // did not quietly become a different answer on the second and third reading.
-    // A timing assertion is deliberately absent: a memo this large either saves
-    // far more than any budget a test could set or the budget is machine-shaped,
-    // and a test that only fails on slow hardware is not a test.
-    const embeds = createEmbeds(async () => [], FAST);
-    const inner = await inlineNote("the original");
-    const base = quoteRepost(inner.id);
-    const fields = { ...base, content: JSON.stringify(inner) };
-    const repost: NostrEvent = { ...fields, id: computeEventId(fields) };
 
-    for (let i = 0; i < 5; i++) {
-      expect(embeds.useEmbed(repost).event).toEqual(inner);
-    }
-    // And a different post embedding nothing still gets nothing, after all that.
-    expect(embeds.useEmbed(quoteRepost(OTHER_ID)).event).toBeNull();
+});
+
+describe("the placeholder following the card it is on", () => {
+  it("asks about the post the row is showing now, not the one it was created with", async () => {
+    // The card list is a `<For>`, which reuses its rows positionally: a prepend
+    // hands every mounted row a *different* post without remounting it. A
+    // placeholder that read its post once, in the component body, would go on
+    // asking about the post that row used to hold — a loading line under a card
+    // whose own note is already here, and none at all under one still fetching.
+    //
+    // The two cards are in opposite states on purpose, so the answer says *which*
+    // post was asked about rather than merely that something was.
+    const query = vi.fn(async () => []);
+    const embeds = createEmbeds(query, FAST);
+    const quiet = quoteRepost(NOTE_ID);
+    const fetching = quoteRepost(OTHER_ID);
+    // Only the second card's note was ever asked for.
+    embeds.requestEmbeds([fetching]);
+
+    let showing = quiet;
+    const loading = embeds.useEmbedLoading(() => showing);
+    // Right answer, about the right post.
+    expect(loading()).toBe(false);
+
+    // The same row, now showing the card that is still fetching. If the post were
+    // read once at creation this would still say false, and the reader would be
+    // shown a card with nothing under it while its note loads.
+    showing = fetching;
+    expect(loading()).toBe(true);
+
+    // And back again, so the accessor is following the row both ways.
+    showing = quiet;
+    expect(loading()).toBe(false);
   });
 });

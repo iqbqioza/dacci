@@ -5,7 +5,6 @@ import {
   flushNewArrivals,
   loadMoreHome,
   noteBarVisibility,
-  noteLoadMoreVisibility,
   selectHomeTab,
   useHomeFeed,
 } from "../home-feed.js";
@@ -45,11 +44,6 @@ export function HomeTimeline(props: {
   createEffect(() => {
     const arriving = buffered().length > 0;
     untrack(() => noteBarVisibility(arriving));
-  });
-
-  createEffect(() => {
-    const more = feed.hasMore() && !feed.loading();
-    untrack(() => noteLoadMoreVisibility(more));
   });
 
   // Background retry: while history is still pending on retryable relays

@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { loginWithNsec, logout, restoreSession, useAuth } from "./auth.jsx";
 import { useFeed } from "./relays.js";
-import { stubRelayLayer } from "../test/stub-relay-layer.js";
 
 function stubStorage() {
   const store = new Map<string, string>();

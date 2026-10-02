@@ -16,11 +16,15 @@ import {
   useRelays,
 } from "./relays.js";
 
-function makeListEvent(
-  pubkey: string,
-  createdAt: number,
-  relays: string[],
-): NostrEvent {
+/**
+ * A relay list the reader published.
+ *
+ * There is no pubkey parameter on purpose. The signature is made by the label, so
+ * an argument that named a different author could not be honoured and would only
+ * look as though it were — which is how a test ends up passing because every call
+ * site passed the same constant, rather than because the parameter did anything.
+ */
+function makeListEvent(createdAt: number, relays: string[]): NostrEvent {
   return signAs("reader", {
     created_at: createdAt,
     kind: 10002,
@@ -30,11 +34,9 @@ function makeListEvent(
 }
 
 /**
- * The reader's own pubkey.
- *
- * Every list in this file is a relay list or a follow list the reader
- * published, and both are now read only if the reader signed them — so the
- * fixtures are signed by the same label the constant is derived from.
+ * The reader's own pubkey, which every list in this file is signed for. Both are
+ * read only if the reader signed them, so the fixtures are signed by the label
+ * this constant is derived from.
  */
 const PUBKEY = fixturePubkey("reader");
 
@@ -62,8 +64,8 @@ vi.mock(new URL("../src/nostr.ts", import.meta.url).pathname, () => ({
 describe("applyLoginRelaySet", () => {
   it("switches to the read relays of the newest list", async () => {
     restoreDefaults();
-    const oldList = makeListEvent(PUBKEY, 100, ["wss://old.example"]);
-    const newList = makeListEvent(PUBKEY, 200, [
+    const oldList = makeListEvent(100, ["wss://old.example"]);
+    const newList = makeListEvent(200, [
       "wss://new-a.example",
       "wss://new-b.example",
     ]);
@@ -112,7 +114,8 @@ describe("applyLoginRelaySet", () => {
   });
 });
 
-function makeContactsEvent(pubkey: string, createdAt: number, follows: string[]) {
+/** A NIP-02 follow list the reader published, for the same reason. */
+function makeContactsEvent(createdAt: number, follows: string[]): NostrEvent {
   return signAs("reader", {
     created_at: createdAt,
     kind: 3,
@@ -124,8 +127,8 @@ function makeContactsEvent(pubkey: string, createdAt: number, follows: string[])
 describe("applyLoginFeed", () => {
   it("adopts follows plus self from the newest list", async () => {
     restoreDefaults();
-    const oldList = makeContactsEvent(PUBKEY, 100, ["a".repeat(64)]);
-    const newList = makeContactsEvent(PUBKEY, 200, [
+    const oldList = makeContactsEvent(100, ["a".repeat(64)]);
+    const newList = makeContactsEvent(200, [
       "b".repeat(64),
       "c".repeat(64),
     ]);
@@ -166,7 +169,7 @@ describe("relay/feed persistence", () => {
     stubStorage();
     try {
       await applyLoginRelaySet(PUBKEY, async () => [
-        makeListEvent(PUBKEY, 100, [
+        makeListEvent(100, [
           "wss://personal-a.example",
           "wss://personal-b.example",
         ]),
@@ -230,7 +233,7 @@ describe("relay/feed persistence", () => {
           await new Promise((r) => setTimeout(r, 900));
           return [];
         }
-        return [makeListEvent(PUBKEY, 1, ["wss://answer.example"])];
+        return [makeListEvent(1, ["wss://answer.example"])];
       });
       expect(Date.now() - started).toBeLessThan(700);
       expect(useRelays().relayUrls()).toEqual(["wss://answer.example"]);

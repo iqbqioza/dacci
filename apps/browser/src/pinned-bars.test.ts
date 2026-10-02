@@ -4,11 +4,16 @@ import { createPinnedBars } from "./pinned-bars.js";
 /**
  * The arrivals row coming and going.
  *
- * The load-more control is corrected by `preservingViewport`, which measures real
- * layout and is tested where a DOM exists. What is testable here is the row,
- * whose correction is arithmetic on a height — and which the profile feed had no
- * correction for at all, on the view a reader is most likely to be scrolled on:
- * they arrived from a link to somebody they already follow.
+ * Its correction is arithmetic on a height, so it can be checked here. The load-
+ * more control is not listed: it is the last child of the list on every feed, so
+ * its coming and going happens below anything the reader is looking at. It used to
+ * be corrected here anyway, by an empty change that found nothing to restore —
+ * this file's comment claimed the correction existed and was tested where a DOM
+ * is, and neither half was true.
+ *
+ * The row itself had no correction at all on the profile feed, which is the view
+ * a reader is most likely to be scrolled on: they arrived from a link to somebody
+ * they already follow.
  */
 const BAR = 52;
 

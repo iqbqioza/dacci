@@ -33,7 +33,11 @@ let generation = 0;
 /**
  * The arrivals row and the load-more control both come and go inside the flow,
  * and a reader scrolled into the feed must not watch the post they were reading
- * move. Shared with the profile feed, which owes the same two corrections.
+ * move.
+ *
+ * One instance per store, and nothing is shared between views: the same helper
+ * is used by the other two feeds, each with its own state. Two feeds are never on
+ * screen at once, and a profile change is one component whose post changes.
  */
 const bars = createPinnedBars();
 
@@ -192,9 +196,5 @@ export function flushNewArrivals(): void {
  */
 export function noteBarVisibility(visible: boolean): void {
   bars.noteBarVisibility(visible);
-}
-
-export function noteLoadMoreVisibility(shown: boolean): void {
-  bars.noteLoadMoreVisibility(shown);
 }
 

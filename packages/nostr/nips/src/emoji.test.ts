@@ -58,20 +58,23 @@ describe("emojisIn", () => {
   });
 
   it("leaves out a tag that is not an emoji the author could have used", () => {
-    // NIP-30 allows only alphanumerics, hyphens and underscores in a
-    // shortcode, and an address that is not a real set is a mistake.
+    // NIP-30 allows only alphanumerics, hyphens and underscores in a shortcode,
+    // and an emoji needs an image. A malformed *address* no longer disqualifies
+    // one: the spec calls that field "an optional address pointer" and defines
+    // the emoji by its shortcode and image, so dropping the picture over a field
+    // that is not part of the definition lost the author's emoji for nothing.
     expect(
       emojisIn(
         note([
           ["emoji", "has space", "https://x/a.png"],
-          ["emoji", "bad", "https://x/b.png", "not-an-address"],
           ["emoji", "nourl"],
           ["emoji"],
           ["t", "notemoji", "https://x/c.png"],
           ["emoji", "ok-1_2", "https://x/d.png"],
+          ["emoji", "bad-address", "https://x/b.png", "not-an-address"],
         ]) as never,
       ).map((emoji) => emoji.code),
-    ).toEqual(["ok-1_2"]);
+    ).toEqual(["ok-1_2", "bad-address"]);
   });
 
   it("reads nothing from an event with no emoji tags", () => {

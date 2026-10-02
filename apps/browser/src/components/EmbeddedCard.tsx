@@ -25,8 +25,32 @@ export function EmbeddedCard(props: {
       {(note) => (
         <div
           class="mt-2 cursor-pointer overflow-hidden rounded-2xl border border-(--line) hover:bg-(--accent-soft)"
+          // Keyboard-reachable, because it is the only route to the quoted post.
+          // The card solves the same problem with its overflow menu, where
+          // "詳細を開く" is a labelled way to the same page; an embed has no menu,
+          // so without this the quoted note's author, time and body were
+          // reachable by nobody using a keyboard at all.
+          //
+          // `role="button"` because that is what it does, and a focusable element
+          // with no role is announced as nothing. It does contain links and a
+          // clickable picture — the nesting `EventCard` refuses a role to avoid —
+          // but there, refusing a role still left a labelled route behind, and
+          // here it would leave none.
+          role="button"
+          tabIndex={0}
+          aria-label="引用した投稿を開く"
           onClick={(e) => {
             // The outer card opens the repost; the embed opens the note.
+            e.stopPropagation();
+            props.onSelect(note);
+          }}
+          onKeyDown={(e) => {
+            // Only when the embed itself has focus. The key event of a link or a
+            // picture inside it bubbles here too, and answering that would open
+            // the post as well as follow the link or open the file.
+            if (e.target !== e.currentTarget) return;
+            if (e.key !== "Enter" && e.key !== " ") return;
+            e.preventDefault();
             e.stopPropagation();
             props.onSelect(note);
           }}
@@ -70,7 +94,7 @@ export function EmbeddedPlaceholder(props: { event: NostrEvent }) {
   // The cheap question. Asking `useEmbed` for this flag re-read the note, and
   // reading a note inline in a repost means verifying a signature — so the
   // placeholder was paying for work it does not use, once per card per render.
-  const loading = useEmbedLoading(props.event);
+  const loading = useEmbedLoading(() => props.event);
   return (
     <Show when={loading()}>
       <div

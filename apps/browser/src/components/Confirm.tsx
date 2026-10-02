@@ -39,7 +39,12 @@ export function Confirm(props: {
     // effect cleans up the panel has been taken out of the page, and a detached
     // node's ancestors are not worth walking: the card it belonged to is the
     // thing the reader was working on, and it is focusable.
-    const card = panel?.closest<HTMLElement>("[tabindex]") ?? null;
+    // The trigger, or the card the dialog came out of, matched by element as well
+    // as by tabindex. A card that is focusable but carries no `tabindex`
+    // attribute of its own would otherwise be invisible here, and with nothing to
+    // hand focus back to, dismissing a dialog dropped a screen reader at the top
+    // of the document.
+    const card = panel?.closest<HTMLElement>("article, [tabindex]") ?? null;
     queueMicrotask(() => {
       cancelButton?.focus();
     });

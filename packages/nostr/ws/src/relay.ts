@@ -147,7 +147,7 @@ export class RelayConnection {
   private socket: Socket | null = null;
   private openWaiters: Array<() => void> = [];
   private failWaiters: Array<() => void> = [];
-    private readonly pendingSubs = new Map<string, PendingSub>();
+  private readonly pendingSubs = new Map<string, PendingSub>();
   /**
    * Publishes in flight, by event id, each id holding every caller waiting on it.
    *

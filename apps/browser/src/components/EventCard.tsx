@@ -52,7 +52,13 @@ export function EventCard(props: {
       // of its own, and a link inside a link is worse than no role at all. The
       // overflow menu's "詳細を開く" remains the labelled route to the same page,
       // which is what a screen reader is told about.
-      tabIndex={props.detailed === true ? undefined : 0}
+      //
+      // Focusable on its own page too, even though Enter does nothing there. A
+      // dialog opened out of this card hands focus back to it on dismissal, and
+      // `focus()` on an element with no tabindex is a silent no-op — so without
+      // this, cancelling the delete question on a post's own page dropped a
+      // screen reader at the top of the document.
+      tabIndex={0}
       onClick={() => {
         // On its own page the post is already open, so clicking must not
         // navigate to the very same route.

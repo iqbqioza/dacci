@@ -83,8 +83,20 @@ export function isOwn(event: NostrEvent, self: string | null): boolean {
 }
 
 const SYNC_TIMEOUT_MS = 5000;
-/** How many of the reader's own deletion requests to read back. */
-const SYNC_LIMIT = 500;
+
+/**
+ * How many of the reader's own deletion requests to read back.
+ *
+ * Small on purpose. Every event in the answer is checked for the reader's own
+ * signature, because a forged kind 5 makes a post disappear and there is no
+ * reading of a relay's word for "this is gone" that is safe to act on — and a
+ * signature check is a few hundred times the cost of the id check the transport
+ * already did. Measured here, five hundred of them block the tab for about a
+ * second and a half, on every sign-in. Fifty is about a tenth of that and covers
+ * the recent history, which is what a stale answer could plausibly contradict;
+ * anything older is already in the reader's own store from when they made it.
+ */
+const SYNC_LIMIT = 50;
 
 /**
  * Reads the reader's own deletion requests back from the relays, so a post

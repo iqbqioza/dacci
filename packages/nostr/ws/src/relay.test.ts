@@ -399,10 +399,10 @@ describe("RelayConnection.query", () => {
     for (let n = 0; n < 8; n++) {
       await round(n);
     }
-    const prompts = signer.mock.calls.length;
-    // Eight reconnects, each asked once: the budget was refilled rather than
-    // spent down to silence.
-    expect(prompts).toBeGreaterThan(5);
+    // Eight reconnects, each asked exactly once: the budget was refilled rather
+    // than spent down to silence. The count is exact because every round in the
+    // loop issues one challenge and the loop is the whole of the test.
+    expect(signer.mock.calls).toHaveLength(8);
   });
 
   it("flags auth-required CLOSED when no signer is configured", async () => {
@@ -692,5 +692,41 @@ describe("RelayConnection.query", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(sockets.length).toBe(count);
     expect(conn.status).toBe("closed");
+  });
+});
+
+describe("a CLOSED message whose reason is not a reason", () => {
+  it("fails the query at once whatever the third field holds", async () => {
+    // NIP-01 leaves the reason optional, and nothing checks the type of what is
+    // there, so `["CLOSED", id, 42]` and `["CLOSED", id, {}]` are both reachable.
+    // Reading the "auth-required:" prefix off either threw inside the message
+    // handler, and every step after the throw was skipped: the query hung for
+    // its whole timeout instead of failing at once, no CLOSE went back for the
+    // subscription the client had abandoned, and a live stream on that id was
+    // neither dropped nor reported. A missing reason and a reason of the wrong
+    // type are the same accident.
+    for (const reason of [undefined, 42, {}, [], true, null]) {
+      const socket = makeSocket();
+      const conn = new RelayConnection("wss://example", () => socket, {
+        authGateProbeMs: 0,
+      });
+      const started = Date.now();
+      const pending = conn.query({ kinds: [1] }, 3000);
+      await new Promise((r) => setTimeout(r, 0));
+      const subId = JSON.parse(
+        vi.mocked(socket.send).mock.calls[0][0],
+      )[1] as string;
+
+      // A three-field frame, with the third field not a string.
+      socket.onmessage?.(JSON.stringify(["CLOSED", subId, reason ?? null]).replace(
+        '"CLOSED",null]',
+        '"CLOSED"]',
+      ));
+      const result = await pending;
+      expect(result.failed, JSON.stringify(reason)).toBe(true);
+      // Settled now, rather than waiting out a three-second budget.
+      expect(Date.now() - started, JSON.stringify(reason)).toBeLessThan(1000);
+      conn.close();
+    }
   });
 });
