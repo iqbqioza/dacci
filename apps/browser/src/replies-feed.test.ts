@@ -75,10 +75,10 @@ describe("replies feed", () => {
     const store = await withStore();
     answerWith = [
       post(DEEPER, [
-        ["e", POST, "", "x", "root"],
-        ["e", REPLY, "", "x", "reply"],
+        ["e", POST, "", "root", "x"],
+        ["e", REPLY, "", "reply", "x"],
       ], 1, 300),
-      post(REPLY, [["e", POST, "", "x", "reply"]], 1, 100),
+      post(REPLY, [["e", POST, "", "reply", "x"]], 1, 100),
     ];
     await store.loadReplies(POST);
     const events = store.useReplies(POST).events();
@@ -98,7 +98,7 @@ describe("replies feed", () => {
       1111,
       200,
     );
-    answerWith = [post(REPLY, [["e", POST, "", "x", "reply"]], 1, 100), comment];
+    answerWith = [post(REPLY, [["e", POST, "", "reply", "x"]], 1, 100), comment];
     await store.loadReplies(POST);
     expect(store.useReplies(POST).events().map((e) => e.id)).toEqual([
       REPLY,
@@ -118,7 +118,7 @@ describe("replies feed", () => {
     const store = await withStore();
     await store.loadReplies(POST);
     const other = "5".repeat(64);
-    answerWith = [post(REPLY, [["e", other, "", "x", "reply"]])];
+    answerWith = [post(REPLY, [["e", other, "", "reply", "x"]])];
     await store.loadReplies(other);
     expect(store.useReplies(POST).events()).toHaveLength(0);
     expect(store.useReplies(other).events().map((e) => e.id)).toEqual([REPLY]);
@@ -141,7 +141,7 @@ describe("replies feed", () => {
 
   it("forgets everything on a reset, so a relay change can be re-queried", async () => {
     const store = await withStore();
-    answerWith = [post(REPLY, [["e", POST, "", "x", "reply"]])];
+    answerWith = [post(REPLY, [["e", POST, "", "reply", "x"]])];
     await store.loadReplies(POST);
     expect(store.useReplies(POST).events()).toHaveLength(1);
     store.resetReplies();
@@ -153,7 +153,7 @@ describe("replies feed", () => {
 
   it("shows a reply the reader just wrote without asking a relay", async () => {
     const store = await withStore();
-    const mine = post(REPLY, [["e", POST, "", "x", "reply"]], 1, 500);
+    const mine = post(REPLY, [["e", POST, "", "reply", "x"]], 1, 500);
     store.addReply(mine);
     expect(store.useReplies(POST).events().map((e) => e.id)).toEqual([REPLY]);
     // Nothing was asked, so the list is not waiting on a relay.
@@ -163,10 +163,10 @@ describe("replies feed", () => {
 
   it("keeps a written reply in conversation order", async () => {
     const store = await withStore();
-    answerWith = [post("5".repeat(64), [["e", POST, "", "x", "reply"]], 1, 100)];
+    answerWith = [post("5".repeat(64), [["e", POST, "", "reply", "x"]], 1, 100)];
     await store.loadReplies(POST);
     // Written after the one already there, so it belongs at the end.
-    store.addReply(post(REPLY, [["e", POST, "", "x", "reply"]], 1, 900));
+    store.addReply(post(REPLY, [["e", POST, "", "reply", "x"]], 1, 900));
     const ids = store.useReplies(POST).events().map((e) => e.id);
     expect(ids).toEqual(["5".repeat(64), REPLY]);
   });
@@ -180,7 +180,7 @@ describe("replies feed", () => {
 
 describe("directReplies on the store's own output", () => {
   it("agrees with the classifier the store used", () => {
-    const reply = post(REPLY, [["e", POST, "", "x", "reply"]]);
+    const reply = post(REPLY, [["e", POST, "", "reply", "x"]]);
     expect(replyParent(reply)).toBe(POST);
     expect(directReplies([reply], POST)).toHaveLength(1);
   });

@@ -25,16 +25,23 @@ const LEAF = "3".repeat(64);
 
 describe("replyParent", () => {
   it("reads the NIP-10 reply marker as the direct parent", () => {
+    // `reply` is deliberately not the last tag. The marker decides which post
+    // is answered; position only decides for the deprecated form, so a fixture
+    // that put the answer last would pass even with the marker unread.
     const reply = post(MIDDLE, [
-      ["e", ROOT, "", "a".repeat(64), "root"],
-      ["e", LEAF, "", "a".repeat(64), "reply"],
+      ["e", LEAF, "", "reply", "a".repeat(64)],
+      ["e", ROOT, "", "root", "a".repeat(64)],
     ]);
     expect(replyParent(reply)).toBe(LEAF);
   });
 
   it("treats a lone root marker as answering the root directly", () => {
-    // NIP-10 prescribes exactly this for a top-level reply.
-    const reply = post(MIDDLE, [["e", ROOT, "", "a".repeat(64), "root"]]);
+    // NIP-10 prescribes exactly this for a top-level reply. The mention that
+    // follows it keeps the fallback from agreeing by accident.
+    const reply = post(MIDDLE, [
+      ["e", ROOT, "", "root", "a".repeat(64)],
+      ["e", LEAF, "", "mention", "a".repeat(64)],
+    ]);
     expect(replyParent(reply)).toBe(ROOT);
   });
 
@@ -56,13 +63,30 @@ describe("replyParent", () => {
     const reply = post(MIDDLE, [["e", "30023:abc:slug"]]);
     expect(replyParent(reply)).toBeNull();
   });
+
+  it("reports nothing for a post that only mentions another one", () => {
+    // NIP-10's third marker is a reference, not an answer. Without this the
+    // marker falls through to the positional form and the mention is read as
+    // the parent, so the post shows up as a reply to what it points at.
+    const quoting = post(MIDDLE, [["e", ROOT, "", "mention", "a".repeat(64)]]);
+    expect(replyParent(quoting)).toBeNull();
+  });
+
+  it("still takes the positional parent when a mention sits beside it", () => {
+    // The marker disqualifies its own tag, not the tags around it.
+    const reply = post(MIDDLE, [
+      ["e", ROOT, "", "mention", "a".repeat(64)],
+      ["e", LEAF],
+    ]);
+    expect(replyParent(reply)).toBe(LEAF);
+  });
 });
 
 describe("isDirectReply", () => {
   it("accepts a NIP-10 reply to the post", () => {
     expect(
       isDirectReply(
-        post(MIDDLE, [["e", ROOT, "", "a".repeat(64), "reply"]]),
+        post(MIDDLE, [["e", ROOT, "", "reply", "a".repeat(64)]]),
         ROOT,
       ),
     ).toBe(true);
@@ -85,17 +109,18 @@ describe("isDirectReply", () => {
   });
 
   it("rejects a reply that answers a deeper post, not this one", () => {
-    // The thread root is named, but the reply answers the middle post.
+    // The thread root is named, but the reply answers the middle post. The
+    // answer is named first so that position alone would name the root.
     const reply = post(LEAF, [
-      ["e", ROOT, "", "a".repeat(64), "root"],
-      ["e", MIDDLE, "", "a".repeat(64), "reply"],
+      ["e", MIDDLE, "", "reply", "a".repeat(64)],
+      ["e", ROOT, "", "root", "a".repeat(64)],
     ]);
     expect(isDirectReply(reply, ROOT)).toBe(false);
     expect(isDirectReply(reply, MIDDLE)).toBe(true);
   });
 
   it("never counts a post as its own reply", () => {
-    expect(isDirectReply(post(ROOT, [["e", ROOT, "", "x", "reply"]]), ROOT)).toBe(
+    expect(isDirectReply(post(ROOT, [["e", ROOT, "", "reply", "x"]]), ROOT)).toBe(
       false,
     );
   });
@@ -105,8 +130,8 @@ describe("isDirectReply", () => {
     // were read as a comment parent, the whole thread would hang off the
     // top post instead of sitting under the post it answers.
     const reply = post(MIDDLE, [
-      ["e", ROOT, "", "x", "root"],
-      ["e", LEAF, "", "x", "reply"],
+      ["e", ROOT, "", "root", "x"],
+      ["e", LEAF, "", "reply", "x"],
     ]);
     expect(commentReplyParent(reply)).toBeNull();
   });
@@ -131,15 +156,23 @@ describe("isDirectReply", () => {
     const repost = post(MIDDLE, [["e", ROOT]], 6);
     expect(isDirectReply(repost, ROOT)).toBe(false);
   });
+
+  it("does not list a post that only mentions the one as an answer", () => {
+    // The thread is read off this answer, so a `mention` marker reaching it
+    // would put the referring post into someone else's conversation.
+    const quoting = post(MIDDLE, [["e", ROOT, "", "mention", "x"]]);
+    expect(isDirectReply(quoting, ROOT)).toBe(false);
+    expect(directReplies([quoting], ROOT)).toEqual([]);
+  });
 });
 
 describe("directReplies", () => {
-  const toRoot = post("4".repeat(64), [["e", ROOT, "", "x", "reply"]], 1, 300);
-  const older = post("5".repeat(64), [["e", ROOT, "", "x", "reply"]], 1, 100);
-  const newer = post("6".repeat(64), [["e", ROOT, "", "x", "reply"]], 1, 200);
+  const toRoot = post("4".repeat(64), [["e", ROOT, "", "reply", "x"]], 1, 300);
+  const older = post("5".repeat(64), [["e", ROOT, "", "reply", "x"]], 1, 100);
+  const newer = post("6".repeat(64), [["e", ROOT, "", "reply", "x"]], 1, 200);
   const deeper = post("7".repeat(64), [
-    ["e", ROOT, "", "x", "root"],
-    ["e", MIDDLE, "", "x", "reply"],
+    ["e", ROOT, "", "root", "x"],
+    ["e", MIDDLE, "", "reply", "x"],
   ], 1, 150);
 
   it("keeps only the direct answers, oldest first", () => {

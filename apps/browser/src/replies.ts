@@ -9,7 +9,9 @@ import { isComment } from "dacci-nostr-nips";
  * NIP-10 marks the direct parent with `reply` and the thread root with
  * `root`; a top-level reply to the root carries only `root`, so that tag is
  * the direct parent when no `reply` marker is present. The deprecated
- * positional form has no markers, and its last `e` tag is the parent.
+ * positional form has no markers, and its last `e` tag is the parent. The
+ * third marker, `mention`, names a post the author only refers to, so it is
+ * never a parent.
  */
 export function replyParent(event: NostrEvent): string | null {
   const parents = event.tags.filter((tag) => tag[0] === "e" && isHex64(tag[1]));
@@ -21,7 +23,12 @@ export function replyParent(event: NostrEvent): string | null {
   const root = parents.find((tag) => tag[3] === "root");
   if (root !== undefined) return root[1];
   // Unmarked tags are the deprecated positional form: last one is the parent.
-  return parents[parents.length - 1][1];
+  // A `mention` marker is not that form: NIP-10 gives it to name a post the
+  // author refers to rather than answers, so it never holds a parent. Left in
+  // the pool it would become the parent by position, and a post that merely
+  // points at another one would be listed under it as a reply.
+  const positional = parents.filter((tag) => tag[3] !== "mention");
+  return positional.length === 0 ? null : positional[positional.length - 1][1];
 }
 
 /**
