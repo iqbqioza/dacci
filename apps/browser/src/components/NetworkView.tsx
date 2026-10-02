@@ -17,6 +17,7 @@ const STATUS_LABEL: Record<RelayConnStatus, string> = {
   checking: "確認中…",
   online: "オンライン",
   offline: "オフライン",
+  refused: "拒否 (到達はしています)",
   auth: "認証が必要 (NIP-42)",
 };
 
@@ -25,6 +26,8 @@ const STATUS_CLASS: Record<RelayConnStatus, string> = {
   checking: "bg-(--warn)",
   online: "bg-(--ok)",
   offline: "bg-(--danger)",
+  // Warn, not danger: the relay answered. Nothing is broken about it.
+  refused: "bg-(--warn)",
   auth: "bg-(--auth)",
 };
 
@@ -125,6 +128,7 @@ export function NetworkView() {
       online: entries.filter((e) => statuses[e.url] === "online").length,
       offline: entries.filter((e) => statuses[e.url] === "offline").length,
       auth: entries.filter((e) => statuses[e.url] === "auth").length,
+      refused: entries.filter((e) => statuses[e.url] === "refused").length,
       described: entries.filter((e) => relayInfo()[e.url] !== undefined).length,
     };
   });
@@ -158,6 +162,10 @@ export function NetworkView() {
           オンライン {counts().online}
           {counts().auth > 0 ? ` / 認証 ${counts().auth}` : ""}
           {counts().offline > 0 ? ` / オフライン ${counts().offline}` : ""}
+          {/* Counted apart from the offline ones, because a relay that answered
+              and said no is not a relay that is down, and lumping the two
+              together is what made the number read as a fault. */}
+          {counts().refused > 0 ? ` / 拒否 ${counts().refused}` : ""}
           {" / "}
           情報 {counts().described}
         </span>

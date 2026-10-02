@@ -33,6 +33,19 @@ export interface QueryResult {
 export interface PublishResult {
   accepted: boolean;
   message: string;
+  /**
+   * True when a relay actually sent an `OK` for this event, whatever it said.
+   *
+   * NIP-01's `OK` with `false` is an answer: `duplicate`, `pow`, `rate-limited`,
+   * `blocked`, `invalid`, `restricted` all describe the event, not the
+   * connection, and most of them mean the relay is working exactly as intended.
+   * Reading "refused" as "unreachable" turned a relay that had already stored
+   * the post into a row the reader was told was down.
+   *
+   * False means nobody answered: a closed socket, a handshake that failed, or a
+   * timeout. That is the only shape in which the relay is genuinely unreachable.
+   */
+  fromRelay: boolean;
 }
 
 /**
@@ -479,7 +492,11 @@ export class RelayConnection {
         this.pendingPublishes.delete(msg[1]);
         for (const pending of waiting) {
           clearTimeout(pending.timer);
-          pending.resolve({ accepted: msg[2], message: msg[3] });
+          pending.resolve({
+            accepted: msg[2],
+            message: msg[3],
+            fromRelay: true,
+          });
         }
       }
     } else if (msg[0] === "AUTH" && typeof msg[1] === "string") {
@@ -526,7 +543,11 @@ export class RelayConnection {
       this.pendingPublishes.delete(id);
       for (const pending of waiting) {
         clearTimeout(pending.timer);
-        pending.resolve({ accepted: false, message: "connection closed" });
+        pending.resolve({
+          accepted: false,
+          message: "connection closed",
+          fromRelay: false,
+        });
       }
     }
   }
@@ -636,14 +657,14 @@ export class RelayConnection {
     this.ensureSocket();
     const opened = await this.waitOpen(timeoutMs);
     if (!opened) {
-      return { accepted: false, message: "connection failed" };
+      return { accepted: false, message: "connection failed", fromRelay: false };
     }
     await this.waitAuthGate(timeoutMs);
     const socket = this.ensureSocket();
     const outcome = await new Promise<PublishResult>((resolve) => {
       const timer = setTimeout(() => {
         this.dropWaiter(event.id, resolve);
-        resolve({ accepted: false, message: "timeout" });
+        resolve({ accepted: false, message: "timeout", fromRelay: false });
       }, timeoutMs);
       const waiting = this.pendingPublishes.get(event.id);
       if (waiting === undefined) {

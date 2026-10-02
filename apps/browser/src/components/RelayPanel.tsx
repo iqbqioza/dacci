@@ -18,6 +18,7 @@ const DOT: Record<RelayConnStatus, string> = {
   checking: "background-color: var(--warn)",
   online: "background-color: var(--ok)",
   offline: "background-color: var(--danger)",
+  refused: "background-color: var(--warn)",
   auth: "background-color: var(--auth)",
 };
 
@@ -26,6 +27,7 @@ const LABEL: Record<RelayConnStatus, string> = {
   checking: "確認中",
   online: "オンライン",
   offline: "オフライン",
+  refused: "拒否",
   auth: "認証が必要",
 };
 

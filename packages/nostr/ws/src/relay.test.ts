@@ -461,7 +461,55 @@ describe("RelayConnection.query", () => {
     ]);
     socket.peer(["OK", event.id, true, ""]);
     const result = await pending;
-    expect(result).toEqual({ accepted: true, message: "" });
+    expect(result).toEqual({ accepted: true, message: "", fromRelay: true });
+  });
+
+  it("reports a refusal as an answer, and a silence as no answer", async () => {
+    // The difference the Network page rests on. NIP-01's `OK <id> false <prefix>`
+    // is a relay saying it will not store *this event* — `duplicate`, `pow`,
+    // `rate-limited`, `blocked`, `invalid`, `restricted` — and every one of those
+    // is the relay working. Only a socket that never spoke is a relay that is
+    // down, so the two have to be distinguishable in the result itself rather
+    // than guessed at from the message.
+    const refused = new RelayConnection("wss://example", () => makeSocket(), {
+      authGateProbeMs: 0,
+    });
+    const first = relayEvent({
+      pubkey: "b".repeat(64),
+      created_at: 1000,
+      kind: 1,
+      tags: [],
+      content: "hi",
+    });
+    const pending = refused.publish(first);
+    await new Promise((r) => setTimeout(r, 0));
+    (refused as unknown as { socket: ReturnType<typeof makeSocket> }).socket.peer([
+      "OK",
+      first.id,
+      false,
+      "duplicate: already have it",
+    ]);
+    await expect(pending).resolves.toEqual({
+      accepted: false,
+      message: "duplicate: already have it",
+      fromRelay: true,
+    });
+
+    const silent = new RelayConnection("wss://example", () => makeSocket(), {
+      authGateProbeMs: 0,
+    });
+    const second = relayEvent({
+      pubkey: "b".repeat(64),
+      created_at: 1001,
+      kind: 1,
+      tags: [],
+      content: "no answer for this one",
+    });
+    await expect(silent.publish(second, 20)).resolves.toEqual({
+      accepted: false,
+      message: "timeout",
+      fromRelay: false,
+    });
   });
 
   it("streams live events after EOSE", async () => {

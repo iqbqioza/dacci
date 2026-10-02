@@ -8,6 +8,7 @@ import {
   clearFeed,
   DEFAULT_RELAYS,
   initRelays,
+  noteWriteResult,
   refreshStatuses,
   removeRelay,
   restoreDefaults,
@@ -338,6 +339,34 @@ describe("relay set editing", () => {
     expect(useRelays().relayStatuses()["wss://write-only.example"]).toBe(
       "unknown",
     );
+    restoreDefaults();
+  });
+
+  it("does not call a relay that answered us offline", () => {
+    // A write-only relay is never probed, so the only thing the list knows about
+    // it is what a publish came back with. NIP-01 answers a publish it will not
+    // store with `OK <id> false <prefix>`, and the reasons are about the event:
+    // `duplicate`, `pow`, `rate-limited`, `blocked`, `invalid`, `restricted`.
+    //
+    // Reading every refusal as "offline" told the reader their network had
+    // failed in the one case that proves it worked — a relay that already had
+    // the post, and said so.
+    restoreDefaults();
+    const url = "wss://refused.example";
+    addRelay(url, "write");
+    expect(useRelays().relayStatuses()[url]).toBe("unknown");
+
+    // Answered, and said no.
+    noteWriteResult(url, false, true);
+    expect(useRelays().relayStatuses()[url]).toBe("refused");
+
+    // Answered, and took it.
+    noteWriteResult(url, true, true);
+    expect(useRelays().relayStatuses()[url]).toBe("online");
+
+    // Never answered. That is the only shape in which it is unreachable.
+    noteWriteResult(url, false, false);
+    expect(useRelays().relayStatuses()[url]).toBe("offline");
     restoreDefaults();
   });
 

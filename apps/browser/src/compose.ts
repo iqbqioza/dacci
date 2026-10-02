@@ -174,10 +174,13 @@ async function sendToWriteRelays(event: NostrEvent): Promise<number> {
   let accepted = 0;
   settled.forEach((result, index) => {
     const url = urls[index];
-    const ok = result.status === "fulfilled" && result.value?.accepted === true;
+    const outcome = result.status === "fulfilled" ? result.value : null;
+    const ok = outcome?.accepted === true;
     if (ok) accepted += 1;
-    // Report the outcome per relay, so write-only relays show a real state.
-    noteWriteResult(url, ok);
+    // Report the outcome per relay, so write-only relays show a real state — and
+    // whether the relay answered at all, because "said no" and "never spoke" are
+    // different states and only one of them is a relay that is down.
+    noteWriteResult(url, ok, outcome?.fromRelay === true);
   });
   return accepted;
 }

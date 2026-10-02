@@ -27,6 +27,8 @@ export type RelayConnStatus =
   | "checking"
   | "online"
   | "offline"
+  /** Reachable, and it answered — it just would not take this event. */
+  | "refused"
   | "auth";
 
 /**
@@ -321,9 +323,26 @@ export async function refreshStatuses(): Promise<void> {
   await Promise.all(readRelays().map(checkOne));
 }
 
-/** Records what a write-only relay answered, so the list can show it. */
-export function noteWriteResult(url: string, accepted: boolean): void {
-  setStatus(url, accepted ? "online" : "offline");
+/**
+ * Records what a write-only relay answered, so the list can show it.
+ *
+ * `answered` is whether an `OK` arrived at all. NIP-01's refusal reasons —
+ * `duplicate`, `pow`, `rate-limited`, `blocked`, `invalid`, `restricted` — are
+ * statements about the event, not the connection, and a relay that has already
+ * stored the post is not a relay that is down. Marking those "offline" told the
+ * reader their network had failed when it had in fact worked, which is the one
+ * thing a status row must never do.
+ */
+export function noteWriteResult(
+  url: string,
+  accepted: boolean,
+  answered: boolean,
+): void {
+  if (accepted) {
+    setStatus(url, "online");
+    return;
+  }
+  setStatus(url, answered ? "refused" : "offline");
 }
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
