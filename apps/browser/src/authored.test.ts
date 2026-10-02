@@ -1,6 +1,16 @@
-import { hasValidId, hasValidSignature } from "dacci-nostr-nips";
+import {
+  hasValidId,
+  hasValidSignature,
+  type NostrEvent,
+} from "dacci-nostr-nips";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fixturePubkey, forgedAs, replayedAs, signAs } from "./fixture-event.js";
+import {
+  fixturePubkey,
+  forgedAs,
+  replayedAs,
+  signAs,
+  type UnsignedFixture,
+} from "./fixture-event.js";
 import { stubRelayLayer } from "../test/stub-relay-layer.js";
 
 /**
@@ -47,7 +57,12 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // A mock registered with `doMock` outlives `resetModules`, so one that is not
+  // unregistered here is still in place for the next test — and a test that runs
+  // against a module it did not set up is a test that passes for the wrong
+  // reason.
   vi.doUnmock("./auth.js");
+  vi.doUnmock("./relays.js");
 });
 
 describe("a relay list the reader did not sign", () => {
@@ -254,5 +269,186 @@ describe("a deletion request the reader did not sign", () => {
     await store.syncDeleted(READER);
 
     expect(store.isDeleted("a".repeat(64))).toBe(false);
+  });
+});
+
+describe("metadata a relay made up", () => {
+  const SUBJECT = fixturePubkey("subject");
+
+  /** The store, wired to a relay that answers however the test tells it to. */
+  async function withProfileRelay(
+    answer: () => NostrEvent[] | Promise<NostrEvent[]>,
+  ): Promise<typeof import("./profile.js")> {
+    vi.resetModules();
+    vi.doMock("./relays.js", () => ({
+      useRelays: () => ({ readRelays: () => ["wss://a"] }),
+    }));
+    vi.doMock("./nostr.js", () => ({
+      getConnection: () => ({
+        url: "wss://a",
+        query: async () => {
+          const events = await answer();
+          return { failed: false, events, eose: true };
+        },
+      }),
+    }));
+    return import("./profile.js");
+  }
+
+  /**
+   * A kind 0 event's own fields.
+   *
+   * `pubkey` is left to the signer, like every other fixture here: a metadata
+   * event that named its own author could not have been signed by them.
+   */
+  const metadata = (fields: {
+    name?: string;
+    picture?: string;
+  }): UnsignedFixture => ({
+    created_at: 1700000000,
+    kind: 0,
+    tags: [],
+    content: JSON.stringify({ name: fields.name, picture: fields.picture }),
+  });
+
+  /** The store coalesces a burst, so a read has to outlast its flush delay. */
+  const settled = (): Promise<void> =>
+    new Promise((resolve) => setTimeout(resolve, 100));
+
+  it("is not shown under the author's name", async () => {
+    // A profile is acted on rather than read: its picture is fetched from
+    // wherever it points, so a forged one sends the reader's browser to an
+    // address of somebody else's choosing while wearing a real name.
+    const store = await withProfileRelay(() => [
+      forgedAs("subject", metadata({ name: "Not The Real Name" })),
+    ]);
+    store.requestProfiles([SUBJECT]);
+    await settled();
+    // Read after the wait. `useProfile` returns a snapshot, not a live accessor,
+    // so a view taken beforehand would be the one from before the answer landed
+    // and would read null whatever the relay said.
+    expect(store.useProfile(SUBJECT).profile).toBeNull();
+  });
+
+  it("does not become 'this person has no profile' either", async () => {
+    // The subtle half, and the one that bites. An empty answer means "asked, and
+    // there is nothing" to this store, and it is recorded as a fact and never
+    // asked again — which is how a forgery would end with the profile editor
+    // publishing an empty profile over the real one.
+    const store = await withProfileRelay(() => [
+      forgedAs("subject", metadata({ name: "Forged" })),
+    ]);
+    store.requestProfiles([SUBJECT]);
+    await settled();
+    // Still a question, not an answer.
+    expect(store.useProfile(SUBJECT).resolved).toBe(false);
+  });
+
+  it("leaves a profile the author really signed alone", async () => {
+    // The other half, and the one a check written as "reject kind 0" would break
+    // for every reader.
+    const store = await withProfileRelay(() => [
+      signAs("subject", metadata({ name: "The Real Name" })),
+    ]);
+    store.requestProfiles([SUBJECT]);
+    await settled();
+    const view = store.useProfile(SUBJECT);
+    expect(view.resolved).toBe(true);
+    expect(view.profile?.name).toBe("The Real Name");
+  });
+
+  it("prefers the signed copy when one relay forges and another does not", async () => {
+    // The mixed case, which is the realistic one: four relays, one hostile, and
+    // a forgery timestamped newer than the truth so it would win the store's
+    // newest-wins rule.
+    const store = await withProfileRelay(() => [
+      forgedAs("subject", {
+        ...metadata({ name: "Forged And Newer" }),
+        created_at: 1800000000,
+      }),
+      signAs("subject", metadata({ name: "The Real Name" })),
+    ]);
+    store.requestProfiles([SUBJECT]);
+    await settled();
+    expect(store.useProfile(SUBJECT).profile?.name).toBe("The Real Name");
+  });
+});
+
+describe("a relay that answers first with a forgery", () => {
+  const READER = fixturePubkey("reader");
+
+  const list = (name: string): NostrEvent[] => [
+    {
+      ...signAs("reader", {
+        created_at: 1700000000,
+        kind: 10002,
+        content: "",
+        tags: [["r", `wss://${name}.example`]],
+      }),
+    },
+  ];
+
+  /**
+   * Two relays: a hostile one that answers at once with a forgery, and an honest
+   * one that answers a moment later with the reader's real list.
+   */
+  async function withHostileFirst(
+    forgedFirst: boolean,
+  ): Promise<typeof import("./relays.js")> {
+    vi.resetModules();
+    // Earlier tests in this file mock the relay layer, and `resetModules` does
+    // not unregister a mock — so a leaked one would make this import a different
+    // module than the one under test.
+    vi.doUnmock("./relays.js");
+    useMemoryStorage();
+    stubRelayLayer();
+    const relays = await import("./relays.js");
+    const real = list("mine");
+    const forged = [
+      {
+        ...signAs("reader", {
+          created_at: 1800000000,
+          kind: 10002,
+          content: "",
+          tags: [["r", "wss://attacker.example"]],
+        }),
+        sig: "0".repeat(128),
+      },
+    ];
+    relays.restoreDefaults();
+    // The first URL in the set is the one that speaks first, and `firstAnswer`
+    // takes whoever answers first, so the order here is the whole test.
+    await relays.applyLoginRelaySet(READER, async (url) =>
+      url.includes("ditto")
+        ? forgedFirst
+          ? forged
+          : real
+        : // The honest relay is slower, which is the realistic shape: a hostile
+          // relay has nothing to look up and can answer instantly.
+          new Promise<NostrEvent[] | null>((resolve) =>
+            setTimeout(() => resolve(real), 30),
+          ),
+    );
+    return relays;
+  }
+
+  it("does not let the forgery suppress the reader's own list", async () => {
+    // The weaker half of the problem, and the one that is easy to miss: the
+    // forgery is dropped either way, so the reader is not taken over. But the
+    // round ended at the first answer, so no relay holding the real list was ever
+    // asked, and the reader's own relay set silently stopped applying — on every
+    // sign-in, for as long as that relay is in the set.
+    const relays = await withHostileFirst(true);
+    expect(relays.useRelays().readRelays()).toContain("wss://mine.example");
+    expect(relays.useRelays().writeRelays()).not.toContain(
+      "wss://attacker.example",
+    );
+  });
+
+  it("still takes the real list when the honest relay answers first", async () => {
+    // The ordinary case, so the fix cannot be "wait for everyone, always" — that
+    // is what made a login take as long as the worst connection.
+    const relays = await withHostileFirst(false);
+    expect(relays.useRelays().writeRelays()).toEqual(["wss://mine.example"]);
   });
 });

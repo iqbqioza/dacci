@@ -221,14 +221,39 @@ export async function defaultQuery(
 }
 
 /**
+ * An answer counts only if the reader signed something in it.
+ *
+ * A relay that answers with nothing usable has not answered, so the round moves
+ * on to the next relay rather than resolving with what the forgery left behind.
+ */
+function signedByReader(pubkey: string): (events: NostrEvent[]) => boolean {
+  return (events) => signedBy(events, pubkey).length > 0;
+}
+
+/**
  * Runs `queryFn` against the current read relays and resolves as soon as the
  * first one answers with something. Waiting for the slowest relay would
  * make a login take as long as the worst connection, so a deadline is the
  * only thing that ends the wait.
+ *
+ * `isUsable` decides whether an answer counts, and it matters for more than
+ * tidiness. Without it the first relay to answer ends the round, so a hostile one
+ * that answers with nothing but a forgery would stop the round before any relay
+ * with the reader's real list had been asked — the check that drops the forgery
+ * would then leave an empty answer, and the reader's own list would never be read.
+ * A relay whose answer cannot be used is not an answer, so the round carries on
+ * to the next one; only when none of them can be used does it resolve empty, and
+ * the caller keeps what it had.
+ *
+ * `isUsable` is required rather than defaulted. A default of "any non-empty
+ * answer counts" is precisely what let a forgery end the round before any relay
+ * holding the reader's real list had been asked, so a caller that forgot to pass
+ * one would put that back with no compiler and no test to notice.
  */
 async function firstAnswer(
   filter: Filter,
   queryFn: RelayQueryFn,
+  isUsable: (events: NostrEvent[]) => boolean = (events) => events.length > 0,
 ): Promise<NostrEvent[]> {
   const urls = readRelays();
   if (urls.length === 0) return [];
@@ -248,7 +273,7 @@ async function firstAnswer(
     for (const url of urls) {
       void queryFn(url, filter).then(
         (events) => {
-          if (events !== null && events.length > 0) {
+          if (events !== null && isUsable(events)) {
             clearTimeout(deadline);
             finish(events);
             return;
@@ -425,7 +450,11 @@ export async function loadRelayInfo(
   // Only a list the reader signed describes the reader's relays. A forgery is
   // answered like no answer at all, which leaves the current set in place.
   const candidates = signedBy(
-    await firstAnswer({ kinds: [RELAY_LIST_KIND], authors: [pubkey], limit: 5 }, queryFn),
+    await firstAnswer(
+      { kinds: [RELAY_LIST_KIND], authors: [pubkey], limit: 5 },
+      queryFn,
+      signedByReader(pubkey),
+    ),
     pubkey,
   );
   if (candidates.length === 0) return;
@@ -478,7 +507,11 @@ export async function applyLoginFeed(
   // dropped rather than read. Falling back to self-only is the same place a
   // missing list lands.
   const candidates = signedBy(
-    await firstAnswer({ kinds: [CONTACTS_KIND], authors: [pubkey], limit: 5 }, queryFn),
+    await firstAnswer(
+      { kinds: [CONTACTS_KIND], authors: [pubkey], limit: 5 },
+      queryFn,
+      signedByReader(pubkey),
+    ),
     pubkey,
   );
   let authors = [pubkey];
@@ -528,7 +561,11 @@ export async function applyLoginRelaySet(
   // is adopted only if the reader signed it. A relay that forges one is treated
   // as a relay that had none, and the set the reader chose is left alone.
   const candidates = signedBy(
-    await firstAnswer({ kinds: [RELAY_LIST_KIND], authors: [pubkey], limit: 5 }, queryFn),
+    await firstAnswer(
+      { kinds: [RELAY_LIST_KIND], authors: [pubkey], limit: 5 },
+      queryFn,
+      signedByReader(pubkey),
+    ),
     pubkey,
   );
   if (candidates.length === 0) return;

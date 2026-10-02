@@ -1,6 +1,7 @@
 import type { Filter, NostrEvent } from "dacci-nostr-nips";
 import { ProfileStore, type Profile } from "dacci-nostr-profile";
 import { createSignal } from "solid-js";
+import { isSignedBy } from "./authored.js";
 import { getConnection } from "./nostr.js";
 import { useRelays } from "./relays.js";
 
@@ -39,9 +40,34 @@ const store = new ProfileStore(
     // Every relay refused or timed out. Throwing keeps the lookup open, which
     // is the difference between "no profile" and "we do not know yet".
     if (answered === 0) throw new Error("no relay answered");
-    return settled.flatMap((r) =>
+    const events = settled.flatMap((r) =>
       r.status === "fulfilled" ? r.value : ([] as NostrEvent[]),
     );
+
+    // Metadata is acted on rather than merely read: a forged one puts a name and
+    // a face under a real person's key, and its `picture` is fetched from
+    // wherever the forger chose — so the reader's browser is sent to an address
+    // of somebody else's picking, attributed to somebody they follow. Only an
+    // event the author signed may stand in for the author.
+    const signed: NostrEvent[] = [];
+    const forged = new Set<string>();
+    for (const event of events) {
+      if (isSignedBy(event, event.pubkey)) signed.push(event);
+      else forged.add(event.pubkey);
+    }
+
+    // An author nobody signed for is not an author without a profile, and this
+    // store cannot tell the two apart: an empty answer is recorded as "asked, and
+    // there is nothing" and never asked again, and the editor would then publish
+    // an empty profile over the real one. Throwing keeps the question open
+    // instead. The whole batch is re-asked rather than just the author, which
+    // costs a little and is bounded by the store's own attempts.
+    for (const pubkey of authors) {
+      if (forged.has(pubkey) && !signed.some((event) => event.pubkey === pubkey)) {
+        throw new Error("a relay answered with metadata nobody signed");
+      }
+    }
+    return signed;
   },
   { onChange: () => setVersion((v) => v + 1) },
 );
