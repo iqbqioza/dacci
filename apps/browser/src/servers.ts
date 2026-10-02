@@ -91,8 +91,8 @@ export const BUILTIN_SERVERS: UploadServer[] = [
 ];
 
 const STORAGE_KEY = "dacci.servers";
-/** When this browser last published the list, so a stale answer is ignored. */
-const WRITTEN_KEY = "dacci.servers.written";
+/** When this browser last published a list, so a stale answer is ignored. */
+const WRITTEN_PREFIX = "dacci.servers.written.";
 
 // The stored list is read at module load, so a reload shows what the reader
 // configured. It holds their servers only: the ones the app offers itself are
@@ -207,6 +207,14 @@ export async function publishServers(): Promise<boolean> {
     return false;
   }
   const created_at = Math.floor(Date.now() / 1000);
+  // Read before the publish, because the local list has already changed by the
+  // time this runs — so an empty list now is a list this device never loaded,
+  // not a list the reader just emptied.
+  const mine = servers().filter((server) => server.builtin !== true);
+  if (mine.length === 0) {
+    showNotice("保存するサーバーがありません");
+    return false;
+  }
   const sent = await publishEvent(
     {
       pubkey,
@@ -215,7 +223,7 @@ export async function publishServers(): Promise<boolean> {
       // The reader's own servers, and only those: BUD-03 has a client upload to
       // the first server in the list, so the app's own defaults written here
       // would take uploads away from the server the reader chose.
-      tags: servers().map((server) => ["server", server.url]),
+      tags: mine.map((server) => ["server", server.url]),
       content: "",
     },
     // The local list has already changed by the time this runs, so a failure
@@ -228,7 +236,7 @@ export async function publishServers(): Promise<boolean> {
   // Remember when this browser wrote, so a relay answer that predates the
   // write is recognised as stale instead of undoing the edit.
   try {
-    localStorage.setItem(WRITTEN_KEY, String(created_at));
+    localStorage.setItem(WRITTEN_PREFIX + pubkey, String(created_at));
   } catch {
     // Without the note the read still works, it just cannot tell a stale
     // answer from a fresh one.
@@ -247,9 +255,9 @@ export async function addServerAndPublish(
 }
 
 /** Removes a server and publishes the new list. */
-export async function removeServerAndPublish(url: string): Promise<void> {
+export async function removeServerAndPublish(url: string): Promise<boolean> {
   removeServer(url);
-  await publishServers();
+  return await publishServers();
 }
 
 /**
@@ -310,7 +318,7 @@ async function loadServersInner(): Promise<void> {
     // this browser knows about is dropped: it must never undo a change that
     // is still on screen. Anything as new or newer replaces the list, which
     // is what brings in servers published on another client.
-    if (list.at < lastWrite()) return;
+    if (list.at < lastWrite(pubkey)) return;
     const next = dedupe(list.servers);
     if (sameServers(next, atStart)) return;
     setServers(next);
@@ -319,10 +327,18 @@ async function loadServersInner(): Promise<void> {
   }
 }
 
-/** When this browser last published the list, or 0 if it never did. */
-function lastWrite(): number {
+/**
+ * When this browser last published *this account's* list, or 0 if it never did.
+ *
+ * Keyed by account, because the gate above it is. One key for the whole app meant
+ * the second account of a session was refused its own list whenever that list
+ * predated the first account's write: signing into a second account loaded
+ * nothing, the gate was marked open anyway, and the next edit published this
+ * device's list under an account that had never been asked.
+ */
+function lastWrite(pubkey: string): number {
   try {
-    const raw = localStorage.getItem(WRITTEN_KEY);
+    const raw = localStorage.getItem(WRITTEN_PREFIX + pubkey);
     const value = raw === null ? Number.NaN : Number.parseInt(raw, 10);
     return Number.isFinite(value) ? value : 0;
   } catch {

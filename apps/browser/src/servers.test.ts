@@ -487,8 +487,11 @@ describe("loadServers", () => {
 
 describe("publishServers", () => {
   /** A signed-in store whose publishes are recorded instead of sent. */
-  async function signedIn() {
-    const pubkey = READER;
+  /** The signing label for a second account in this file. */
+  const OTHER = fixturePubkey("other");
+
+  async function signedIn(as: string = READER, answer: unknown[] = []) {
+    const pubkey = as;
     const sent: Array<Record<string, unknown>> = [];
     vi.resetModules();
     vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
@@ -500,7 +503,7 @@ describe("publishServers", () => {
     }));
     // The account's published list is read before anything is written: a list
     // this device never read must not be published as the account's.
-    answerWith([]);
+    answerWith(answer);
     const store = await import("./servers.js");
     await store.loadServers();
     return { store, sent, pubkey };
@@ -530,11 +533,60 @@ describe("publishServers", () => {
     expect(sent[0].tags).toEqual([["server", "https://my.blossom.example"]]);
   });
 
-  it("publishes the shortened list when a server is removed", async () => {
+  it("will not publish an empty list, which would delete the account's", async () => {
+    // This used to assert `tags: []`, locking in the thing BUD-03 forbids: the
+    // event "MUST include at least one `server` tag". Because kind 10063
+    // replaces the whole list, an empty one is not a list of no servers — it is
+    // the removal of every server the account has, written to the one store that
+    // cannot be read back, on every other client too.
+    //
+    // Reaching it means this device never loaded a list, or that the reader just
+    // removed their last one. Neither is something to answer by wiping the
+    // account.
     const { store, sent } = await signedIn();
     store.addServer("https://files.example");
-    await store.removeServerAndPublish("https://files.example");
-    expect(sent[0].tags).toEqual([]);
+    expect(await store.removeServerAndPublish("https://files.example")).toBe(
+      false,
+    );
+    expect(sent).toHaveLength(0);
+    // The local list is still emptied, because that is what the reader asked for.
+    expect(own(store)).toEqual([]);
+  });
+
+  it("reads a second account's own list, whatever the first one wrote", async () => {
+    // The note of when this browser published a list was one key for the whole
+    // app, while the gate that protects the account's list was per account. Two
+    // accounts did not fit.
+    //
+    // What actually happened is worse than the account seeing nothing. The
+    // second account's list was measured against the first account's write, found
+    // itself older, and was refused as stale — which left the *local* list in
+    // place. That list belongs to the first account, so the second account was
+    // shown the first account's servers, and its next edit would have published
+    // them under itself.
+    const now = Math.floor(Date.now() / 1000);
+    // The first account writes its list, and the stamp goes in under its own key.
+    const first = await signedIn(READER);
+    first.store.addServer("https://first.example");
+    expect(await first.store.publishServers()).toBe(true);
+    expect(first.sent).toHaveLength(1);
+
+    // The second account's list is *older* than that write. It is still its own
+    // list, and it is still the newest thing anyone has published for it.
+    const second = await signedIn(OTHER, [
+      listEvent(["https://other.example"], {
+        author: "other",
+        at: now - 5000,
+      }),
+    ]);
+    expect(own(second.store)).toEqual(["https://other.example"]);
+
+    // And the accounts do not read each other: the first account's list is not
+    // offered to the second, and the second's is not offered to the first.
+    const firstAgain = await signedIn(READER, [
+      listEvent(["https://first.example"], { at: now - 5000 }),
+    ]);
+    expect(own(firstAgain.store)).toEqual(["https://first.example"]);
   });
 
   it("publishes nothing when the reader is not signed in", async () => {
