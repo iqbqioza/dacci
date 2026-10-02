@@ -13,6 +13,7 @@ import {
 } from "solid-js";
 import { restoreSession, useAuth } from "./auth.jsx";
 import { resetEmbeds } from "./embeds.js";
+import { trapFocus } from "./focus-trap.js";
 import { createDetail } from "./detail.js";
 import { fetchEventById } from "./event-cache.js";
 import {
@@ -119,8 +120,10 @@ export function App() {
   };
   let stopLiveFeeds: () => void = () => {};
   let liveKey = "";
-/** The compose dialog's own textarea, so focus can be placed inside it. */
-let composeInput: HTMLTextAreaElement | undefined;
+  /** The compose dialog's own textarea, so focus can be placed inside it. */
+  let composeInput: HTMLTextAreaElement | undefined;
+  /** The compose dialog itself, so the keyboard can be held inside it. */
+  let composePanel: HTMLDivElement | undefined;
   /** Whose server list is loaded, so it is read again only on a change. */
   let serversIdentity = "";
 
@@ -178,12 +181,39 @@ let composeInput: HTMLTextAreaElement | undefined;
       if (event.key === "Escape") closeCompose();
     };
     document.addEventListener("keydown", onKey);
+    // And has to stay inside. `aria-modal="true"` says the timeline behind the
+    // scrim cannot be reached, and nothing made it so: a Tab past the last
+    // control walked the feed under the scrim, one article at a time.
+    const untrap =
+      composePanel === undefined ? () => undefined : trapFocus(composePanel);
+    // Where the reader was, to hand back when the dialog closes. The dialog is
+    // mounted at the app's top level and outlives the route behind it, so this is
+    // the Compose button in the nav — which a route change can still take away.
+    const before = document.activeElement;
     // The dialog is not in the DOM until this effect runs, so the caret waits
     // for the next tick before it is placed inside it.
     queueMicrotask(() => {
       composeInput?.focus();
     });
-    onCleanup(() => document.removeEventListener("keydown", onKey));
+    onCleanup(() => {
+      document.removeEventListener("keydown", onKey);
+      untrap();
+      // Without this, dismissing the dialog left the reader on the body and their
+      // next Tab restarted at the top of the page. `focus()` on a detached element
+      // is a silent no-op, so the page itself is the fallback.
+      if (
+        before instanceof HTMLElement &&
+        before !== document.body &&
+        before.isConnected
+      ) {
+        before.focus();
+        return;
+      }
+      const main = document.querySelector<HTMLElement>("main");
+      if (main === null) return;
+      if (!main.hasAttribute("tabindex")) main.setAttribute("tabindex", "-1");
+      main.focus();
+    });
   });
 
   // The profile page follows whoever it is showing, live. Leaving the page
@@ -356,6 +386,9 @@ let composeInput: HTMLTextAreaElement | undefined;
           onClick={closeCompose}
         >
           <div
+            ref={(el) => {
+              composePanel = el;
+            }}
             class="w-full max-w-md rounded-2xl bg-(--surface) p-4"
             role="dialog"
             aria-modal="true"

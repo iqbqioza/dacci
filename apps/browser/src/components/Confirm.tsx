@@ -1,4 +1,5 @@
 import { createEffect, onCleanup, Show } from "solid-js";
+import { trapFocus } from "../focus-trap.js";
 
 /**
  * A question asked before something that cannot be taken back. Deleting a post
@@ -30,6 +31,10 @@ export function Confirm(props: {
       if (event.key === "Escape") props.onCancel();
     };
     document.addEventListener("keydown", onKey);
+    // And has to stay inside: `aria-modal="true"` says the page behind is inert,
+    // and nothing made it so. The two answers are the whole dialog, so a Tab
+    // past the second one landed on the feed under the scrim.
+    const untrap = panel === undefined ? () => undefined : trapFocus(panel);
     // The scrim covers the page, so focus has to come inside: left where it
     // was, the next Tab walks the feed behind the question instead of the two
     // answers in it. "やめる" is where it goes, because that is the answer that
@@ -50,6 +55,7 @@ export function Confirm(props: {
     });
     onCleanup(() => {
       document.removeEventListener("keydown", onKey);
+      untrap();
       // And hand it back, so a reader who answered or dismissed is returned to
       // the card they came from rather than dropped at the top of the page.
       //

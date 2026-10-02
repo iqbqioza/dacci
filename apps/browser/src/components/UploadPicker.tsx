@@ -115,14 +115,41 @@ export function UploadPicker(props: {
   // of a note's page, where a list that always opened upwards left the screen.
   createEffect(() => {
     if (!open() || root === undefined || list === undefined) return;
-    const icon = root.getBoundingClientRect();
-    // The layout size, not the painted one: a transform moves the list without
-    // changing it, and measuring the moved box would move it further.
-    const width = list.offsetWidth;
-    const height = list.offsetHeight;
     const margin = 8;
     const gap = 6;
-    const fits = (left: number): boolean =>
+
+    /** The place a box of this size takes, kept clear of the window's edges. */
+    function keepInside(wanted: number, size: number, limit: number): number {
+      const room = limit - size - margin;
+      // A box taller than the window has no centred place, so it starts at
+      // the top margin and scrolls rather than running off the bottom.
+      return wanted < margin
+        ? margin
+        : wanted > room
+          ? Math.max(margin, room)
+          : wanted;
+    }
+
+    const place = (): void => {
+      if (root === undefined || list === undefined) return;
+      const icon = root.getBoundingClientRect();
+      // The list is fixed to the window, so it cannot follow the icon out of it.
+      // Scrolling the button away used to leave the list sitting at the bottom of
+      // the window, pointing at a button six hundred pixels above it — and it was
+      // the placement that kept it there, not staleness: the list is clamped to
+      // the window's edge, and the window's edge does not move.
+      //
+      // A popup whose anchor has gone is not a popup any more. Escape still works
+      // on it, which is what made it look alive rather than stranded.
+      if (icon.bottom <= 0 || icon.top >= window.innerHeight) {
+        setOpen(false);
+        return;
+      }
+      // The layout size, not the painted one: a transform moves the list without
+      // changing it, and measuring the moved box would move it further.
+      const width = list.offsetWidth;
+      const height = list.offsetHeight;
+      const fits = (left: number): boolean =>
       left >= margin && left + width <= window.innerWidth - margin;
     const right = icon.right + gap;
     const left = icon.left - gap - width;
@@ -134,28 +161,48 @@ export function UploadPicker(props: {
     // own corner, while the room it has to fit in is the whole window. So the
     // place in the window becomes a distance from the icon.
     const x =
-      beside === "right"
-        ? right
-        : beside === "left"
-          ? left
-          : keepInside(icon.left, width, window.innerWidth);
-    const centred = icon.top + icon.height / 2 - height / 2;
-    const y =
-      beside === "below"
-        ? keepInside(icon.bottom + gap, height, window.innerHeight)
-        : keepInside(centred, height, window.innerHeight);
-    // The list is fixed to the window and placed with a transform, so the place
-    // chosen above is already the window coordinate it should sit at — no longer
-    // a distance from the icon, which it no longer hangs off.
-    setAt({ x, y });
+        beside === "right"
+          ? right
+          : beside === "left"
+            ? left
+            : keepInside(icon.left, width, window.innerWidth);
+      const centred = icon.top + icon.height / 2 - height / 2;
+      const y =
+        beside === "below"
+          ? keepInside(icon.bottom + gap, height, window.innerHeight)
+          : keepInside(centred, height, window.innerHeight);
+      // The list is fixed to the window and placed with a transform, so the place
+      // chosen above is already the window coordinate it should sit at — no longer
+      // a distance from the icon, which it no longer hangs off.
+      setAt({ x, y });
+    };
 
-    /** The place a box of this size takes, kept clear of the window's edges. */
-    function keepInside(wanted: number, size: number, limit: number): number {
-      const room = limit - size - margin;
-      // A box taller than the window has no centred place, so it starts at
-      // the top margin and scrolls rather than running off the bottom.
-      return wanted < margin ? margin : wanted > room ? Math.max(margin, room) : wanted;
-    }
+    place();
+
+    // And measured again whenever that answer could have gone stale.
+    //
+    // The list is fixed to the window, so the one position taken when it opened
+    // stops being true as soon as the page scrolls: the icon it hangs off moves,
+    // and the list stays where it was, pointing at nothing. It stops being true
+    // when the list itself grows too — "+ Blossom サーバーを追加" adds a field and
+    // a button to it, which is how the row below the window's edge came to be
+    // stranded with no way back. The list is fixed, so scrolling the page could
+    // not bring it into view.
+    const again = (): void => place();
+    // Capture, so a scroll inside any scroller counts: the icon can sit in a
+    // scrolling note page as easily as in the window itself.
+    window.addEventListener("scroll", again, true);
+    window.addEventListener("resize", again);
+    // The list's own size is the one thing `place` measures that no event
+    // announces.
+    const observer =
+      typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(again);
+    if (observer !== undefined && list !== undefined) observer.observe(list);
+    onCleanup(() => {
+      window.removeEventListener("scroll", again, true);
+      window.removeEventListener("resize", again);
+      observer?.disconnect();
+    });
   });
 
   async function uploadTo(server: UploadServer, file: File): Promise<void> {
@@ -337,10 +384,14 @@ function ServerList(props: {
               {/* The servers the app offers itself are not the reader's to
                   remove, so the button is not offered for them at all. */}
               <Show when={server.builtin !== true}>
+                {/* Named after the server. Two of the reader's own servers in
+                    the list read as "削除" and "削除", with the same title, so
+                    nothing said which was which. */}
                 <button
                   type="button"
                   class="shrink-0 rounded-full px-2 py-1 text-xs text-(--ink-muted) hover:bg-(--line) hover:text-(--danger)"
-                  title="このサーバーを削除"
+                  title={`${server.url} を削除`}
+                  aria-label={`${server.url} を削除`}
                   onClick={() => props.onRemove(server.url)}
                 >
                   削除

@@ -345,9 +345,15 @@ function RelayRow(props: { url: string; mode: RelayMode }) {
             label={`${props.url} の用途`}
             onChange={(mode) => setRelayMode(props.url, mode)}
           />
+          {/* Named after the relay, not just the action. A screen reader reads
+              one button per row and they were all "削除", with the same title on
+              every one, so a reader on the Network page heard the same word as
+              many times as there were relays and nothing to tell them apart. The
+              relay is what the row is about; the action is the same everywhere. */}
           <button
             class="rounded-full px-2 py-1 text-xs text-(--ink-muted) hover:bg-(--line) hover:text-(--danger)"
-            title="このリレーを削除"
+            title={`${props.url} を削除`}
+            aria-label={`${props.url} を削除`}
             onClick={() => removeRelay(props.url)}
           >
             削除

@@ -1,4 +1,5 @@
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
+import { trapFocus } from "../focus-trap.js";
 import type { MetadataValue } from "dacci-nostr-nips";
 import { birthdayTo } from "dacci-nostr-nips";
 import { useAuth } from "../auth.jsx";
@@ -65,6 +66,8 @@ export function ProfileEditor() {
 
   /** The first field, so opening the editor can put the caret inside it. */
   let firstField: HTMLInputElement | HTMLTextAreaElement | undefined;
+  /** The panel, so the keyboard can be held inside it. */
+  let panel: HTMLDivElement | undefined;
 
   // Escape is the way out of anything that asks, and the scrim already closes
   // this, so the keyboard offers nothing new that a click does not.
@@ -76,14 +79,18 @@ export function ProfileEditor() {
     document.addEventListener("keydown", onKey);
     // This is the worst case in the app for focus: a dozen fields sit behind the
     // scrim, so a Tab left where the reader was walks the page being covered
-    // rather than the form. The first field is where the caret belongs, and
-    // closing hands focus back to whatever opened the editor.
+    // rather than the form — and `aria-modal="true"` has already told a screen
+    // reader that page cannot be reached at all.
+    const untrap = panel === undefined ? () => undefined : trapFocus(panel);
+    // The first field is where the caret belongs, and closing hands focus back
+    // to whatever opened the editor.
     const before = document.activeElement;
     queueMicrotask(() => {
       firstField?.focus();
     });
     onCleanup(() => {
       document.removeEventListener("keydown", onKey);
+      untrap();
       if (
         before instanceof HTMLElement &&
         before !== document.body &&
@@ -116,6 +123,9 @@ export function ProfileEditor() {
         onClick={closeProfileEditor}
       >
         <div
+          ref={(el) => {
+            panel = el;
+          }}
           class="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-2xl bg-(--surface) p-4"
           role="dialog"
           aria-modal="true"
