@@ -1,6 +1,6 @@
 import type { ContentSegment, Emoji, NostrEvent } from "dacci-nostr-nips";
 import { contentSegments, emojisIn, mentionedProfiles } from "dacci-nostr-nips";
-import { createEffect, For, Show } from "solid-js";
+import { createEffect, Index, Show } from "solid-js";
 import { requestProfiles } from "../profile.js";
 import { nameOf, Mention, TextRun } from "./RichText.jsx";
 import { NoteImage } from "./NoteImage.jsx";
@@ -38,9 +38,14 @@ export function NoteBody(props: { event: NostrEvent }) {
       // only give the paragraph somewhere to break between words.
       fallback={<>{segments().map((segment) => renderSegment(segment, emojis()))}</>}
     >
-      <For each={segments()}>
-        {(segment) => renderSegment(segment, emojis())}
-      </For>
+      {/* Keyed by position, not by the segment itself. A name arriving anywhere
+          on the page rebuilds every mention's segment, and keying on identity
+          would throw the whole body away with it — including which of an
+          image's addresses has already been tried. The number of segments
+          does not depend on any name, so a row keeps its place and its state. */}
+      <Index each={segments()}>
+        {(segment) => renderSegment(segment(), emojis())}
+      </Index>
     </Show>
   );
 }

@@ -19,6 +19,17 @@ import { useRelays } from "./relays.js";
  * them on every login.
  */
 const [deleted, setDeleted] = createSignal<ReadonlySet<string>>(new Set());
+/**
+ * Whose deletions these are, and a token for the read in flight.
+ *
+ * A deletion request is the reader's own, so this list belongs to one reader the
+ * way the follow and mute lists do. Without that it never shrinks: one reader
+ * deletes a post, signs out, and the next reader still cannot see it — for a
+ * deletion they had nothing to do with and no way to undo.
+ */
+let owner: string | null = null;
+/** Bumped per read, so a reply that settles after a reader change is dropped. */
+let readGeneration = 0;
 
 /** Whether a post has been deleted. */
 export function isDeleted(id: string): boolean {
@@ -74,6 +85,14 @@ const SYNC_LIMIT = 500;
  * deleted post back on screen.
  */
 export async function syncDeleted(pubkey: string): Promise<void> {
+  // A different reader has a different set of requests, and a read still
+  // running belongs to the reader who started it.
+  if (owner !== pubkey) {
+    owner = pubkey;
+    readGeneration += 1;
+    setDeleted(new Set<string>());
+  }
+  const generation = readGeneration;
   const filter: Filter = { kinds: [DELETION_KIND], authors: [pubkey], limit: SYNC_LIMIT };
   const settled = await Promise.allSettled(
     useRelays()
@@ -101,5 +120,20 @@ export async function syncDeleted(pubkey: string): Promise<void> {
   // Nothing answered, so what is known stays known: a deletion read once is
   // not undone by a relay that is merely quiet now.
   if (answered === 0) return;
+  // The reader changed while this was out, so the answer belongs to a list
+  // nobody is looking at any more. Writing it would apply one reader's
+  // deletions to the next reader's feeds.
+  if (generation !== readGeneration) return;
   markDeleted(deletedEventIds(events));
+}
+
+/**
+ * Drops the list, on a login change or a relay change, so it is read again for
+ * whoever is reading now. A request still in flight is made stale so its answer
+ * cannot land in the fresh list.
+ */
+export function resetDeleted(): void {
+  owner = null;
+  readGeneration += 1;
+  setDeleted(new Set<string>());
 }

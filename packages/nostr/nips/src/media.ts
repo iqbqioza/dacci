@@ -254,13 +254,27 @@ export function contentSegments(
  * written in, and the whitespace that leaves behind is collapsed the way a
  * removed `nostr:` link is, without touching the paragraphs. An image and a
  * name are what the reader is here for, so neither is ever dropped.
+ *
+ * A run that is nothing but whitespace is kept when something else is written on
+ * both sides of it. That run is not leftover space: it is the gap between two
+ * figures, or the space a name is separated from what follows it. Dropping it
+ * glues a name to the image after it and closes the blank line the author put
+ * between two images. A run with nothing on one side is leftover space and
+ * goes, which is what the single filter was for.
  */
 function tidy(segments: ContentSegment[]): ContentSegment[] {
-  return segments
-    .filter(
-      (segment) => segment.kind !== "text" || segment.text.trim() !== "",
-    )
-    .map((segment) =>
+  const out: ContentSegment[] = [];
+  for (const [index, segment] of segments.entries()) {
+    if (segment.kind === "text" && segment.text.trim() === "") {
+      const before = segments[index - 1];
+      const after = segments[index + 1];
+      // Whitespace between two written things is a gap the author chose.
+      if (before !== undefined && after !== undefined) {
+        out.push(segment);
+      }
+      continue;
+    }
+    out.push(
       segment.kind === "text"
         ? {
             kind: "text",
@@ -268,4 +282,6 @@ function tidy(segments: ContentSegment[]): ContentSegment[] {
           }
         : segment,
     );
+  }
+  return out;
 }

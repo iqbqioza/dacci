@@ -138,6 +138,20 @@ describe("Blossom upload", () => {
     expect(result).toEqual({ url: "https://media.example/a.png" });
   });
 
+  it("resolves a relative endpoint against the server, not against the app", async () => {
+    // A document may name its endpoint as a path on itself. Left relative,
+    // `fetch` resolves it against the page, so the reader's file — and the
+    // Authorization header that authorises it — would be posted to whoever hosts
+    // this app instead of to the server they chose.
+    const calls = stubFetch({
+      document: { api_url: "/api", supported_nips: [96, 98] },
+      body: { status: "success", nip94_event: { tags: [["url", "https://media.example/a.png"]] } },
+    });
+    const { uploadFile: upload } = await import("./upload.js");
+    await upload({ url: NIP96 }, file());
+    expect(calls[1].url).toBe(`${NIP96}/api`);
+  });
+
   it("falls back to the download base when no url comes back", async () => {
     stubFetch({ document: null, body: { uploaded: 1 } });
     const { uploadFile: upload, fileHashHex: hash } = await import("./upload.js");
@@ -240,6 +254,25 @@ describe("uploadFile", () => {
     const { uploadFile: upload } = await import("./upload.js");
     const result = await upload({ url: HOST }, file());
     expect(result).toEqual({ failure: "no-signer" });
+  });
+
+  it("reports a dismissed signature prompt instead of rejecting", async () => {
+    // A NIP-07 extension asks the reader to confirm and throws when the dialog
+    // is dismissed. That is ordinary, not a crash, and it must come back as a
+    // reason: left uncaught it escapes through a `void` and the reader is left
+    // watching a spinner with nothing said.
+    vi.doMock("./auth.js", () => ({
+      getSigner: () => ({
+        signEvent: async () => {
+          throw new Error("user rejected");
+        },
+      }),
+      useAuth: () => ({ pubkey: () => "a".repeat(64) }),
+    }));
+    stubFetch({ status: 200, body: {} });
+    const { uploadFile: upload } = await import("./upload.js");
+    const result = await upload({ url: HOST }, file());
+    expect(result).toEqual({ failure: "cancelled" });
   });
 
   it("explains a 401 from a server that wants a signature", async () => {
@@ -487,6 +520,7 @@ describe("uploadFailureText", () => {
   it("has a message for every failure", () => {
     for (const reason of [
       "no-signer",
+      "cancelled",
       "network",
       "too-large",
       "unsupported-type",

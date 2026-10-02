@@ -129,6 +129,12 @@ export function UploadPicker(props: {
         return;
       }
       props.onUploaded(result.url);
+    } catch {
+      // An upload reports why it failed rather than throwing, so anything that
+      // reaches here is something nobody planned for. Saying so is better than
+      // the rejection leaving through a `void` with the reader left watching a
+      // spinner that never stops.
+      props.onError(uploadFailureText("unknown"));
     } finally {
       setBusy(null);
     }

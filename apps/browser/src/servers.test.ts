@@ -322,12 +322,63 @@ describe("loadServers", () => {
       }),
     }));
     const store = await import("./servers.js");
+    // The account's list is read first, which is what lets it be written at all.
+    await store.loadServers();
     await store.addServerAndPublish("https://mine.example");
     // The relay still answers with the list from before the edit, published
     // earlier than the one the reader just wrote.
     answer = [listEvent(["https://stale.example"], { at: 1 })];
     await store.loadServers();
     expect(own(store)).toEqual(["https://mine.example"]);
+  });
+
+  it("does not publish a list it never read", async () => {
+    // The servers on this device may be all this device ever saw, and BUD-03
+    // replaces the whole list, so writing them would delete every server the
+    // reader configured on another client.
+    const pubkey = "a".repeat(64);
+    const sent: unknown[] = [];
+    vi.resetModules();
+    vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
+    vi.doMock("./compose.js", () => ({
+      publishEvent: async (template: Record<string, unknown>) => {
+        sent.push(template);
+        return { ...template, id: "f".repeat(64), sig: "e".repeat(128) };
+      },
+    }));
+    // Every relay refuses, so the round never answered.
+    vi.doMock("./nostr.js", () => ({
+      getConnection: () => ({
+        url: "wss://read.example",
+        query: async () => ({ failed: true, events: [] }),
+      }),
+    }));
+    const store = await import("./servers.js");
+    await store.loadServers();
+    await store.addServerAndPublish("https://my.blossom.example");
+    expect(sent).toEqual([]);
+    // The edit is still on screen; it just was not published.
+    expect(own(store)).toEqual(["https://my.blossom.example"]);
+  });
+
+  it("publishes once the list has been read, even when nothing was published", async () => {
+    // Asked and answered with nothing is an answer: it says the account has no
+    // list, so publishing one cannot lose anything.
+    const pubkey = "a".repeat(64);
+    const sent: unknown[] = [];
+    vi.resetModules();
+    vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
+    vi.doMock("./compose.js", () => ({
+      publishEvent: async (template: Record<string, unknown>) => {
+        sent.push(template);
+        return { ...template, id: "f".repeat(64), sig: "e".repeat(128) };
+      },
+    }));
+    answerWith([]);
+    const store = await import("./servers.js");
+    await store.loadServers();
+    await store.addServerAndPublish("https://my.blossom.example");
+    expect(sent).toHaveLength(1);
   });
 
   it("brings in a list published on another client", async () => {
@@ -363,7 +414,12 @@ describe("publishServers", () => {
         return { ...template, id: "f".repeat(64), sig: "e".repeat(128) };
       },
     }));
-    return { store: await import("./servers.js"), sent, pubkey };
+    // The account's published list is read before anything is written: a list
+    // this device never read must not be published as the account's.
+    answerWith([]);
+    const store = await import("./servers.js");
+    await store.loadServers();
+    return { store, sent, pubkey };
   }
 
   it("publishes the list as a kind 10063 (BUD-03) event when a server is added", async () => {

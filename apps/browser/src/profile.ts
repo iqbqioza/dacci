@@ -11,20 +11,37 @@ const store = new ProfileStore(
   async (authors: string[]): Promise<NostrEvent[]> => {
     // Metadata is a read, so only read-capable relays are asked.
     const urls = useRelays().readRelays();
-    if (urls.length === 0) return [];
+    // No relay can answer, so the store is told the question is open rather
+    // than answered with nothing. A reader whose relays are all write-only
+    // would otherwise be recorded as having no profile, and the editor would
+    // then publish an empty one over the real thing.
+    if (urls.length === 0) throw new Error("no relay can be read from");
     // One REQ for the whole batch; relays answer kind 0 newest-first.
     const filter: Filter = {
       kinds: [0],
       authors,
       limit: authors.length,
     };
+    // A relay that refused still settles its promise, so the relays that
+    // answered are counted by what they said, not by whether their promise
+    // resolved. Counting the latter would make a round where every relay
+    // failed look like a round where every relay said there is no profile,
+    // which is the one mistake this whole distinction exists to prevent.
+    let answered = 0;
     const settled = await Promise.allSettled(
       urls.map(async (url) => {
         const result = await getConnection(url).query(filter, 4000);
-        return result.failed ? [] : result.events;
+        if (result.failed) return [];
+        answered += 1;
+        return result.events;
       }),
     );
-    return settled.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+    // Every relay refused or timed out. Throwing keeps the lookup open, which
+    // is the difference between "no profile" and "we do not know yet".
+    if (answered === 0) throw new Error("no relay answered");
+    return settled.flatMap((r) =>
+      r.status === "fulfilled" ? r.value : ([] as NostrEvent[]),
+    );
   },
   { onChange: () => setVersion((v) => v + 1) },
 );

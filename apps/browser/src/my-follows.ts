@@ -31,6 +31,8 @@ const [tags, setTags] = createSignal<string[][]>([]);
 const [loaded, setLoaded] = createSignal(false);
 const [pending, setPending] = createSignal(false);
 const [owner, setOwner] = createSignal<string | null>(null);
+/** Incremented for every read, so a stale answer can be recognised as stale. */
+let readGeneration = 0;
 
 const SYNC_TIMEOUT_MS = 5000;
 
@@ -69,11 +71,13 @@ export function useFollowState(pubkey: string): FollowState {
 export function requestMyFollows(): void {
   const key = useAuth().pubkey();
   if (key === null) return;
-  // A different reader has a different list.
+  // A different reader has a different list, and a read still running belongs
+  // to the reader who started it: its answer must not be taken as this one's.
   if (owner() !== key) {
     setOwner(key);
     setLoaded(false);
     setTags([]);
+    setPending(false);
   }
   if (loaded() || pending()) return;
   setPending(true);
@@ -81,6 +85,9 @@ export function requestMyFollows(): void {
 }
 
 async function loadMyFollows(key: string): Promise<void> {
+  // Bumped for every read, so a reply that arrives after a reader change, or
+  // after a reset, is dropped instead of being written as the current answer.
+  const generation = ++readGeneration;
   const filter: Filter = { kinds: [CONTACTS_KIND], authors: [key], limit: 5 };
   const settled = await Promise.allSettled(
     useRelays()
@@ -105,6 +112,10 @@ async function loadMyFollows(key: string): Promise<void> {
       events.push(...result.value);
     }
   }
+  // A reader change or a reset happened while this was in flight, so the answer
+  // belongs to a list nobody is looking at any more. Dropping it is the whole
+  // point: writing it would put one reader's list under another's key.
+  if (generation !== readGeneration) return;
   setPending(false);
   // No relay answered, so the list is still unknown. Leaving it unknown keeps
   // the button from claiming the reader does not follow someone they do.
@@ -169,6 +180,9 @@ export async function toggleFollow(pubkey: string): Promise<void> {
 
 /** Dropped on a login change and a relay change, so the list is read again. */
 export function resetMyFollows(): void {
+  // A read in flight belongs to the list that was just dropped, so bumping the
+  // generation makes its answer stale rather than current.
+  readGeneration += 1;
   setOwner(null);
   setTags([]);
   setLoaded(false);

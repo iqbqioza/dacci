@@ -6,7 +6,7 @@ import {
 import { createSignal } from "solid-js";
 import type { LiveSubscription } from "dacci-nostr-ws";
 import { rememberEvents } from "./event-cache.js";
-import { HOME_KINDS, getConnection } from "./nostr.js";
+import { HOME_KINDS, NOTIFICATION_KINDS, getConnection } from "./nostr.js";
 import { useRelays } from "./relays.js";
 
 const MAX_BUFFERED = 200;
@@ -132,7 +132,11 @@ export function startLiveFeeds(deps: LiveFeedDeps): () => void {
         subs.push(
           connection.subscribe(
             {
-              kinds: [1, 6, 7],
+              // The same kinds the paginated list asks for. NIP-22 comments are
+              // in it: a kind 1111 that addresses the reader has to reach the
+              // live stream too, or the bar never tells them about it and only
+              // a reload would.
+              kinds: NOTIFICATION_KINDS,
               "#p": [self],
               since: Math.floor(Date.now() / 1000),
             },

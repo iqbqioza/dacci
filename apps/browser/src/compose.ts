@@ -91,7 +91,13 @@ function isHex64(value: string | undefined): value is string {
 const PUBLISH_TIMEOUT_MS = 5000;
 
 /** Why a publish did not go out, so the caller can say which it was. */
-export type PublishFailure = "no-signer" | "no-relay" | "rejected" | "empty";
+export type PublishFailure =
+  | "no-signer"
+  | "no-relay"
+  | "rejected"
+  /** The reader dismissed the signature prompt, so nothing was signed. */
+  | "cancelled"
+  | "empty";
 
 /** Signs and broadcasts to every relay, then caches for deep links. */
 export async function publishEvent(
@@ -111,7 +117,17 @@ export async function publishEvent(
     reportError("no-signer");
     return null;
   }
-  const event = await signer.signEvent(template);
+  // Signing can refuse, and refusing is ordinary: a NIP-07 extension asks the
+  // reader to confirm and throws when the dialog is dismissed. That has to come
+  // back as a reason like any other, or the caller is left with a rejected
+  // promise, a button that stops working and nothing said about why.
+  let event: NostrEvent;
+  try {
+    event = await signer.signEvent(template);
+  } catch {
+    reportError("cancelled");
+    return null;
+  }
   rememberEvents([event]);
   const accepted = await sendToWriteRelays(event);
   if (accepted === 0) {
@@ -161,6 +177,7 @@ const FAILURE_TEXT: Record<PublishFailure, string> = {
   "no-signer": "ログインが必要です (Settings)",
   "no-relay": "書き込むリレーがありません (Network)",
   rejected: "リレーに拒否されました",
+  cancelled: "署名をキャンセルしました",
   empty: "本文を入力してください",
 };
 
@@ -380,7 +397,6 @@ export async function deleteEvent(event: NostrEvent): Promise<boolean> {
     markDeleted([event.id]);
     // The request is the reader's own event, so a reload finds it again and
     // keeps the post out of sight without the reader doing anything.
-    showNotice("削除しました");
     showNotice("削除しました");
     return true;
   } finally {

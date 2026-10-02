@@ -1,5 +1,6 @@
 import type { NostrEvent } from "dacci-nostr-nips";
 import { compareEvents } from "dacci-nostr-nips";
+import type { TimelinePaginator } from "dacci-nostr-paginator";
 import { createSignal } from "solid-js";
 import { withoutDeleted } from "./deleted.js";
 import { rememberEvents } from "./event-cache.js";
@@ -31,6 +32,15 @@ const [hasMore, setHasMore] = createSignal(false);
 let generation = 0;
 let listRef: HTMLDivElement | undefined;
 let loadedFor: string | null = null;
+/**
+ * The paginator that holds where the next page starts.
+ *
+ * It has to outlive a page, like the home and profile feeds' paginators do. A
+ * fresh one begins again at the newest notification, so "load more" would ask
+ * for the first page again, have every event deduped away, and leave the reader
+ * unable to reach anything older than their first page.
+ */
+let paginator: TimelinePaginator | null = null;
 
 export function useNotifications() {
   return {
@@ -52,15 +62,13 @@ export function useNotifications() {
 async function loadPage(reset: boolean): Promise<void> {
   const pubkey = loadedFor;
   if (pubkey === null) return;
-  const paginator = createNotificationTimeline(
-    useRelays().readRelays(),
-    pubkey,
-  );
+  const active = paginator ?? createNotificationTimeline(useRelays().readRelays(), pubkey);
+  paginator = active;
   const gen = generation;
   if (reset) setLoading(true);
   else setLoadingMore(true);
   try {
-    const page = await paginator.loadNextPage();
+    const page = await active.loadNextPage();
     if (gen !== generation) return;
     // Relays only answer what they indexed, so the union is verified here:
     // addressed to this pubkey, and never the user's own event.
@@ -82,7 +90,7 @@ async function loadPage(reset: boolean): Promise<void> {
     setCoverage(page.coverage);
     setAuthRelays(page.authRequiredRelays);
     setPendingRelays(page.pendingRelays);
-    setHasMore(paginator.hasMore());
+    setHasMore(active.hasMore());
   } finally {
     if (gen === generation) {
       setLoading(false);
@@ -106,6 +114,9 @@ export function ensureNotifications(pubkey: string | null): void {
 export function resetNotifications(): void {
   generation += 1;
   loadedFor = null;
+  // The old paginator's cursors belong to a list that no longer exists, and a
+  // stale page still in flight must not be able to move them.
+  paginator = null;
   setEvents([]);
   setCoverage("partial");
   setAuthRelays([]);
@@ -122,7 +133,18 @@ export function loadMoreNotifications(): void {
 
 /** Inserts buffered live notifications above the current first one. */
 export function flushNotificationArrivals(): void {
-  const plan = planFlush(useNotificationLive().buffered(), events());
+  const self = loadedFor;
+  // The same guard the paginated path applies. A reader's own post carries a
+  // `p` tag naming them whenever they reply to themselves, repost themselves or
+  // answer themselves, and the relay indexes that like any other: without this
+  // their own post arrives as a notification about themselves.
+  const arriving =
+    self === null
+      ? []
+      : useNotificationLive()
+          .buffered()
+          .filter((event) => isNotification(event, self));
+  const plan = planFlush(arriving, events());
   preservingViewport(listRef, () => {
     clearNotificationBuffer();
     if (plan.added.length > 0) setEvents(plan.events);

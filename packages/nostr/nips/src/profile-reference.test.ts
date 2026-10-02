@@ -221,8 +221,59 @@ describe("contentSegments with names", () => {
       note(`hi ${npub(ALICE)}\nhttps://x.example/a.png`),
       nameOf,
     );
-    expect(segments.map((s) => s.kind)).toEqual(["text", "mention", "image"]);
+    // The line the author put between the name and the image survives: it is
+    // the gap they chose, not leftover space.
+    expect(segments.map((s) => s.kind)).toEqual([
+      "text",
+      "mention",
+      "text",
+      "image",
+    ]);
     expect(segments[0]).toEqual({ kind: "text", text: "hi " });
+    expect(segments[2]).toEqual({ kind: "text", text: "\n" });
+  });
+
+  it("keeps the space that separates a name from an image after it", () => {
+    // Without this the name button sits flush against the picture, so the two
+    // read as one thing.
+    const segments = contentSegments(
+      note(`${npub(ALICE)} https://x.example/a.png`),
+      nameOf,
+    );
+    expect(segments.map((s) => s.kind)).toEqual(["mention", "text", "image"]);
+    expect(segments[1]).toEqual({ kind: "text", text: " " });
+  });
+
+  it("keeps the blank line between two images", () => {
+    // The blank line is a paragraph of the author's own, so closing it glues
+    // the two figures together.
+    const segments = contentSegments(
+      note("https://x.example/1.png\n\nhttps://x.example/2.png"),
+    );
+    expect(segments.map((s) => s.kind)).toEqual(["image", "text", "image"]);
+    expect(segments[1]).toEqual({ kind: "text", text: "\n\n" });
+  });
+
+  it("still drops the space a lone image leaves behind", () => {
+    // A run with nothing written on one side of it is leftover space, and it is
+    // the one case where dropping it is right.
+    const segments = contentSegments(note("a https://x.example/1.png"));
+    expect(segments.map((s) => s.kind)).toEqual(["text", "image"]);
+  });
+
+  it("leaves punctuation tight against the name it follows", () => {
+    // `Alice , ok` is not what anyone wrote, and the author put the comma
+    // against the reference on purpose.
+    const read = (text: string): string =>
+      contentSegments(note(text), nameOf)
+        .map((s) =>
+          s.kind === "text" ? s.text : s.kind === "mention" ? s.mention.label : "",
+        )
+        .join("");
+    expect(read(`${npub(ALICE)}, ok`)).toBe("Alice, ok");
+    expect(read(`${npub(ALICE)}。`)).toBe("Alice。");
+    expect(read(`${npub(ALICE)}!`)).toBe("Alice!");
+    expect(read(`${npub(ALICE)} ok`)).toBe("Alice ok");
   });
 
   it("does not let a name be read as an image", () => {

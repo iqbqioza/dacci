@@ -68,7 +68,14 @@ export async function loadReplies(postId: string): Promise<void> {
   const answers = directReplies(found, postId);
   setReplies((prev) => {
     const next = new Map(prev);
-    next.set(postId, answers);
+    // A reply the reader has just published is not in a relay's answer yet, and
+    // a NIP-07 prompt makes that overlap likely. Replacing the list with what
+    // the relays said would make their own reply vanish from the thread it was
+    // sent in, with nothing to fetch it back.
+    const kept = (prev.get(postId) ?? []).filter(
+      (event) => !answers.some((answer) => answer.id === event.id),
+    );
+    next.set(postId, directReplies([...answers, ...kept], postId));
     return next;
   });
   setLoading(false);

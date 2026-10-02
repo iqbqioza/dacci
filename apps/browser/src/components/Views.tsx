@@ -14,6 +14,7 @@ import {
   useNotifications,
 } from "../notifications-feed.js";
 import { useNotificationLive } from "../live.js";
+import { useRelays } from "../relays.js";
 import { useSensitiveMode, type SensitiveMode } from "../sensitive.js";
 import { openProfileEditor } from "../profile-edit.js";
 import { useTheme, type Theme } from "../theme.js";
@@ -32,6 +33,7 @@ export function NotificationsView(props: {
   onSelect: (event: NostrEvent) => void;
 }) {
   const { pubkey } = useAuth();
+  const relays = useRelays();
   const { buffered } = useNotificationLive();
   const feed = useNotifications();
 
@@ -40,6 +42,11 @@ export function NotificationsView(props: {
     ensureNotifications(pubkey());
   });
   createEffect(() => {
+    // The relay set is read too. A relay change resets the store, and without
+    // this the reset would empty the list with nothing left to refill it: the
+    // reader would be told they have no notifications until they navigated away
+    // and back.
+    relays.relayVersion();
     ensureNotifications(pubkey());
   });
 

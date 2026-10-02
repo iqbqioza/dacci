@@ -10,6 +10,8 @@ import type { UploadServer } from "./servers.js";
 /** Why an upload did not finish, so the form can say which it was. */
 export type UploadFailure =
   | "no-signer"
+  /** The reader dismissed the signature prompt, so nothing was signed. */
+  | "cancelled"
   | "network"
   | "too-large"
   | "unsupported-type"
@@ -54,8 +56,28 @@ interface ServerInfo {
  * BUD-02 server, so a host that serves none is not an error; only a document
  * that exists and cannot be used is.
  */
-async function serverInfo(server: string, seen: Set<string> = new Set()): Promise<ServerInfo> {
-  const wellKnown = `${server}/.well-known/nostr/nip96.json`;
+/**
+ * A document's own address, or the same address resolved against the server
+ * that served the document. Only a relative path is rewritten: an address the
+ * server wrote in full is used exactly as written, because normalising it would
+ * append a slash to a bare origin and turn a working `download_url` into a
+ * different one.
+ *
+ * Resolving a relative path here is what keeps the bytes — and the
+ * `Authorization` header that authorises them — going to the server the reader
+ * picked. Left relative, `fetch` would resolve it against the app's own origin
+ * and post the reader's file to whoever hosts this page.
+ */
+function absoluteOrResolved(address: string, server: string): string {
+  if (/^[a-z][a-z0-9+.-]*:/i.test(address)) return address;
+  try {
+    return new URL(address, `${server}/`).toString();
+  } catch {
+    return address;
+  }
+}
+
+async function serverInfo(server: string, seen: Set<string> = new Set()): Promise<ServerInfo> {  const wellKnown = `${server}/.well-known/nostr/nip96.json`;
   let record: {
     api_url?: unknown;
     download_url?: unknown;
@@ -66,6 +88,10 @@ async function serverInfo(server: string, seen: Set<string> = new Set()): Promis
   try {
     const response = await fetch(wellKnown, {
       headers: { Accept: "application/json" },
+      // The deadline covers the document as well as the upload. A host that
+      // completes the handshake and then says nothing would otherwise leave the
+      // reader watching a spinner with no way forward and no error.
+      signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     if (response.ok && servesItself(response.url, server)) {
       const body: unknown = await response.json();
@@ -78,13 +104,19 @@ async function serverInfo(server: string, seen: Set<string> = new Set()): Promis
   }
   const api = record.api_url;
   if (typeof api === "string" && api !== "") {
+    // A document may give the endpoint as a path on itself. Resolving it against
+    // the server is what keeps the bytes — and the Authorization header that
+    // authorises them — going to the server the reader picked. Left relative,
+    // `fetch` would resolve it against the app's own origin and post the
+    // reader's file to whoever hosts this page.
+    const endpoint = absoluteOrResolved(api, server);
     return {
-      endpoint: api,
+      endpoint,
       method: "POST",
       downloadUrl:
         typeof record.download_url === "string" && record.download_url !== ""
-          ? record.download_url
-          : api,
+          ? absoluteOrResolved(record.download_url, server)
+          : endpoint,
       // NIP-96 marks the upload AUTH required. A plan may also accept an
       // unsigned one (`is_nip98_required: false`), but signing still works
       // there, so a signature is sent either way.
@@ -150,45 +182,54 @@ export function acceptsType(contentTypes: string[] | null, type: string): boolea
   });
 }
 
-/** The signed header a request needs, or null when no signer is available. */
+/** The signed header a request needs, null when no signer is available, and
+ * `"cancelled"` when the reader dismissed the signature prompt. */
 async function authorization(
   info: ServerInfo,
   endpoint: string,
   digest: Uint8Array,
-): Promise<string | null> {
+): Promise<string | null | "cancelled"> {
   const signer = getSigner();
   if (signer === null) return null;
   const pubkey = useAuth().pubkey();
   if (pubkey === null) return null;
   const sign = (template: Parameters<typeof signer.signEvent>[0]) =>
     signer.signEvent(template);
-  if (info.method === "PUT") {
-    // BUD-11 validates its own event shape, so a NIP-98 header is refused.
-    // The token names the action and the blob, both of which the server
-    // checks against the request it received. A host that also serves NIP-96
-    // is signed for whichever endpoint the file is actually posted to, since
-    // the method decides which of the two dialects is in play.
-    const host = new URL(endpoint).host;
-    const auth = await signBlossomAuth({
-      verb: "upload",
+  // Signing refuses as a matter of course: a NIP-07 extension asks the reader
+  // to confirm and throws when the dialog is dismissed. Left uncaught that
+  // rejection would escape the upload with nothing said about it, and the
+  // reader would only see the spinner stop.
+  try {
+    if (info.method === "PUT") {
+      // BUD-11 validates its own event shape, so a NIP-98 header is refused.
+      // The token names the action and the blob, both of which the server
+      // checks against the request it received. A host that also serves NIP-96
+      // is signed for whichever endpoint the file is actually posted to, since
+      // the method decides which of the two dialects is in play.
+      const host = new URL(endpoint).host;
+      const auth = await signBlossomAuth({
+        verb: "upload",
+        pubkey,
+        hashHex: bytesToHex(digest),
+        server: host,
+        content: "Upload Blob",
+        signEvent: sign,
+      });
+      return auth.header;
+    }
+    // NIP-98 binds the header to the request; the payload is the hash of the
+    // file, so a server can tell whether it stored the bytes meant for it.
+    const auth = await signHttpAuth({
+      method: "POST",
+      url: endpoint,
       pubkey,
-      hashHex: bytesToHex(digest),
-      server: host,
-      content: "Upload Blob",
+      payload: digest,
       signEvent: sign,
     });
     return auth.header;
+  } catch {
+    return "cancelled";
   }
-  // NIP-98 binds the header to the request; the payload is the hash of the
-  // file, so a server can tell whether it stored the bytes meant for it.
-  const auth = await signHttpAuth({
-    method: "POST",
-    url: endpoint,
-    pubkey,
-    payload: digest,
-    signEvent: sign,
-  });
-  return auth.header;
 }
 
 /** The file address from a BUD-02 blob descriptor, or null. */
@@ -278,6 +319,7 @@ export async function uploadFile(
   }
 
   const auth = await authorization(info, info.endpoint, digest);
+  if (auth === "cancelled") return { failure: "cancelled" };
   // A server that wants a signature cannot be used without one, and saying so
   // is more useful than a bare rejection the reader cannot act on.
   if (auth === null) return { failure: "no-signer" };
@@ -379,6 +421,8 @@ export function uploadFailureText(failure: UploadFailure): string {
   switch (failure) {
     case "no-signer":
       return "アップロードにはログインが必要です (Settings)";
+    case "cancelled":
+      return "署名をキャンセルしました";
     case "network":
       return "サーバーに接続できませんでした";
     case "too-large":

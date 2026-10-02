@@ -6,7 +6,7 @@ import {
   urlSpans,
 } from "dacci-nostr-nips";
 import { profileLabel } from "dacci-nostr-profile";
-import { createEffect, createMemo, For, Show } from "solid-js";
+import { createEffect, createMemo, For, Index, Show } from "solid-js";
 import { shortNpub } from "../nostr.js";
 import { requestProfiles, useProfile } from "../profile.js";
 import { navigate, profileHash } from "../router.js";
@@ -74,6 +74,13 @@ type Piece =
   | { kind: "link"; url: string }
   | { kind: "emoji"; emoji: Emoji };
 
+/** Appends a run of text with the author's shortcodes drawn, as pieces. */
+function addEmoji(out: Piece[], text: string, emojis: Emoji[]): void {
+  for (const part of emojify(text, emojis)) {
+    out.push(part);
+  }
+}
+
 /**
  * A run of text with the author's custom emoji and the addresses in it drawn as
  * they are meant to be read.
@@ -95,30 +102,17 @@ export function TextRun(props: { text: string; emojis?: Emoji[] }) {
   // a space, so a link never ends up glued to the word before it. Emoji are cut
   // out first: a shortcode is not an address and an address is not an emoji.
   const pieces = createMemo<Piece[]>(() => {
-    const parts: Emojified[] = emojify(props.text, emojis());
     const out: Piece[] = [];
-    for (const part of parts) {
-      if (part.kind === "emoji") {
-        out.push(part);
-        continue;
-      }
-      const found: UrlSpan[] = urlSpans(part.text);
-      if (found.length === 0) {
-        out.push({ kind: "text", text: part.text });
-        continue;
-      }
-      let cursor = 0;
-      for (const span of found) {
-        if (span.start > cursor) {
-          out.push({ kind: "text", text: part.text.slice(cursor, span.start) });
-        }
-        out.push({ kind: "link", url: span.url });
-        cursor = span.end;
-      }
-      if (cursor < part.text.length) {
-        out.push({ kind: "text", text: part.text.slice(cursor) });
-      }
+    for (const chunk of urlSpans(props.text)) {
+      // The address is cut out first and the shortcodes are looked for only in
+      // what surrounds it. Doing it the other way round would let an author's
+      // own `:shortcode:` inside a query string split the address in half, and
+      // the link would go somewhere the reader never wrote.
+      addEmoji(out, props.text.slice(0, chunk.start), emojis());
+      out.push({ kind: "link", url: chunk.url });
+      addEmoji(out, props.text.slice(chunk.end), emojis());
     }
+    if (out.length === 0) addEmoji(out, props.text, emojis());
     return out;
   });
 
@@ -202,9 +196,11 @@ export function RichText(props: {
 
   return (
     <Show when={segments().length > 0}>
-      <For each={segments()}>
-        {(segment) => renderSegment(segment, props.emojis)}
-      </For>
+      {/* Keyed by position, so a name arriving redraws the one mention that
+          gained it instead of rebuilding the whole run around it. */}
+      <Index each={segments()}>
+        {(segment) => renderSegment(segment(), props.emojis)}
+      </Index>
     </Show>
   );
 }

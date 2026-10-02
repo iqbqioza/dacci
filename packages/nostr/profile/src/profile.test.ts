@@ -153,7 +153,10 @@ describe("ProfileStore", () => {
     let attempt = 0;
     const query = vi.fn(async () => {
       attempt += 1;
-      return attempt === 1 ? [] : [metaEvent(A, JSON.stringify({ name: "late" }))];
+      // A lookup that did not answer throws. An empty array would mean the
+      // author has no profile, which is an answer and is not retried.
+      if (attempt === 1) throw new Error("no relay answered");
+      return [metaEvent(A, JSON.stringify({ name: "late" }))];
     });
     const store = new ProfileStore(query, {
       flushDelayMs: 1,
@@ -162,10 +165,53 @@ describe("ProfileStore", () => {
     });
     store.request([A]);
     await tick(20);
-    // First attempt failed: unresolved, but queued for a retry.
+    // First attempt went unanswered: unknown, not resolved, queued for a retry.
     expect(store.peek(A)).toBeNull();
+    expect(store.resolved(A)).toBe(false);
     await tick(120);
     expect(store.peek(A)?.name).toBe("late");
+    store.clear();
+  });
+
+  it("records an author a relay answered about as having no profile", async () => {
+    const query = vi.fn(async () => []);
+    const store = new ProfileStore(query, { flushDelayMs: 1 });
+    store.request([A]);
+    await tick(20);
+    // Asked and answered with nothing is a fact about the author, so it is
+    // resolved: the editor may build on it.
+    expect(store.peek(A)).toBeNull();
+    expect(store.resolved(A)).toBe(true);
+    expect(store.isLoading(A)).toBe(false);
+    store.clear();
+  });
+
+  it("never re-asks an author a relay answered about", async () => {
+    const query = vi.fn(async () => []);
+    const store = new ProfileStore(query, { flushDelayMs: 1 });
+    store.request([A]);
+    await tick(20);
+    store.request([A]);
+    await tick(20);
+    expect(query).toHaveBeenCalledTimes(1);
+    store.clear();
+  });
+
+  it("does not turn a profile it already has into an unanswered one", async () => {
+    // A relay going quiet must never cost a name that is already on screen.
+    let answer = true;
+    const query = vi.fn(async () => {
+      if (!answer) throw new Error("no relay answered");
+      return [metaEvent(A, JSON.stringify({ name: "known" }))];
+    });
+    const store = new ProfileStore(query, { flushDelayMs: 1 });
+    store.request([A]);
+    await tick(20);
+    expect(store.peek(A)?.name).toBe("known");
+    answer = false;
+    store.request([A, B]);
+    await tick(20);
+    expect(store.peek(A)?.name).toBe("known");
     store.clear();
   });
 

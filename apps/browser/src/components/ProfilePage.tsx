@@ -16,6 +16,7 @@ import {
   useProfileFeed,
 } from "../profile-feed.js";
 import { feedHash, navigate, profileHash } from "../router.js";
+import { formatDate } from "../nostr.js";
 import { useProfileLive } from "../live.js";
 import { useProfile } from "../profile.js";
 import { useFollowCount } from "../follows.js";
@@ -48,6 +49,9 @@ export function ProfileHeader(props: { pubkey: string }) {
               class="h-full w-full object-cover"
               loading="lazy"
               decoding="async"
+              // The picture is on someone else's host, which has no business
+              // knowing which profile, or which reader, pulled it.
+              referrerpolicy="no-referrer"
             />
           )}
         </Show>
@@ -113,9 +117,7 @@ export function ProfileHeader(props: { pubkey: string }) {
   );
 }
 
-function formatDate(seconds: number): string {
-  return new Date(seconds * 1000).toLocaleDateString("ja-JP");
-}
+
 
 /**
  * A profile page: the header, the Notes / Replies and notes tabs, and the

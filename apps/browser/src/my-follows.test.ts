@@ -1,8 +1,20 @@
+import type { NostrEvent } from "dacci-nostr-nips";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const ME = "1".repeat(64);
 const ALICE = "2".repeat(64);
 const BOB = "3".repeat(64);
+
+/** A relay answer the test releases when it chooses. */
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let release: (value: T) => void = () => {};
+  const promise = new Promise<T>((resolve) => {
+    release = resolve;
+  });
+  return { promise, resolve: release };
+}
+
+const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
 /** Who the fake vault is signed in as; the tests change this mid-flight. */
 let signedInAs: string | null = ME;
@@ -14,11 +26,11 @@ async function freshStore() {
 }
 
 /** The kind 3 events a relay answers the list query with. */
-function listEvent(tags: string[][], at = 2000): unknown {
+function listEvent(tags: string[][], at = 2000, pubkey = ME): NostrEvent {
   return {
     id: "a".repeat(64),
     kind: 3,
-    pubkey: ME,
+    pubkey,
     created_at: at,
     content: "",
     tags,
@@ -246,6 +258,73 @@ describe("my follows", () => {
     signedInAs = "9".repeat(64);
     store.requestMyFollows();
     expect(store.useFollowState(ALICE).following()).toBeNull();
+  });
+
+  it("throws away a read that settles after the reader changed", async () => {
+    // The list of the reader who signed out must never be written under the
+    // key of the reader who signed in: publishing it would replace that
+    // reader's whole follow list.
+    const first = deferred<NostrEvent[]>();
+    const second = deferred<NostrEvent[]>();
+    const sent: unknown[] = [];
+    let call = 0;
+    vi.doMock("./nostr.js", () => ({
+      getConnection: () => ({
+        query: async () => {
+          call += 1;
+          const events = call === 1 ? await first.promise : await second.promise;
+          return { failed: false, events };
+        },
+        publish: async (event: unknown) => {
+          sent.push(event);
+          return { accepted: true };
+        },
+      }),
+    }));
+    const store = await freshStore();
+    store.requestMyFollows();
+    await tick();
+    // The reader signs out and someone else signs in while the read is out.
+    signedInAs = "9".repeat(64);
+    store.requestMyFollows();
+    await tick();
+    // The new reader's list answers first, then the old reader's does.
+    second.resolve([listEvent([["p", BOB]], 2000, "9".repeat(64))]);
+    await settled();
+    first.resolve([listEvent([["p", ALICE]], 2000, ME)]);
+    await settled();
+    expect(store.useFollowState(ALICE).following()).toBe(false);
+    expect(store.useFollowState(BOB).following()).toBe(true);
+    // And nothing of the first reader's list can be published.
+    await store.useFollowState(ALICE).toggle();
+    expect(sent[0]).toMatchObject({ tags: [["p", BOB], ["p", ALICE]] });
+  });
+
+  it("reads the new reader's list even when the old read is still out", async () => {
+    // The old read must not leave `pending` set, or the new reader's own read
+    // is never asked for and the button waits for nothing.
+    const first = deferred<NostrEvent[]>();
+    let call = 0;
+    vi.doMock("./nostr.js", () => ({
+      getConnection: () => ({
+        query: async () => {
+          call += 1;
+          return call === 1
+            ? { failed: false, events: await first.promise }
+            : { failed: false, events: [] };
+        },
+      }),
+    }));
+    const store = await freshStore();
+    store.requestMyFollows();
+    await tick();
+    signedInAs = "9".repeat(64);
+    store.requestMyFollows();
+    await settled();
+    expect(call).toBe(2);
+    expect(store.useFollowState(ALICE).following()).toBe(false);
+    first.resolve([]);
+    await settled();
   });
 
   it("forgets the list on a reset, so it is read again", async () => {

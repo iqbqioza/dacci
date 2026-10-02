@@ -42,7 +42,7 @@ import { noticeMessage } from "./notice.js";
 import { resetHomeFeed } from "./home-feed.js";
 import { resetFollowCounts } from "./follows.js";
 import { requestMyFollows, resetMyFollows } from "./my-follows.js";
-import { syncDeleted, isDeleted } from "./deleted.js";
+import { resetDeleted, syncDeleted, isDeleted } from "./deleted.js";
 import { requestMyMutes, resetMyMutes } from "./muted.js";
 import { startLiveFeeds, watchProfileSubject } from "./live.js";
 import { adoptMyActivity, syncMyActivity } from "./my-actions.js";
@@ -114,6 +114,8 @@ export function App() {
   };
   let stopLiveFeeds: () => void = () => {};
   let liveKey = "";
+/** The compose dialog's own textarea, so focus can be placed inside it. */
+let composeInput: HTMLTextAreaElement | undefined;
   /** Whose server list is loaded, so it is read again only on a change. */
   let serversIdentity = "";
 
@@ -160,6 +162,25 @@ export function App() {
     });
   });
 
+  // Escape is the way out of anything that asks, and every other dialog in the
+  // app offers it. This one did not, which left a keyboard with no way out but
+  // hunting for the close button. Focus also has to come inside: without it the
+  // first Tab press carries on from the button behind the scrim, into the feed
+  // the dialog is covering.
+  createEffect(() => {
+    if (!composeOpen()) return;
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") closeCompose();
+    };
+    document.addEventListener("keydown", onKey);
+    // The dialog is not in the DOM until this effect runs, so the caret waits
+    // for the next tick before it is placed inside it.
+    queueMicrotask(() => {
+      composeInput?.focus();
+    });
+    onCleanup(() => document.removeEventListener("keydown", onKey));
+  });
+
   // The profile page follows whoever it is showing, live. Leaving the page
   // only stops the stream: the loaded posts stay for the next visit.
   createEffect(() => {
@@ -201,6 +222,9 @@ export function App() {
       // truth for what this key has already done.
       const self = pubkey();
       adoptMyActivity(self);
+      // The deleted set belongs to whoever is reading now, so a new reader
+      // starts from an empty one instead of inheriting the last one's.
+      resetDeleted();
       if (self !== null) {
         void syncMyActivity();
         // The reader's own deletions decide what a feed does not show, so they
@@ -322,8 +346,17 @@ export function App() {
         {/* Above every pinned bar. A scroll-pinned row is a stacking context
             of its own, so a scrim without a z-index of its own paints under
             them and leaves the page behind it clickable while it is open. */}
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-(--scrim)">
-          <div class="w-full max-w-md rounded-2xl bg-(--surface) p-4">
+        <div
+          class="fixed inset-0 z-50 flex items-center justify-center bg-(--scrim)"
+          onClick={closeCompose}
+        >
+          <div
+            class="w-full max-w-md rounded-2xl bg-(--surface) p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-label={COMPOSE_TITLES[composeMode()]}
+            onClick={(e) => e.stopPropagation()}
+          >
             <h2 class="font-bold">{COMPOSE_TITLES[composeMode()]}</h2>
             <Show when={composeTarget()}>
               {(event) => (
@@ -339,6 +372,9 @@ export function App() {
               )}
             </Show>
             <textarea
+              ref={(el) => {
+                composeInput = el;
+              }}
               class="mt-2 h-32 w-full rounded-2xl border border-(--line-strong) p-2"
               value={draft()}
               onInput={(e) => setDraft(e.currentTarget.value)}

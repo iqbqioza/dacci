@@ -59,13 +59,18 @@ export function createHomeTimeline(
 
 /**
  * Everything addressed to one pubkey: mentions and replies (kind 1, NIP-27
- * `#p` tag), reposts (kind 6, NIP-18 `p` tag) and reactions (kind 7, NIP-25
- * `p` tag).
+ * `#p` tag), long-form replies (kind 1111, NIP-22, which carry the same `p`
+ * tag for the person being replied to), reposts (kind 6, NIP-18 `p` tag) and
+ * reactions (kind 7, NIP-25 `p` tag).
+ *
+ * 1111 is here because an answer under the reader's own reply is addressed to
+ * them as much as an answer under a post is, and leaving it out would make that
+ * the one notification they never see.
  *
  * Limitation: a repost that omits the `p` tag is not addressable and cannot
  * be discovered by any filter, so it is out of reach by protocol design.
  */
-export const NOTIFICATION_KINDS = [1, 6, 7];
+export const NOTIFICATION_KINDS = [1, 6, 7, 1111];
 
 /**
  * Client-side guard: relays only answer what they indexed, so the merged
@@ -106,6 +111,26 @@ export function shortNpub(pubkey: string): string {
   return `${npub.slice(0, 11)}…${npub.slice(-4)}`;
 }
 
+/**
+ * Shown instead of a time that cannot be a time.
+ *
+ * NIP-01 puts no upper bound on `created_at` and a relay will serve whatever it
+ * was sent, so a post can arrive dated beyond the year 275,760 — past what a
+ * JavaScript `Date` can hold at all. `toLocaleString` answers that with the
+ * literal string "Invalid Date", which is not a time and not an explanation, so
+ * it is caught here instead.
+ */
+export const UNKNOWN_TIME = "—";
+
 export function formatTime(createdAt: number): string {
-  return new Date(createdAt * 1000).toLocaleString("ja-JP");
+  const date = new Date(createdAt * 1000);
+  if (!Number.isFinite(date.getTime())) return UNKNOWN_TIME;
+  return date.toLocaleString("ja-JP");
+}
+
+/** The same guard for a registration date, which comes off a profile. */
+export function formatDate(seconds: number): string {
+  const date = new Date(seconds * 1000);
+  if (!Number.isFinite(date.getTime())) return UNKNOWN_TIME;
+  return date.toLocaleDateString("ja-JP");
 }

@@ -133,12 +133,23 @@ function spaceBefore(before: string): string {
   return /[^\s]$/.test(before) ? " " : "";
 }
 
-/** A space after the name, unless it ends the text or a line. */
+/**
+ * A space after the name, unless it ends the text or a line — or unless what
+ * follows is punctuation, which belongs to the word before it. `Alice , ok` is
+ * not what anyone wrote, so the same rule the address reader uses to leave the
+ * trailing full stop out of a link is used here.
+ */
 function needsSpaceAfter(text: string, from: number): boolean {
   const rest = text.slice(from);
   if (rest === "") return false;
-  return /^[^\s]/.test(rest);
+  return /^[^\s]/.test(rest) && !PUNCTUATION.test(rest);
 }
+
+/**
+ * Punctuation that binds to the word before it. ASCII punctuation as the address
+ * reader has it, and the CJK forms that take no space in Japanese at all.
+ */
+const PUNCTUATION = /^[,.;:!?)\]}»”’、。、．：；！？）】』」〉》]/;
 
 /** The profiles a post names, so a client can ask for their metadata. */
 export function mentionedProfiles(

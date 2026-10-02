@@ -1,5 +1,10 @@
 import type { UnsignedEvent } from "./auth.js";
-import { isHex64, isValidEventStructure, type NostrEvent } from "./event.js";
+import {
+  hasValidId,
+  isHex64,
+  isValidEventStructure,
+  type NostrEvent,
+} from "./event.js";
 
 /**
  * Builders for the four post actions. Tag layouts follow the NIPs exactly,
@@ -49,22 +54,41 @@ export interface ReplyInput {
 }
 
 /**
- * NIP-10 reply to one post. When the target is a reply, the root is marked
- * as `root` and the target as `reply`; otherwise the target carries both
- * markers, which is what a top-level thread expects.
+ * NIP-10 reply to one post.
+ *
+ * NIP-10's marked form is `["e", <event-id>, <relay-url>, <marker>, <pubkey>]`:
+ * the marker is the **fourth** entry and the pubkey the fifth. Writing them the
+ * other way round produces a reply that no current client can read — everyone
+ * looks for the marker at index 3 and finds a pubkey there — so the reader would
+ * treat the post as a fresh top-level note and drop the real thread root.
+ *
+ * When the target is a reply, the root is marked `root` and the target `reply`.
+ * A reply to the root itself carries a **single** `root` tag, which is what
+ * NIP-10 asks for and what marks it as a direct answer to that post.
+ *
+ * The target's own `p` tags come along, because NIP-10 says a reply's `p` tags
+ * hold everyone already involved in the thread. Without them the people above
+ * the reader in a conversation are not notified of it.
  */
 export function buildReply(input: ReplyInput): UnsignedEvent {
   const { pubkey, target, root, text, createdAt } = input;
   const tags: string[][] = [];
   if (root !== undefined && root !== null && root.id !== target.id) {
-    tags.push(["e", root.id, "", root.pubkey, "root"]);
-    tags.push(["e", target.id, "", target.pubkey, "reply"]);
+    tags.push(["e", root.id, "", "root", root.pubkey]);
+    tags.push(["e", target.id, "", "reply", target.pubkey]);
     tags.push(["p", root.pubkey]);
     tags.push(["p", target.pubkey]);
   } else {
-    tags.push(["e", target.id, "", target.pubkey, "root"]);
-    tags.push(["e", target.id, "", target.pubkey, "reply"]);
+    // A direct reply to the root: one marked tag, naming it as both the thread
+    // it belongs to and the post being answered.
+    tags.push(["e", target.id, "", "root", target.pubkey]);
     tags.push(["p", target.pubkey]);
+  }
+  // Everyone already in the thread, deduplicated against the tags above.
+  for (const tagged of target.tags) {
+    if (tagged[0] !== "p" || tagged[1] === undefined) continue;
+    if (tags.some((tag) => tag[0] === "p" && tag[1] === tagged[1])) continue;
+    tags.push(["p", tagged[1]]);
   }
   const a = addressTag(target);
   if (a !== null) tags.push(a);
@@ -182,6 +206,15 @@ export function embeddedEventId(event: NostrEvent): string | null {
  * which lets a client render the embed without a query. Returns the embedded
  * event only when it is structurally a valid event.
  */
+/**
+ * The note a NIP-18 repost carries in its own content.
+ *
+ * The id is checked as well as the shape. This object never crossed a socket, so
+ * nothing has vouched for it, and a repost's content is attacker-chosen text: an
+ * inline note claiming someone else's id would be drawn as that person's post,
+ * with words the attacker wrote, inside a card the reader trusts. Checking the
+ * id is what ties the note to the fields it claims to have.
+ */
 export function embeddedNote(event: NostrEvent): NostrEvent | null {
   if (event.content.length === 0) return null;
   let parsed: unknown;
@@ -190,17 +223,23 @@ export function embeddedNote(event: NostrEvent): NostrEvent | null {
   } catch {
     return null;
   }
-  return isValidEventStructure(parsed) ? parsed : null;
+  return isValidEventStructure(parsed) && hasValidId(parsed) ? parsed : null;
 }
 
 /**
- * A NIP-22 comment, which is either the dedicated kind or, from clients
- * that predate it, a kind 1 post carrying the uppercase `I` tag.
+ * A NIP-22 comment, which is either the dedicated kind or, from clients that
+ * predate it, a kind 1 post carrying the uppercase `I` tag.
+ *
+ * Only the uppercase `I` marks a comment. In NIP-22 the uppercase tags (`K`,
+ * `E`, `A`, `I`) are the root scope and the lowercase ones (`k`, `e`, `a`, `i`)
+ * are the parent item, and a lowercase `i` is a NIP-73 external identifier — a
+ * live tag any post may carry, such as `["i", "podcast:item:guid:…"]`. Treating
+ * it as the comment marker would label an ordinary post a comment and drop it
+ * from the Notes tab.
  */
 export function isComment(event: NostrEvent): boolean {
   return (
-    event.kind === COMMENT_KIND ||
-    event.tags.some((tag) => tag[0] === "I" || tag[0] === "i")
+    event.kind === COMMENT_KIND || event.tags.some((tag) => tag[0] === "I")
   );
 }
 

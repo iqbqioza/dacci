@@ -1,4 +1,5 @@
 import type { NostrEvent } from "dacci-nostr-nips";
+import { compareEvents } from "dacci-nostr-nips";
 import { createSignal } from "solid-js";
 import { rememberEvents } from "./event-cache.js";
 import { postsForTab, type FeedTab } from "./feed-tabs.js";
@@ -120,7 +121,22 @@ export async function loadMoreHome(): Promise<void> {
     if (gen !== generation) return;
     // Keep a cache so event deep links survive reloads.
     rememberEvents(page.events);
-    setAll((prev) => [...prev, ...page.events]);
+    // Deduped and re-sorted, like the profile and notification feeds. This list
+    // has two writers — the paginator and the live arrivals — and they do not
+    // know about each other, so an event both of them hold would otherwise be
+    // drawn twice. A page can also begin with a post newer than the last one of
+    // the page before it, when a relay that was behind catches up, and appending
+    // it as it comes would put a newer post under an older one.
+    setAll((prev) => {
+      const seen = new Set<string>();
+      return [...prev, ...page.events]
+        .filter((event) => {
+          if (seen.has(event.id)) return false;
+          seen.add(event.id);
+          return true;
+        })
+        .sort(compareEvents);
+    });
     setCoverage(page.coverage);
     setAuthRelays(page.authRequiredRelays);
     setPendingRelays(page.pendingRelays);

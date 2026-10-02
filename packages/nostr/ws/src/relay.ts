@@ -1,7 +1,9 @@
 import {
+  hasValidId,
   isAuthRequiredMessage,
   isRelayMessage,
   isValidEventStructure,
+  matchesFilter,
   type Filter,
   type NostrEvent,
 } from "dacci-nostr-nips";
@@ -356,9 +358,25 @@ export class RelayConnection {
     if (msg[0] === "EVENT" && typeof msg[1] === "string") {
       const sub = this.pendingSubs.get(msg[1]);
       const live = this.liveSubs.get(msg[1]);
-      if (sub && isValidEventStructure(msg[2])) {
+      // Shape, then identity. The id is the sha256 of the event's own fields,
+      // so checking it is what makes an id mean anything: without it a relay can
+      // serve rewritten content under someone else's id, and every list, deep
+      // link and dedupe keyed on that id would be describing a different event.
+      // It costs one hash per event and it is the only place every inbound event
+      // passes through.
+      if (sub && isValidEventStructure(msg[2]) && hasValidId(msg[2] as NostrEvent)) {
         sub.events.push(msg[2] as NostrEvent);
-      } else if (live && isValidEventStructure(msg[2])) {
+      } else if (
+        live &&
+        isValidEventStructure(msg[2]) &&
+        hasValidId(msg[2] as NostrEvent) &&
+        // And what it has to do with this subscription. A relay can push any
+        // event it likes on an open id, and the buffers below take whatever
+        // arrives: a kind 4 DM would be delivered to a feed that asked for
+        // notes, and a single event dated far in the future would sit at the top
+        // of the reader's list permanently.
+        matchesFilter(msg[2] as NostrEvent, live.filter)
+      ) {
         live.onEvent(msg[2] as NostrEvent);
       }
     } else if (msg[0] === "EOSE" && typeof msg[1] === "string") {

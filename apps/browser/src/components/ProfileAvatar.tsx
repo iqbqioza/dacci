@@ -67,6 +67,9 @@ export function ProfileAvatar(props: {
             class="h-full w-full object-cover"
             loading="lazy"
             decoding="async"
+            // The picture is on someone else's host, which has no business
+            // knowing which post, or which reader, pulled it.
+            referrerpolicy="no-referrer"
             onError={() => setBroken(true)}
           />
         )}

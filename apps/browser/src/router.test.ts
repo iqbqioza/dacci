@@ -61,6 +61,23 @@ describe("parseHash", () => {
     });
   });
 
+  it("keeps the tab the address bar names, however odd the path", () => {
+    // The timeline reads the URL as the source of truth for the tab. A path
+    // that strips down to a tab but does not match a page must not silently
+    // switch it: the address bar would say `replies` while the list showed
+    // Notes, and a copied link would carry the disagreement onward.
+    expect(parseHash("#/home/replies/replies")).toEqual({
+      name: "menu",
+      menu: "home",
+      replies: true,
+    });
+    expect(parseHash("#/notifications/replies/replies")).toEqual({
+      name: "menu",
+      menu: "notifications",
+      replies: true,
+    });
+  });
+
   it("never reads the suffix as a menu or a pubkey", () => {
     // Without this, #/replies would open a page nobody can navigate back
     // from, and #/profile/replies would look like a broken pubkey.

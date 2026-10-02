@@ -27,7 +27,14 @@ export interface Profile {
 }
 
 export interface ProfileQuery {
-  /** Resolve one batch. Returns whatever the relays could provide. */
+  /**
+   * Resolve one batch, and **throw when not one relay answered**.
+   *
+   * An empty array therefore means "asked, and there is nothing", which is the
+   * only answer that lets the store record an author as having no profile. A
+   * thrown error means the question is still open, and the store must not
+   * answer it with a guess.
+   */
   (authors: string[]): Promise<NostrEvent[]>;
 }
 
@@ -43,8 +50,18 @@ export interface ProfileStoreOptions {
   onChange?: () => void;
 }
 
+/**
+ * What the store knows about one author.
+ *
+ * `absent` and `failed` are different answers and must not be merged. "Asked
+ * and there is no profile" is a fact about the author; "the lookup never came
+ * back" is an absence of information, and anything that writes has to be able
+ * to tell them apart. Treating the second as the first turns a failed read into
+ * an empty profile, and publishing that empties the reader's real one.
+ */
 type Entry =
   | { status: "loaded"; profile: Profile }
+  | { status: "absent" }
   | { status: "loading" }
   | { status: "failed"; attempts: number; retryAt: number };
 
@@ -150,17 +167,18 @@ export class ProfileStore {
   }
 
   /**
-   * Whether an author's profile has been settled: found, or asked for and not
-   * found.
+   * Whether an author's profile is known: found, or asked for and found not to
+   * exist.
    *
    * This is the difference between "this person has no profile" and "this
    * person's profile has not arrived yet", and the two must not be confused by
-   * anything that writes: publishing a profile built from a lookup that never
-   * answered would replace a real profile with an empty one.
+   * anything that writes: publishing a profile built on a lookup that never
+   * answered would replace a real profile with an empty one. A failed lookup is
+   * therefore **not** resolved.
    */
   resolved(pubkey: string): boolean {
-    const entry = this.entries.get(pubkey);
-    return entry !== undefined && entry.status !== "loading";
+    const status = this.entries.get(pubkey)?.status;
+    return status === "loaded" || status === "absent";
   }
 
   /**
@@ -212,57 +230,73 @@ export class ProfileStore {
   }
 
   private async resolveBatch(authors: string[]): Promise<void> {
-    let events: NostrEvent[] = [];
+    let events: NostrEvent[] | null = null;
     try {
       events = (await this.query(authors)).filter((event) =>
         isValidEventStructure(event),
       );
     } catch {
-      events = [];
+      // The batch was not answered. Everything in it stays unknown, so the
+      // authors keep their old state and are queued again below.
+      events = null;
     }
 
-    // Replaceable event: the newest metadata per pubkey wins.
-    const newest = new Map<string, NostrEvent>();
-    for (const event of events) {
-      const current = newest.get(event.pubkey);
-      if (
-        current === undefined ||
-        event.created_at > current.created_at ||
-        (event.created_at === current.created_at && event.id < current.id)
-      ) {
-        newest.set(event.pubkey, event);
+    if (events !== null) {
+      // Replaceable event: the newest metadata per pubkey wins.
+      const newest = new Map<string, NostrEvent>();
+      for (const event of events) {
+        const current = newest.get(event.pubkey);
+        if (
+          current === undefined ||
+          event.created_at > current.created_at ||
+          (event.created_at === current.created_at && event.id < current.id)
+        ) {
+          newest.set(event.pubkey, event);
+        }
       }
+
+      for (const pubkey of authors) {
+        const event = newest.get(pubkey);
+        const profile = event === undefined ? null : parseProfile(event);
+        if (profile !== null) {
+          this.entries.set(pubkey, { status: "loaded", profile });
+          continue;
+        }
+        // Asked and answered: this author has no profile. That is an answer,
+        // not a gap, so it is recorded as one and never re-asked.
+        this.entries.set(pubkey, { status: "absent" });
+      }
+      return;
     }
 
     for (const pubkey of authors) {
-      const event = newest.get(pubkey);
-      const profile = event === undefined ? null : parseProfile(event);
-      if (profile !== null) {
-        this.entries.set(pubkey, { status: "loaded", profile });
-        continue;
-      }
       const previous = this.entries.get(pubkey);
-      const attempts =
-        previous !== undefined && previous.status === "failed"
-          ? previous.attempts + 1
-          : 1;
-      if (attempts > this.maxAttempts) {
-        // Give up; request() will not resurrect it on its own.
-        this.entries.set(pubkey, {
-          status: "failed",
-          attempts,
-          retryAt: Number.POSITIVE_INFINITY,
-        });
-        continue;
-      }
-      const delay = Math.min(this.baseRetryMs * 2 ** (attempts - 1), this.maxRetryMs);
+      // A resolved author keeps its answer: a quiet relay must not turn
+      // "this person has no profile" back into a question.
+      if (previous !== undefined && previous.status !== "loading") continue;
+      this.failOnce(pubkey);
+    }
+  }
+
+  /** Records one unanswered attempt for an author and queues the retry. */
+  private failOnce(pubkey: string): void {
+    const previous = this.entries.get(pubkey);
+    const attempts =
+      previous !== undefined && previous.status === "failed"
+        ? previous.attempts + 1
+        : 1;
+    if (attempts > this.maxAttempts) {
+      // Give up; request() will not resurrect it on its own.
       this.entries.set(pubkey, {
         status: "failed",
         attempts,
-        retryAt: Date.now() + delay,
+        retryAt: Number.POSITIVE_INFINITY,
       });
-      this.scheduleRetry(pubkey, delay);
+      return;
     }
+    const delay = Math.min(this.baseRetryMs * 2 ** (attempts - 1), this.maxRetryMs);
+    this.entries.set(pubkey, { status: "failed", attempts, retryAt: Date.now() + delay });
+    this.scheduleRetry(pubkey, delay);
   }
 
   /**

@@ -1,5 +1,30 @@
+import { computeEventId, type NostrEvent } from "dacci-nostr-nips";
 import { describe, expect, it, vi } from "vitest";
 import { RelayConnection, type Socket } from "../src/relay.js";
+
+/**
+ * A relay's event, with the id the NIP-01 hash actually gives it.
+ *
+ * The connection drops anything whose id does not match its own fields, so a
+ * fixture with a made-up id would be testing a rejection rather than the
+ * behaviour it is named after.
+ */
+function relayEvent(fields: {
+  pubkey: string;
+  created_at?: number;
+  kind?: number;
+  tags?: string[][];
+  content?: string;
+}): NostrEvent {
+  const full = {
+    pubkey: fields.pubkey,
+    created_at: fields.created_at ?? 1000,
+    kind: fields.kind ?? 1,
+    tags: fields.tags ?? [],
+    content: fields.content ?? "x",
+  };
+  return { ...full, id: computeEventId(full), sig: "c".repeat(128) };
+}
 
 function makeSocket(): Socket & { peer: (msg: unknown) => void } {
   const socket: Socket & { peer: (msg: unknown) => void } = {
@@ -21,15 +46,7 @@ describe("RelayConnection.query", () => {
     const conn = new RelayConnection("wss://example", () => socket, {
       authGateProbeMs: 0,
     });
-    const event = {
-      id: "a".repeat(64),
-      pubkey: "b".repeat(64),
-      created_at: 1000,
-      kind: 1,
-      tags: [],
-      content: "hi",
-      sig: "c".repeat(128),
-    };
+    const event = relayEvent({ pubkey: "b".repeat(64), created_at: 1000, kind: 1, tags: [], content: "hi" });
     const pending = conn.query({ kinds: [1], limit: 10 });
     await new Promise((r) => setTimeout(r, 0));
     const sent = vi.mocked(socket.send).mock.calls[0][0];
@@ -57,17 +74,116 @@ describe("RelayConnection.query", () => {
     expect(result.eose).toBe(false);
   });
 
+  it("drops an event whose id is not the hash of its own fields", async () => {
+    // An id is the sha256 of the event's fields, so checking it is what makes
+    // an id mean anything. Without the check a relay can serve rewritten words
+    // under someone else's id, and every list, deep link and dedupe keyed on
+    // that id ends up describing a different event than the one that was signed.
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+    });
+    const pending = conn.query({ kinds: [1] });
+    await new Promise((r) => setTimeout(r, 0));
+    const sent = vi.mocked(socket.send).mock.calls[0][0];
+    const subId = JSON.parse(sent)[1] as string;
+
+    const genuine = relayEvent({
+      pubkey: "b".repeat(64),
+      created_at: 1000,
+      content: "what the author wrote",
+    });
+    // Same id, different words: the shape is fine, the identity is not.
+    const tampered = { ...genuine, content: "what the relay chose" };
+    socket.peer(["EVENT", subId, tampered]);
+    socket.peer(["EVENT", subId, genuine]);
+    socket.peer(["EOSE", subId]);
+
+    const result = await pending;
+    expect(result.events.map((e) => e.content)).toEqual([
+      "what the author wrote",
+    ]);
+  });
+
+  it("drops an event whose id is not even hex", async () => {
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+    });
+    const pending = conn.query({ kinds: [1] });
+    await new Promise((r) => setTimeout(r, 0));
+    const sent = vi.mocked(socket.send).mock.calls[0][0];
+    const subId = JSON.parse(sent)[1] as string;
+    socket.peer(["EVENT", subId, { id: "nope" }]);
+    socket.peer(["EOSE", subId]);
+    const result = await pending;
+    expect(result.events).toEqual([]);
+  });
+
+  it("refuses a live event that does not match its id", async () => {
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+    });
+    const seen: string[] = [];
+    conn.subscribe({ kinds: [1] }, (e) => seen.push(e.content));
+    await new Promise((r) => setTimeout(r, 0));
+    const sent = vi.mocked(socket.send).mock.calls[0][0];
+    const subId = JSON.parse(sent)[1] as string;
+    const genuine = relayEvent({ pubkey: "b".repeat(64), created_at: 1000 });
+    socket.peer(["EVENT", subId, { ...genuine, content: "swapped" }]);
+    socket.peer(["EVENT", subId, genuine]);
+    expect(seen).toEqual(["x"]);
+  });
+
+  it("refuses a live event the subscription did not ask for", async () => {
+    // A relay may push anything on an open subscription id. The buffers take
+    // whatever arrives, so a kind 4 direct message delivered to a feed that
+    // asked for notes — or one event dated far in the future, which would sit
+    // at the top of the reader's list for the rest of the session — must not
+    // get through.
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+    });
+    const seen: number[] = [];
+    conn.subscribe({ kinds: [1], "#p": ["9".repeat(64)] }, (e) =>
+      seen.push(e.kind),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    const sent = vi.mocked(socket.send).mock.calls[0][0];
+    const subId = JSON.parse(sent)[1] as string;
+
+    // A perfectly well-formed note, but addressed to someone else.
+    socket.peer([
+      "EVENT",
+      subId,
+      relayEvent({ pubkey: "b".repeat(64), created_at: 1000 }),
+    ]);
+    // And a direct message on a subscription that asked for notes.
+    socket.peer([
+      "EVENT",
+      subId,
+      relayEvent({ pubkey: "b".repeat(64), created_at: 1001, kind: 4 }),
+    ]);
+    expect(seen).toEqual([]);
+
+    // What it did ask for still arrives.
+    socket.peer([
+      "EVENT",
+      subId,
+      relayEvent({
+        pubkey: "b".repeat(64),
+        created_at: 1002,
+        tags: [["p", "9".repeat(64)]],
+      }),
+    ]);
+    expect(seen).toEqual([1]);
+  });
+
   it("answers a NIP-42 challenge and completes on EOSE", async () => {
     const socket = makeSocket();
-    const authEvent = {
-      id: "d".repeat(64),
-      pubkey: "e".repeat(64),
-      created_at: 1000,
-      kind: 22242,
-      tags: [["relay", "wss://example"]],
-      content: "",
-      sig: "f".repeat(128),
-    };
+    const authEvent = relayEvent({ pubkey: "b".repeat(64), created_at: 1000, kind: 22242, tags: [["relay", "wss://example"]], content: "" });
     const conn = new RelayConnection(
       "wss://example",
       () => socket,
@@ -108,16 +224,8 @@ describe("RelayConnection.query", () => {
     const conn = new RelayConnection("wss://example", () => socket, {
       authGateProbeMs: 0,
     });
-    const eventA = {
-      id: "a".repeat(64),
-      pubkey: "b".repeat(64),
-      created_at: 1000,
-      kind: 1,
-      tags: [],
-      content: "a",
-      sig: "c".repeat(128),
-    };
-    const eventB = { ...eventA, id: "d".repeat(64), content: "b" };
+    const eventA = relayEvent({ pubkey: "b".repeat(64), created_at: 1000, kind: 1, tags: [], content: "a" });
+    const eventB = relayEvent({ pubkey: "b".repeat(64), content: "b" });
     const first = conn.query({ kinds: [1] });
     const second = conn.query({ kinds: [1] });
     await new Promise((r) => setTimeout(r, 0));
@@ -143,15 +251,7 @@ describe("RelayConnection.query", () => {
     const conn = new RelayConnection("wss://example", () => socket, {
       authGateProbeMs: 0,
     });
-    const event = {
-      id: "a".repeat(64),
-      pubkey: "b".repeat(64),
-      created_at: 1000,
-      kind: 1,
-      tags: [],
-      content: "hi",
-      sig: "c".repeat(128),
-    };
+    const event = relayEvent({ pubkey: "b".repeat(64), created_at: 1000, kind: 1, tags: [], content: "hi" });
     const pending = conn.publish(event);
     await new Promise((r) => setTimeout(r, 0));
     expect(JSON.parse(vi.mocked(socket.send).mock.calls[0][0])).toEqual([
@@ -183,15 +283,7 @@ describe("RelayConnection.query", () => {
     socket.peer([
       "EVENT",
       subId,
-      {
-        id: "e".repeat(64),
-        pubkey: "b".repeat(64),
-        created_at: 2000,
-        kind: 1,
-        tags: [],
-        content: "live",
-        sig: "f".repeat(128),
-      },
+      relayEvent({ pubkey: "b".repeat(64), created_at: 2000, kind: 1, tags: [], content: "live" }),
     ]);
     expect(received).toEqual(["live"]);
   });
@@ -238,15 +330,7 @@ describe("RelayConnection.query", () => {
     socket.peer([
       "EVENT",
       subId,
-      {
-        id: "d".repeat(64),
-        pubkey: "b".repeat(64),
-        created_at: 1,
-        kind: 1,
-        tags: [],
-        content: "after",
-        sig: "f".repeat(128),
-      },
+      relayEvent({ pubkey: "b".repeat(64), created_at: 1, kind: 1, tags: [], content: "after" }),
     ]);
     expect(received).toEqual([]);
   });
@@ -266,15 +350,7 @@ describe("RelayConnection.query", () => {
     // Nothing answered yet, but the challenge was not lost.
     expect(calls).toHaveLength(1);
 
-    const authEvent = {
-      id: "a".repeat(64),
-      pubkey: "b".repeat(64),
-      created_at: 1,
-      kind: 22242,
-      tags: [["relay", "wss://example"]],
-      content: "",
-      sig: "c".repeat(128),
-    };
+    const authEvent = relayEvent({ pubkey: "b".repeat(64), created_at: 1, kind: 22242, tags: [["relay", "wss://example"]], content: "" });
     conn.setSigner(() => authEvent);
     await new Promise((r) => setTimeout(r, 0));
     const after = vi.mocked(socket.send).mock.calls.map((c) => c[0]);
@@ -289,15 +365,7 @@ describe("RelayConnection.query", () => {
 
   it("never sends a REQ before answering the challenge", async () => {
     const socket = makeSocket();
-    const authEvent = {
-      id: "a".repeat(64),
-      pubkey: "b".repeat(64),
-      created_at: 1,
-      kind: 22242,
-      tags: [],
-      content: "",
-      sig: "c".repeat(128),
-    };
+    const authEvent = relayEvent({ pubkey: "b".repeat(64), created_at: 1, kind: 22242, tags: [], content: "" });
     const conn = new RelayConnection(
       "wss://example",
       () => socket,

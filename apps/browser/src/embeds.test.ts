@@ -1,7 +1,8 @@
 import type { NostrEvent } from "dacci-nostr-nips";
-import { encodeNote } from "dacci-nostr-nips";
+import { computeEventId, encodeNote } from "dacci-nostr-nips";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearEventCache, rememberEvents } from "./event-cache.js";
+import { markDeleted, resetDeleted } from "./deleted.js";
 import { createEmbeds } from "./embeds.js";
 
 const AUTHOR = "a".repeat(64);
@@ -9,6 +10,22 @@ const NOTE_ID = "b".repeat(64);
 const OTHER_ID = "c".repeat(64);
 
 const link = (id: string): string => `nostr:${encodeNote(id)}`;
+
+/**
+ * A note whose id follows from its own fields, which is what a repost carrying
+ * the note inline must have: that content never crossed a socket, so the id is
+ * the only thing tying the object to the note it claims to be.
+ */
+function inlineNote(content: string): NostrEvent {
+  const fields = {
+    pubkey: AUTHOR,
+    created_at: 100,
+    kind: 1,
+    tags: [["t", "nostr"]] as string[][],
+    content,
+  };
+  return { ...fields, id: computeEventId(fields), sig: "s".repeat(128) };
+}
 
 function note(id: string, content: string): NostrEvent {
   return {
@@ -56,15 +73,76 @@ describe("embed wiring", () => {
     });
   });
 
+  it("shows nothing for a note a NIP-09 request has taken away", async () => {
+    // Deleting a post has to take it out of every list, and the embed is a
+    // list: the note travels inside a repost's own content, and a plain link to
+    // a `nostr:note1…` has its text fetched. Otherwise the author deletes their
+    // post and it goes on being drawn inside everything that referenced it.
+    markDeleted([NOTE_ID]);
+    try {
+      const quoted = quoteRepost(NOTE_ID);
+      // The repost carries the note inline, so no query is needed to draw it.
+      const secret = inlineNote("secret");
+      const withBody = { ...quoted, content: JSON.stringify(secret) };
+      const embeds = createEmbeds(async () => [secret], FAST);
+      embeds.requestEmbeds([quoted, withBody]);
+      await tick(20);
+      expect(embeds.useEmbed(quoted).event).toBeNull();
+      expect(embeds.useEmbed(withBody).event).toBeNull();
+      // And a note that merely links to it is not fetched either.
+      const linker = note(OTHER_ID, `look ${link(NOTE_ID)}`);
+      const asked: string[][] = [];
+      const watching = createEmbeds(async (ids) => {
+        asked.push(ids);
+        return [note(NOTE_ID, "secret")];
+      }, FAST);
+      watching.requestEmbeds([linker]);
+      await tick(20);
+      expect(asked).toEqual([]);
+      expect(watching.useEmbed(linker).event).toBeNull();
+    } finally {
+      resetDeleted();
+    }
+  });
+
+  it("shows the note again once it is not deleted", async () => {
+    const embeds = createEmbeds(async () => [note(NOTE_ID, "live")], FAST);
+    markDeleted([NOTE_ID]);
+    const linker = note(OTHER_ID, `look ${link(NOTE_ID)}`);
+    embeds.requestEmbeds([linker]);
+    await tick(20);
+    expect(embeds.useEmbed(linker).event).toBeNull();
+    // A deletion read back from a relay can also un-hide, so the check is read
+    // live rather than baked in at request time. The id was never queued while
+    // it was deleted, so the card asks again on the next render.
+    resetDeleted();
+    embeds.requestEmbeds([linker]);
+    await tick(20);
+    expect(embeds.useEmbed(linker).event?.id).toBe(NOTE_ID);
+  });
+
   it("shows the note inline when the repost carries it as JSON", () => {
     const embeds = createEmbeds(async () => [], FAST);
-    const inner = note(NOTE_ID, "the original");
+    const inner = inlineNote("the original");
     const repost = {
-      ...quoteRepost(NOTE_ID),
+      ...quoteRepost(inner.id),
       content: JSON.stringify(inner),
     };
     // No query is needed: NIP-18 puts the note in the content.
     expect(embeds.useEmbed(repost).event).toEqual(inner);
+  });
+
+  it("shows nothing for an inline note that does not match its id", () => {
+    // The outer repost is signed by whoever wrote it and passes every check,
+    // so the card would otherwise draw a post that looks like the victim's own
+    // and says whatever the attacker typed.
+    const embeds = createEmbeds(async () => [], FAST);
+    const victim = inlineNote("the original");
+    const repost = {
+      ...quoteRepost(victim.id),
+      content: JSON.stringify({ ...victim, content: "TRUST ME" }),
+    };
+    expect(embeds.useEmbed(repost).event).toBeNull();
   });
 
   it("reuses a note the feed already holds instead of querying", async () => {

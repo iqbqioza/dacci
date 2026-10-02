@@ -3,6 +3,7 @@ import { createSignal } from "solid-js";
 import { useAuth } from "./auth.js";
 import { publishEvent } from "./compose.js";
 import { getConnection } from "./nostr.js";
+import { showNotice } from "./notice.js";
 import { useRelays } from "./relays.js";
 
 /**
@@ -95,6 +96,15 @@ const WRITTEN_KEY = "dacci.servers.written";
 // configured. It holds their servers only: the ones the app offers itself are
 // not theirs to configure, and are added to every view of the list.
 const [servers, setServers] = createSignal<UploadServer[]>(read());
+/**
+ * Whether the account's published list has been read at all.
+ *
+ * BUD-03 replaces the whole list on every write, so publishing a list that was
+ * never read would publish whatever happened to be on this device and delete
+ * every server the reader configured elsewhere. A read that no relay answered
+ * leaves this false, which is the only thing that keeps a write off.
+ */
+const [readList, setReadList] = createSignal(false);
 
 function read(): UploadServer[] {
   try {
@@ -180,6 +190,13 @@ export function removeServer(url: string): void {
 export async function publishServers(): Promise<boolean> {
   const pubkey = useAuth().pubkey();
   if (pubkey === null) return false;
+  // The list on this device may be all this device ever saw. Writing it as the
+  // account's list would delete the servers the reader added elsewhere, so a
+  // list that has not been read is not published.
+  if (!readList()) {
+    showNotice("サーバー一覧を読み込んでから保存してください");
+    return false;
+  }
   const created_at = Math.floor(Date.now() / 1000);
   const sent = await publishEvent({
     pubkey,
@@ -243,6 +260,8 @@ async function loadServersInner(): Promise<void> {
   const pubkey = useAuth().pubkey();
   if (pubkey === null) {
     setServers(read());
+    // A signed-out reader has no list to publish, so there is nothing to read.
+    setReadList(true);
     return;
   }
   // Snapshot before the round: a reply that is stale compared with what the
@@ -250,6 +269,10 @@ async function loadServersInner(): Promise<void> {
   const atStart = servers();
   try {
     const list = await fetchServerPreference(pubkey);
+    // Asked and answered: whatever this device holds can be published without
+    // losing a server the reader configured elsewhere. An answer with nothing
+    // in it is still an answer — it says the account has published no list.
+    setReadList(true);
     // Nothing published leaves the reader with what they had.
     if (list.servers.length === 0) return;
     // A relay can still be answering with a list older than the edit the
@@ -288,16 +311,32 @@ function sameServers(a: UploadServer[], b: UploadServer[]): boolean {
  * One round across every read relay, with the answers merged. Relays
  * disagree about which kinds they store, so a single relay answering
  * nothing must not decide the result.
+ *
+ * Throws when not one relay answered, for the same reason the profile store
+ * does: an empty answer has to mean "asked, and there is nothing published",
+ * because that is the only answer that lets the list be replaced. A round where
+ * every relay refused has to stay a question.
  */
 async function oneQuery(filter: Filter): Promise<unknown[]> {
   const urls = useRelays().readRelays();
+  if (urls.length === 0) throw new Error("no relay can be read from");
+  // A relay that refused still settles its promise, so what answered is
+  // counted by what each relay said. Counting settled promises instead would
+  // make a round where every relay failed look like one where every relay
+  // answered, and the list would be published as if it were the whole of it.
+  let answered = 0;
   const settled = await Promise.allSettled(
     urls.map(async (url) => {
       const result = await getConnection(url).query(filter, 4000);
-      return result.failed ? [] : result.events;
+      if (result.failed) return [];
+      answered += 1;
+      return result.events;
     }),
   );
-  return settled.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+  if (answered === 0) throw new Error("no relay answered");
+  return settled.flatMap((r) =>
+    r.status === "fulfilled" ? r.value : ([] as unknown[]),
+  );
 }
 
 /** A read list, with when the event behind it was published. */

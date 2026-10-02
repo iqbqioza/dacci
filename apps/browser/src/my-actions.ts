@@ -1,5 +1,6 @@
 import type { NostrEvent } from "dacci-nostr-nips";
 import {
+  deletedEventIds,
   summarizeMyActivity,
   type MyActivity,
   type MyActivityMap,
@@ -158,8 +159,15 @@ export function adoptMyActivity(next: string | null): void {
 
 /**
  * Asks the relays what this key has already done, so the rows are right after
- * a reload and actions taken in another client are picked up. The relay
- * answer replaces the cache; a silent relay leaves it untouched.
+ * a reload and actions taken in another client are picked up.
+ *
+ * The answer is applied, never used to erase. An action the reader can see is
+ * one they took, and the only things that may take it away are a NIP-09 request
+ * that says so or an answer that genuinely covers everything: every read relay
+ * answering, and the window not full. A single relay answering "nothing" while
+ * the others are still loading says nothing about the rest of the reader's
+ * history, and treating it as the truth would erase every highlight they have
+ * and write the loss to this browser for good.
  */
 export async function syncMyActivity(): Promise<void> {
   const key = pubkey();
@@ -190,10 +198,47 @@ export async function syncMyActivity(): Promise<void> {
     }
   }
   if (answered === 0) return;
-  // The relay answer is the truth, including deletions, so it replaces the
-  // cache. Actions older than the queried window fall out of it, which is
-  // why the local copy is only a first paint.
-  const summary = summarizeMyActivity(events);
-  setActivity(summary);
-  write(key, summary);
+  const fresh = summarizeMyActivity(events);
+  // Every relay answered and the window was not full, so this really is the
+  // whole of what the reader has done lately: deletions and all.
+  if (answered === urls.length && events.length < SYNC_LIMIT) {
+    setActivity(fresh);
+    write(key, fresh);
+    return;
+  }
+  const next = applyOver(activity(), fresh, events);
+  setActivity(next);
+  write(key, next);
+}
+
+/** The three fields that hold an event id, so they can be undone. */
+const ACTION_IDS = ["react", "repost", "quote"] as const;
+
+/**
+ * What the reader had, with what this answer proves applied on top: every
+ * action it reports is added, and every action it shows a NIP-09 request for is
+ * removed. Everything else is left alone, because this answer is not entitled to
+ * say it never happened.
+ */
+function applyOver(
+  current: MyActivityMap,
+  fresh: MyActivityMap,
+  events: NostrEvent[],
+): MyActivityMap {
+  const undone = deletedEventIds(events);
+  const next: MyActivityMap = new Map();
+  for (const [target, entry] of current) {
+    const kept: MyActivity = { ...entry };
+    for (const name of ACTION_IDS) {
+      const id = kept[name];
+      if (id !== undefined && undone.has(id)) delete kept[name];
+    }
+    if (ACTION_IDS.some((name) => kept[name] !== undefined) || kept.replied === true) {
+      next.set(target, kept);
+    }
+  }
+  for (const [target, entry] of fresh) {
+    next.set(target, { ...(next.get(target) ?? {}), ...entry });
+  }
+  return next;
 }

@@ -52,18 +52,26 @@ function signed(
 const target = note("a".repeat(64), AUTHOR);
 const root = note("b".repeat(64), ROOT_AUTHOR);
 
+/**
+ * NIP-10's marked form is `["e", <event-id>, <relay-url>, <marker>, <pubkey>]`,
+ * so the marker is read at index 3. Looking for it anywhere else is what let the
+ * writer and the reader disagree about the same tag.
+ */
 function tagValue(
   event: { tags: string[][] },
   name: string,
   marker?: string,
 ): string[] | undefined {
   return event.tags.find(
-    (t) => t[0] === name && (marker === undefined || t[4] === marker),
+    (t) => t[0] === name && (marker === undefined || t[3] === marker),
   );
 }
 
 describe("buildReply", () => {
-  it("marks a top-level target as both root and reply", () => {
+  it("gives a reply to the root a single root tag", () => {
+    // NIP-10: "A direct reply to the root of a thread should have a single
+    // marked 'e' tag of type 'root'." A lone root tag is also what tells a
+    // reader that this post answers the root directly.
     const event = buildReply({
       pubkey: ME,
       text: "こんにちは",
@@ -73,8 +81,36 @@ describe("buildReply", () => {
     expect(event.kind).toBe(1);
     expect(event.content).toBe("こんにちは");
     expect(tagValue(event, "e", "root")?.[1]).toBe(target.id);
-    expect(tagValue(event, "e", "reply")?.[1]).toBe(target.id);
+    expect(tagValue(event, "e", "reply")).toBeUndefined();
+    const marked = event.tags.filter((t: string[]) => t[0] === "e");
+    expect(marked).toHaveLength(1);
     expect(tagValue(event, "p")?.[1]).toBe(AUTHOR);
+  });
+
+  it("puts the marker where NIP-10 says to read it", () => {
+    // The whole tag: id, then the relay hint (left empty), then the marker,
+    // then the author. Reading the marker at any other index is what made a
+    // published reply unreadable to every current client.
+    const deep = buildReply({ pubkey: ME, text: "x", target, root, createdAt: AT });
+    const rootTag = deep.tags.find((t) => t[1] === root.id);
+    expect(rootTag).toEqual(["e", root.id, "", "root", ROOT_AUTHOR]);
+    const replyTag = deep.tags.find((t) => t[1] === target.id);
+    expect(replyTag).toEqual(["e", target.id, "", "reply", AUTHOR]);
+  });
+
+  it("carries the people already in the thread along", () => {
+    // NIP-10: the reply's `p` tags hold everyone involved in the thread, so
+    // those above the reader are notified of it too.
+    const deep = note("d".repeat(64), AUTHOR, [["p", "9".repeat(64)]]);
+    const event = buildReply({
+      pubkey: ME,
+      text: "x",
+      target: deep,
+      root,
+      createdAt: AT,
+    });
+    const authors = event.tags.filter((t) => t[0] === "p").map((t) => t[1]);
+    expect(authors).toEqual([ROOT_AUTHOR, AUTHOR, "9".repeat(64)]);
   });
 
   it("keeps the thread root separate when replying to a reply", () => {
@@ -183,9 +219,19 @@ describe("isComment", () => {
     expect(isComment(buildComment(1, [["I", "30023", AUTHOR, "post"]]))).toBe(
       true,
     );
+    // The lowercase `i` is not the same tag. In NIP-22 the lowercase tags are
+    // the parent item and the uppercase ones are the root scope, and a
+    // lowercase `i` is a NIP-73 external identifier any post may carry — a
+    // podcast episode's guid, say. Reading it as the comment marker labels an
+    // ordinary post a comment and drops it from the Notes tab.
     expect(isComment(buildComment(1, [["i", "30023", AUTHOR, "post"]]))).toBe(
-      true,
+      false,
     );
+    expect(
+      isComment(
+        buildComment(1, [["i", "podcast:item:guid:d98e07d4-9f8b-4c1b-9b04-e0d0e4b0a3a1"]]),
+      ),
+    ).toBe(false);
   });
 
   it("leaves ordinary notes and replies alone", () => {
@@ -401,17 +447,38 @@ describe("quote and repost references", () => {
   });
 
   it("unwraps the note a repost embeds in its content", () => {
-    const inner = note(quoted, AUTHOR, [["t", "nostr"]]);
+    // The inline note's id has to follow from its own fields: the content of a
+    // repost is attacker-chosen text that never crossed a socket, so the id is
+    // the only thing tying it to the note it claims to be.
+    const inner = signed(1, AUTHOR, [["t", "nostr"]], AT);
     const repost: NostrEvent = {
       id: "c".repeat(64),
       pubkey: ME,
       created_at: AT,
       kind: 6,
-      tags: [["e", quoted], ["p", AUTHOR]],
+      tags: [["e", inner.id], ["p", AUTHOR]],
       content: JSON.stringify(inner),
       sig: "s".repeat(128),
     };
     expect(embeddedNote(repost)).toEqual(inner);
+  });
+
+  it("refuses an inline note whose id is not the hash of its own fields", () => {
+    // A repost is signed by whoever wrote it, so the outer event passes every
+    // check and still says whatever it likes about the note inside. Without the
+    // id check the feed draws a card that looks like the victim's own post and
+    // contains words the attacker typed.
+    const victim = signed(1, AUTHOR, [], AT);
+    const repost: NostrEvent = {
+      id: "c".repeat(64),
+      pubkey: ME,
+      created_at: AT,
+      kind: 6,
+      tags: [["e", victim.id], ["p", AUTHOR]],
+      content: JSON.stringify({ ...victim, content: "TRUST ME" }),
+      sig: "s".repeat(128),
+    };
+    expect(embeddedNote(repost)).toBeNull();
   });
 
   it("has no embedded note when the content is prose or broken JSON", () => {

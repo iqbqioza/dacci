@@ -259,6 +259,9 @@ function RelayRow(props: { url: string; mode: RelayMode }) {
               class="h-8 w-8 shrink-0 rounded-lg object-cover"
               loading="lazy"
               decoding="async"
+              // The icon is on someone else's host, which has no business
+              // knowing which reader's session pulled it.
+              referrerpolicy="no-referrer"
               onError={() => setIconBroken(true)}
             />
           )}

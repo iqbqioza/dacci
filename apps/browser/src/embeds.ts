@@ -3,6 +3,7 @@ import { embeddedEventIdWithText, embeddedNote } from "dacci-nostr-nips";
 import { EmbedStore } from "dacci-nostr-quotes";
 import { createSignal } from "solid-js";
 import { lookupEvent } from "./event-cache.js";
+import { isDeleted } from "./deleted.js";
 import { getConnection } from "./nostr.js";
 import { useRelays } from "./relays.js";
 
@@ -45,20 +46,24 @@ export function createEmbeds(
   });
 
   /**
-   * The note a post embeds: the repost's own JSON content when it carries
-   * one, otherwise the resolved note from the store. Null when the post
-   * embeds nothing, which keeps the card free of a placeholder.
+   * The note a post embeds, or null when there is nothing to show — including
+   * when the note has been deleted.
+   *
+   * A NIP-09 request takes a post away from every list the app draws, and the
+   * embed is a list too: a repost carries the note inline in its own content,
+   * and any post that merely links to a `nostr:note1…` has the note's full text
+   * fetched for it. Without this check the author deletes their post and its
+   * text goes on being drawn inside everything that referenced it.
    */
   const useEmbed = (
     event: NostrEvent,
   ): { event: NostrEvent | null; loading: boolean } => {
     version();
     const id = embeddedEventIdWithText(event);
-    if (id === null) return { event: null, loading: false };
+    if (id === null || isDeleted(id)) return { event: null, loading: false };
     // NIP-18 lets a repost carry the note inline; that needs no query.
     const inline = embeddedNote(event);
-    if (inline !== null && inline.id === id)
-      return { event: inline, loading: false };
+    if (inline !== null && inline.id === id) return { event: inline, loading: false };
     return { event: store.peek(id), loading: store.isLoading(id) };
   };
 
@@ -71,7 +76,9 @@ export function createEmbeds(
     const ids: string[] = [];
     for (const event of events) {
       const id = embeddedEventIdWithText(event);
-      if (id === null) continue;
+      // Nothing to ask a relay for: a note a NIP-09 request has taken away is
+      // not shown, so fetching it would only fill a cache nobody reads.
+      if (id === null || isDeleted(id)) continue;
       const inline = embeddedNote(event);
       if (inline !== null && inline.id === id) {
         store.put(inline);

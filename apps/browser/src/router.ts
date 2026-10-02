@@ -29,11 +29,20 @@ function isMenu(value: string): value is Menu {
  * the caller to reject rather than silently read as Notes.
  */
 function splitReplies(path: string): { base: string; replies: boolean } {
-  const match = path.match(/^(.*)\/([^/]+)$/);
-  if (match !== null && match[2] === REPLIES_SUFFIX) {
-    return { base: match[1], replies: true };
+  // Stripped repeatedly, not once. A single greedy strip leaves a second
+  // `/replies` in the base, which then matches no route and falls through — so
+  // the address bar would say `replies` while the timeline showed Notes.
+  let base = path;
+  let replies = false;
+  for (;;) {
+    const match = base.match(/^(.*)\/([^/]+)$/);
+    // Never strip the whole path: a bare `#/replies` names no page at all, so
+    // leaving it alone is what keeps it from becoming the home tab.
+    if (match === null || match[2] !== REPLIES_SUFFIX || match[1] === "") break;
+    base = match[1];
+    replies = true;
   }
-  return { base: path, replies: false };
+  return { base, replies };
 }
 
 /**
@@ -73,7 +82,11 @@ export function parseHash(hash: string): Route {
   if (menuMatch && isMenu(menuMatch[1])) {
     return { name: "menu", menu: menuMatch[1], replies };
   }
-  return { name: "menu", menu: "home", replies: false };
+  // Nothing matched, so this hash names no page. The tab that was asked for is
+  // kept anyway: falling back to home must not also silently switch the tab,
+  // or the address bar and the highlighted tab would disagree about a link
+  // someone can copy and send to someone else.
+  return { name: "menu", menu: "home", replies };
 }
 
 export function currentHash(): string {

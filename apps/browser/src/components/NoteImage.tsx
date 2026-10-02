@@ -74,7 +74,10 @@ export function NoteImage(props: {
         }}
       />
       <Show when={props.image.alt !== undefined}>
-        <p class="mt-1 text-xs text-(--ink-muted)">{props.image.alt}</p>
+        {/* A span and not a paragraph: a post's body is itself a paragraph, and
+            a paragraph inside a paragraph is not valid markup even where a
+            browser draws it. Block display gives the same line under the image. */}
+        <span class="mt-1 block text-xs text-(--ink-muted)">{props.image.alt}</span>
       </Show>
     </Show>
   );
