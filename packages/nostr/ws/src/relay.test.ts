@@ -26,7 +26,9 @@ function relayEvent(fields: {
   return { ...full, id: computeEventId(full), sig: "c".repeat(128) };
 }
 
-function makeSocket(): Socket & { peer: (msg: unknown) => void } {
+function makeSocket(opts: { open?: boolean } = {}): Socket & {
+  peer: (msg: unknown) => void;
+} {
   const socket: Socket & { peer: (msg: unknown) => void } = {
     send: vi.fn(),
     close: vi.fn(),
@@ -36,7 +38,9 @@ function makeSocket(): Socket & { peer: (msg: unknown) => void } {
     onclose: null,
     peer: (msg) => socket.onmessage?.(JSON.stringify(msg)),
   };
-  queueMicrotask(() => socket.onopen?.());
+  // `open: false` is a relay that takes the socket and never finishes the
+  // handshake, which is what a query parks on.
+  if (opts.open !== false) queueMicrotask(() => socket.onopen?.());
   return socket;
 }
 
@@ -510,6 +514,149 @@ describe("RelayConnection.query", () => {
       message: "timeout",
       fromRelay: false,
     });
+  });
+
+  it("answers what was waiting when it is closed", async () => {
+    // Closing is how a caller abandons work, and abandoning work means every
+    // waiter is told. It was left to the socket's own `close` event — which
+    // `close()` makes stale by nulling `socket`, so the handler that would have
+    // answered everything declined it as somebody else's connection. Every
+    // in-flight query and publish then sat until the timeout it had already given
+    // up on.
+    //
+    // The timeouts here are long enough that a hang is unmistakable, and the
+    // wait is a race against a short one so a failure says which it was.
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+      // No reconnect: a drop here is not what is under test.
+      autoReconnect: false,
+    });
+    const event = relayEvent({
+      pubkey: "b".repeat(64),
+      created_at: 1000,
+      kind: 1,
+      tags: [],
+      content: "in flight",
+    });
+
+    const publish = conn.publish(event, 60000);
+    const query = conn.query({ kinds: [1] }, 60000);
+    await new Promise((r) => setTimeout(r, 0));
+    // And one that is only waiting for the socket to open at all: it is on
+    // neither the sub list nor the publish list, so draining those misses it.
+    const opening = conn.publish(
+      relayEvent({
+        pubkey: "b".repeat(64),
+        created_at: 1001,
+        kind: 1,
+        tags: [],
+        content: "never dialled",
+      }),
+      60000,
+    );
+
+    conn.close();
+
+    const stillWaiting = "still waiting" as const;
+    const settled = await Promise.race([
+      Promise.all([publish, query, opening]),
+      new Promise<typeof stillWaiting>((r) => setTimeout(() => r(stillWaiting), 1500)),
+    ]);
+    // Raced against a wait far shorter than any of the three deadlines, so a
+    // failure says plainly that something never settled rather than which.
+    expect(settled).not.toBe(stillWaiting);
+    if (settled === stillWaiting) return;
+    const [published, read, dialedAfterwards] = settled;
+    // A publish refused by a shutdown says so, and does not claim a relay spoke.
+    expect(published).toEqual({
+      accepted: false,
+      message: "connection closed",
+      fromRelay: false,
+    });
+    expect(read.failed).toBe(true);
+    // And the third one — which started after the socket was already up and so
+    // was never waiting for anything — is refused too, rather than dialling a
+    // fresh connection that `close()` had promised would not happen.
+    expect(dialedAfterwards.accepted).toBe(false);
+    expect(dialedAfterwards.fromRelay).toBe(false);
+  });
+
+  it("answers a caller that was still waiting for the socket to open", async () => {
+    // The other half of closing: a query started against a relay that has taken
+    // the socket and never finished the handshake is parked in `waitOpen`, which
+    // is on neither the sub list nor the publish list. Draining those two misses
+    // it, so it waited out the timeout it had already given up on.
+    const socket = makeSocket({ open: false });
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+      autoReconnect: false,
+    });
+    const query = conn.query({ kinds: [1] }, 60000);
+    const publish = conn.publish(
+      relayEvent({
+        pubkey: "b".repeat(64),
+        created_at: 1000,
+        kind: 1,
+        tags: [],
+        content: "never sent",
+      }),
+      60000,
+    );
+    await new Promise((r) => setTimeout(r, 0));
+
+    conn.close();
+
+    const stillWaiting = "still waiting" as const;
+    const settled = await Promise.race([
+      Promise.all([query, publish]),
+      new Promise<typeof stillWaiting>((r) => setTimeout(() => r(stillWaiting), 1500)),
+    ]);
+    expect(settled).not.toBe(stillWaiting);
+    if (settled === stillWaiting) return;
+    const [read, sent] = settled;
+    expect(read.failed).toBe(true);
+    expect(sent.accepted).toBe(false);
+    expect(sent.fromRelay).toBe(false);
+  });
+
+  it("does not dial again once it has been closed", async () => {
+    // Closing means closed. Draining the waiters answers the work that was already
+    // running, but a caller who closes a connection and then queries it again
+    // would otherwise be handed a *new* socket — a connection `close()` had
+    // promised would not exist, opened behind the caller's back.
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+      autoReconnect: false,
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    conn.close();
+    const dialledAfterClose = vi.mocked(socket.send).mock.calls.length;
+
+    const read = await conn.query({ kinds: [1] }, 5000);
+    expect(read.failed).toBe(true);
+    // No REQ went out, and nothing was sent on the closed socket.
+    expect(vi.mocked(socket.send).mock.calls.length).toBe(dialledAfterClose);
+
+    const stillWaiting = "still waiting" as const;
+    const sent = await Promise.race([
+      conn.publish(
+        relayEvent({
+          pubkey: "b".repeat(64),
+          created_at: 1001,
+          kind: 1,
+          tags: [],
+          content: "after close",
+        }),
+        5000,
+      ),
+      new Promise<typeof stillWaiting>((r) => setTimeout(() => r(stillWaiting), 1500)),
+    ]);
+    // Refused, and quickly: a publish on a closed connection is not something to
+    // wait a round trip to find out.
+    expect(sent).not.toBe(stillWaiting);
+    expect(vi.mocked(socket.send).mock.calls.length).toBe(dialledAfterClose);
   });
 
   it("does not believe an OK that is not one", async () => {

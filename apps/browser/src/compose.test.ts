@@ -34,7 +34,12 @@ function stubRelay(): void {
     }),
   }));
   vi.doMock("./relays.js", () => ({
-    useRelays: () => ({ writeRelays: () => ["wss://write.example"] }),
+    // `readRelays` is here for NIP-18: the repost and quote tags name a relay the
+    // quoted note can be fetched from, so the mock answers for the read side too.
+    useRelays: () => ({
+      writeRelays: () => ["wss://write.example"],
+      readRelays: () => ["wss://read.example"],
+    }),
     noteWriteResult: () => undefined,
   }));
   vi.doMock("./auth.jsx", () => ({
@@ -206,12 +211,49 @@ describe("broadcastEvent", () => {
 
   it("sends nothing when there is no relay to write to", async () => {
     vi.doMock("./relays.js", () => ({
-      useRelays: () => ({ writeRelays: () => [] }),
+      useRelays: () => ({ writeRelays: () => [], readRelays: () => [] }),
       noteWriteResult: () => undefined,
     }));
     const compose = await import("./compose.js");
     expect(await compose.broadcastEvent(post(OTHER))).toBe(false);
     expect(published).toHaveLength(0);
+  });
+
+  it("distinguishes nowhere-to-post from refused", async () => {
+    // Both arrive as a count of zero, and only one of them is something the
+    // reader can act on: "there is nowhere to post" points at Network, "they
+    // refused it" does not. They used to be the same sentence, so a reader with
+    // no write relay was told their note had been rejected by relays that were
+    // never asked.
+    const reported: string[] = [];
+    vi.doMock("./nostr.js", () => ({
+      getConnection: (url: string) => ({
+        publish: async () => ({ accepted: false, fromRelay: true }),
+      }),
+    }));
+
+    vi.doMock("./relays.js", () => ({
+      useRelays: () => ({ writeRelays: () => [], readRelays: () => [] }),
+      noteWriteResult: () => undefined,
+    }));
+    const nowhere = await import("./compose.js");
+    await nowhere.publishEvent(post(OTHER), (reason) => reported.push(reason));
+    expect(reported).toEqual(["no-relay"]);
+
+    // And a relay that answered "no" is still a refusal.
+    reported.length = 0;
+    vi.doUnmock("./relays.js");
+    vi.doMock("./relays.js", () => ({
+      useRelays: () => ({
+        writeRelays: () => ["wss://no.example"],
+        readRelays: () => [],
+      }),
+      noteWriteResult: () => undefined,
+    }));
+    vi.resetModules();
+    const refused = await import("./compose.js");
+    await refused.publishEvent(post(OTHER), (reason) => reported.push(reason));
+    expect(reported).toEqual(["rejected"]);
   });
 
   it("reports the outcome per relay, so the panel shows a real state", async () => {

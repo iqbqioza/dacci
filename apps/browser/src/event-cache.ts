@@ -6,7 +6,19 @@ const cache = new Map<string, NostrEvent>();
 
 export function rememberEvents(events: NostrEvent[]): void {
   for (const event of events) {
-    if (!cache.has(event.id)) cache.set(event.id, event);
+    // Every sighting moves the entry to the back of the queue, not only the
+    // first one. Keeping the position it arrived at meant the post a reader had
+    // just opened — the one every re-render asks for — stayed at the front and
+    // was the *first* thing evicted when the cache filled, while events nobody
+    // had looked at since went on sitting there.
+    //
+    // The copy that stays is the first one, deliberately. `id` is a hash of the
+    // event's own fields, so two events with one id can differ at most in `sig`,
+    // which the id does not cover; there is no reason to let whichever relay
+    // answered last decide which signature a cached post is shown with.
+    const known = cache.get(event.id);
+    cache.delete(event.id);
+    cache.set(event.id, known ?? event);
   }
   while (cache.size > MAX_CACHED) {
     const oldest = cache.keys().next();

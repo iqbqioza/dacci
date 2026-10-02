@@ -244,6 +244,29 @@ describe("buildRepost", () => {
     expect(tagValue(event, "e")?.[1]).toBe(target.id);
     expect(tagValue(event, "p")?.[1]).toBe(AUTHOR);
   });
+
+  it("names a relay the note can be fetched from, where NIP-18 says it must", () => {
+    // "The repost event MUST include an `e` tag with the `id` of the note that is
+    // being reposted. That tag MUST include a relay URL as its third entry to
+    // indicate where it can be fetched."
+    //
+    // The tag used to be written as `["e", id]`, so the third entry did not exist
+    // and clients that read it fell back to guessing which relay to ask.
+    const tagged = buildRepost({
+      pubkey: ME,
+      target,
+      createdAt: AT,
+      relay: "wss://relay.example/",
+    });
+    expect(tagValue(tagged, "e")?.[2]).toBe("wss://relay.example/");
+
+    // With no relay to name, the slot is still there. Shortening the tag instead
+    // puts whatever a client reads next into the relay's place.
+    const unnamed = buildRepost({ pubkey: ME, target, createdAt: AT });
+    const tag = tagValue(unnamed, "e") as string[];
+    expect(tag).toHaveLength(3);
+    expect(tag[2]).toBe("");
+  });
 });
 
 describe("buildQuoteRepost", () => {
@@ -258,6 +281,24 @@ describe("buildQuoteRepost", () => {
     expect(event.content).toBe("これ読んで");
     expect(tagValue(event, "q")?.[1]).toBe(target.id);
     expect(tagValue(event, "e")?.[1]).toBe(target.id);
+  });
+
+  it("gives the q tag the relay and the pubkey NIP-18 names", () => {
+    // `["q", "<event-id or address>", "<relay-url>", "<pubkey-if-a-regular-event>"]`
+    const event = buildQuoteRepost({
+      pubkey: ME,
+      target,
+      text: "これ読んで",
+      createdAt: AT,
+      relay: "wss://relay.example/",
+    });
+    const q = tagValue(event, "q") as string[];
+    expect(q[0]).toBe("q");
+    expect(q[1]).toBe(target.id);
+    expect(q[2]).toBe("wss://relay.example/");
+    expect(q[3]).toBe(AUTHOR);
+    // And the `e` tag carries the same relay in its own third entry.
+    expect(tagValue(event, "e")?.[2]).toBe("wss://relay.example/");
   });
 });
 

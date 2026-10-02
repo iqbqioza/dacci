@@ -184,19 +184,39 @@ export function acceptsType(contentTypes: string[] | null, type: string): boolea
   });
 }
 
-/** The signed header a request needs, null when no signer is available, and
- * `"cancelled"` when the reader dismissed the signature prompt. */
+/**
+ * The signed header a request needs.
+ *
+ * `null` when no signer is available, `"cancelled"` when the reader dismissed
+ * the signature prompt, and `"invalid-endpoint"` when the address the server
+ * list carried is not an address. That last one is separate from `cancelled`
+ * because a reader who never saw a prompt has not cancelled one.
+ */
 async function authorization(
   info: ServerInfo,
   endpoint: string,
   digest: Uint8Array,
-): Promise<string | null | "cancelled"> {
+): Promise<string | null | "cancelled" | "invalid-endpoint"> {
   const signer = getSigner();
   if (signer === null) return null;
   const pubkey = useAuth().pubkey();
   if (pubkey === null) return null;
   const sign = (template: Parameters<typeof signer.signEvent>[0]) =>
     signer.signEvent(template);
+  // Read before signing, not after. `new URL` throws on an address that is not
+  // one, and it used to throw from inside the block whose `catch` answers
+  // "cancelled" — so a server row holding something that is not an address told
+  // the reader they had dismissed a signing prompt they were never shown. A
+  // server list can carry such an address (it is read off the wire), so this was
+  // reachable rather than theoretical.
+  let blossomServer: string | null = null;
+  if (info.method === "PUT") {
+    try {
+      blossomServer = new URL(endpoint).host;
+    } catch {
+      return "invalid-endpoint";
+    }
+  }
   // Signing refuses as a matter of course: a NIP-07 extension asks the reader
   // to confirm and throws when the dialog is dismissed. Left uncaught that
   // rejection would escape the upload with nothing said about it, and the
@@ -208,12 +228,11 @@ async function authorization(
       // checks against the request it received. A host that also serves NIP-96
       // is signed for whichever endpoint the file is actually posted to, since
       // the method decides which of the two dialects is in play.
-      const host = new URL(endpoint).host;
       const auth = await signBlossomAuth({
         verb: "upload",
         pubkey,
         hashHex: bytesToHex(digest),
-        server: host,
+        server: blossomServer ?? "",
         content: "Upload Blob",
         signEvent: sign,
       });
@@ -241,21 +260,47 @@ function urlFromDescriptor(body: unknown): string | null {
   return typeof url === "string" && url.startsWith("http") ? url : null;
 }
 
-/** The download url from a NIP-96 response, or null when it carries none. */
-function urlFromNip96(body: unknown): string | null {
-  if (typeof body !== "object" || body === null) return null;
-  const status = (body as { status?: unknown }).status;
-  if (status !== "success" && status !== undefined) return null;
-  const event = (body as { nip94_event?: unknown }).nip94_event;
-  if (typeof event !== "object" || event === null) return null;
+/**
+ * What a NIP-96 answer says: where the file is, or why the server said no.
+ *
+ * The refusal and the silence have to be told apart, and both used to arrive as
+ * the same `null`. NIP-96 answers a refusal with `"status": "error"` inside a
+ * body the HTTP status calls a success, and the caller below has a fallback that
+ * *builds* a url from the download base — for a server that stored the file and
+ * reported none. Reading an error as that silence handed the reader a link to a
+ * file that was never written, in a post, under "投稿しました".
+ *
+ * NIP-96: `"status": "success"` … `"error"` if not.
+ */
+function nip96Answer(body: unknown): {
+  url: string | null;
+  error: string | null;
+} {
+  if (typeof body !== "object" || body === null) {
+    return { url: null, error: null };
+  }
+  const record = body as { status?: unknown; message?: unknown; nip94_event?: unknown };
+  if (record.status !== "success" && record.status !== undefined) {
+    const said = typeof record.message === "string" ? record.message : "";
+    return {
+      url: null,
+      // The server's own words where it gave any, since the reader is being told
+      // why their file was not taken and the server is the only one who knows.
+      error: said === "" ? "サーバーがアップロードを拒否しました" : said,
+    };
+  }
+  const event = record.nip94_event;
+  if (typeof event !== "object" || event === null) {
+    return { url: null, error: null };
+  }
   const tags = (event as { tags?: unknown }).tags;
-  if (!Array.isArray(tags)) return null;
+  if (!Array.isArray(tags)) return { url: null, error: null };
   for (const tag of tags) {
     if (Array.isArray(tag) && tag[0] === "url" && typeof tag[1] === "string") {
-      return tag[1];
+      return { url: tag[1], error: null };
     }
   }
-  return null;
+  return { url: null, error: null };
 }
 
 /** What a server says when it refuses, in the reader's words. */
@@ -340,6 +385,13 @@ export async function uploadFile(
 
   const auth = await authorization(info, info.endpoint, digest);
   if (auth === "cancelled") return { failure: "cancelled" };
+  // The server list is read off the wire, so an entry in it can be something that
+  // is not an address at all. Saying so is the only thing the reader can act on:
+  // they have to take the row out of their list, and "you cancelled the signature"
+  // points at a prompt they never saw.
+  if (auth === "invalid-endpoint") {
+    return { failure: "network", message: "サーバーの住所が正しくありません" };
+  }
   // A server that wants a signature cannot be used without one, and saying so
   // is more useful than a bare rejection the reader cannot act on.
   if (auth === null) return { failure: "no-signer" };
@@ -377,10 +429,16 @@ export async function uploadFile(
   } catch {
     parsed = text;
   }
-  const url =
-    info.method === "PUT" ? urlFromDescriptor(parsed) : urlFromNip96(parsed);
+  const answer =
+    info.method === "PUT"
+      ? { url: urlFromDescriptor(parsed), error: null }
+      : nip96Answer(parsed);
+  // A server that said no is not a server that stored the file. Reaching here
+  // with an error meant building a url from the download base for an upload that
+  // never happened.
+  if (answer.error !== null) return { failure: "rejected", message: answer.error };
   const extension = extensionFor(file);
-  if (url !== null) return { url: withExtension(url, extension) };
+  if (answer.url !== null) return { url: withExtension(answer.url, extension) };
   // A server that stored the file but reported no url can still be linked:
   // the file is addressed by its own hash on the download base, which both
   // NIP-96 and BUD-02 serve.

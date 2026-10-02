@@ -127,10 +127,25 @@ export function buildRepost(input: {
   pubkey: string;
   target: NostrEvent;
   createdAt: number;
+  /**
+   * A relay the target can be fetched from.
+   *
+   * NIP-18: "The repost event MUST include an `e` tag with the `id` of the note
+   * that is being reposted. That tag MUST include a relay URL as its third entry
+   * to indicate where it can be fetched." Written as `["e", id]` the tag had two
+   * entries, so anything reading the third position found nothing and clients
+   * fell back to guessing which of the reader's relays to ask — several of them
+   * to none.
+   *
+   * Absent, the slot is filled with an empty string rather than the tag being
+   * shortened: the URL *is* the third entry, so leaving it out puts the next
+   * thing in its place.
+   */
+  relay?: string;
 }): UnsignedEvent {
   const { pubkey, target, createdAt } = input;
   const tags: string[][] = [
-    ["e", target.id],
+    ["e", target.id, input.relay ?? ""],
     ["p", target.pubkey],
   ];
   const a = addressTag(target);
@@ -144,10 +159,20 @@ export function buildQuoteRepost(input: {
   target: NostrEvent;
   text: string;
   createdAt: number;
+  /** A relay the target can be fetched from; see `buildRepost`. */
+  relay?: string;
 }): UnsignedEvent {
   const base = buildRepost(input);
   const tags: string[][] = [
-    ["q", base.tags[0][1]],
+    // NIP-18's quote tag is `["q", "<event-id or address>", "<relay-url>",
+    // "<pubkey-if-a-regular-event>"]`, so the relay goes in second here — the
+    // same slot the `e` tag above carries it in third.
+    [
+      "q",
+      base.tags[0][1],
+      input.relay ?? "",
+      typeof input.target.pubkey === "string" ? input.target.pubkey : "",
+    ],
     ...base.tags,
   ];
   for (const named of mentionedPubkeys(input.text, [input.target.pubkey])) {

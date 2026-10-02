@@ -99,7 +99,19 @@ export type PublishFailure =
   | "cancelled"
   | "empty";
 
-/** Signs and broadcasts to every relay, then caches for deep links. */
+/**
+ * Signs and broadcasts to every relay, and caches the event either way.
+ *
+ * The cache comes *before* the broadcast, and the comment used to say the
+ * opposite — "then caches" — which is the wrong way round to describe it. The
+ * order is deliberate: the reader is told when every relay refused, but the note
+ * they just wrote is still theirs, and dropping it from the local cache on the
+ * strength of a relay's refusal would make a post the reader can see vanish out
+ * of their own feed. So it stays, and its deep link resolves here rather than
+ * asking a relay that refused to hold it.
+ *
+ * It is not on any other device, and the reader has been told so.
+ */
 export async function publishEvent(
   template: {
     pubkey: string;
@@ -131,7 +143,13 @@ export async function publishEvent(
   rememberEvents([event]);
   const accepted = await sendToWriteRelays(event);
   if (accepted === 0) {
-    reportError("rejected");
+    // Two different things, and only one of them the reader can act on: "there
+    // is nowhere to post" points at Network, "they refused it" does not. Both
+    // arrived as the same count of zero, so a reader with no write relay was told
+    // their note had been rejected by relays that were never asked.
+    reportError(
+      useRelays().writeRelays().length === 0 ? "no-relay" : "rejected",
+    );
     return null;
   }
   return event;
@@ -284,6 +302,10 @@ export async function submitCompose(text: string): Promise<boolean> {
                 target: current,
                 text: body,
                 createdAt: created_at,
+                // NIP-18 asks both the `q` tag and the `e` tag for a relay the
+                // quoted note can be fetched from. A read relay is where posts
+                // come from, so that is what is named.
+                relay: useRelays().readRelays()[0],
               }),
             )
           : await publishEvent(
@@ -363,7 +385,16 @@ export async function toggleRepost(event: NostrEvent): Promise<boolean> {
     try {
       const sent =
         existing === undefined
-          ? await publishEvent(buildRepost({ pubkey, target: event, createdAt: now() }))
+          ? await publishEvent(
+              buildRepost({
+                pubkey,
+                target: event,
+                createdAt: now(),
+                // NIP-18 asks for a relay in the `e` tag's third entry, where a
+                // client otherwise has to guess which one to ask.
+                relay: useRelays().readRelays()[0],
+              }),
+            )
           : await publishEvent(
               buildDeletion({
                 pubkey,

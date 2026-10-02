@@ -238,7 +238,7 @@ export class RelayConnection {
   private handleDisconnect(): void {
     this.isOpen = false;
     this.setStatus("closed");
-    this.failPending(new Error("disconnected"));
+    this.failPending("disconnected");
     if (this.explicitClose || this.options.autoReconnect === false) return;
     this.scheduleReconnect();
   }
@@ -378,6 +378,12 @@ export class RelayConnection {
   }
 
   private waitOpen(timeoutMs: number): Promise<boolean> {
+    // A connection that has been closed stays closed. Every query and publish
+    // comes through here first, and without this one that started before `close()`
+    // and reached it later went on to dial a *fresh* socket — a socket
+    // `explicitClose` would then refuse to tear down, so the REQ went out to a
+    // connection nobody was looking after and its answer never came.
+    if (this.explicitClose) return Promise.resolve(false);
     if (this.isOpen) return Promise.resolve(true);
     return new Promise((resolve) => {
       // Both entries leave when either settles. Leaving one behind parked a
@@ -547,7 +553,15 @@ export class RelayConnection {
     if (waiting.length === 0) this.pendingPublishes.delete(eventId);
   }
 
-  private failPending(_reason: unknown): void {
+  /**
+   * Answers every query and publish still waiting, and says why.
+   *
+   * The reason is the message a refused publish carries, because that is the only
+   * place a caller reads it: `"connection closed"` for a shutdown, and anything
+   * else for a drop. Nothing here distinguishes the two on its own, so the word
+   * has to be passed rather than inferred.
+   */
+  private failPending(reason: string): void {
     for (const [subId, sub] of this.pendingSubs) {
       this.pendingSubs.delete(subId);
       clearTimeout(sub.timer);
@@ -557,11 +571,7 @@ export class RelayConnection {
       this.pendingPublishes.delete(id);
       for (const pending of waiting) {
         clearTimeout(pending.timer);
-        pending.resolve({
-          accepted: false,
-          message: "connection closed",
-          fromRelay: false,
-        });
+        pending.resolve({ accepted: false, message: reason, fromRelay: false });
       }
     }
   }
@@ -602,6 +612,12 @@ export class RelayConnection {
     }
     // Never send a REQ before the NIP-42 challenge has been answered.
     await this.waitAuthGate(timeoutMs);
+    // Checked again here, because the gate is the other await between the start
+    // and the send. A connection closed while this one waited has nothing to
+    // query, and saying so is better than dialling one nobody asked for.
+    if (this.explicitClose) {
+      return { events: [], eose: false, failed: true, authRequired: false };
+    }
     // The socket may have been replaced while waiting; use the live one.
     const socket = this.ensureSocket();
     const subId = newSubscriptionId();
@@ -674,6 +690,11 @@ export class RelayConnection {
       return { accepted: false, message: "connection failed", fromRelay: false };
     }
     await this.waitAuthGate(timeoutMs);
+    // As in `query`: a connection closed while this publish waited for the gate
+    // has nothing to carry it.
+    if (this.explicitClose) {
+      return { accepted: false, message: "connection closed", fromRelay: false };
+    }
     const socket = this.ensureSocket();
     const outcome = await new Promise<PublishResult>((resolve) => {
       const timer = setTimeout(() => {
@@ -691,6 +712,19 @@ export class RelayConnection {
     return outcome;
   }
 
+  /**
+   * Shuts the connection down for good, and answers everything still waiting on
+   * it.
+   *
+   * Answering is done here rather than left to the socket's own `close` event,
+   * and that is the whole point of this method. Setting `socket` to null below is
+   * what makes a replaced socket's events stale, and the handlers check for that
+   * on purpose — so by the time the browser delivers `close` for the socket this
+   * method just closed, the handler declines it as somebody else's connection.
+   * Every in-flight query and publish was then left waiting for a timeout it had
+   * already given up on, and a caller who closed a connection to abandon work got
+   * abandoned work instead.
+   */
   close(): void {
     this.explicitClose = true;
     this.liveSubs.clear();
@@ -698,6 +732,10 @@ export class RelayConnection {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    this.failPending("connection closed");
+    // And the ones waiting for the socket to open at all, which `failPending` does
+    // not see: they are not on a sub or a publish, they are on the connection.
+    this.failWaiters.splice(0).forEach((run) => run());
     this.socket?.close();
     this.socket = null;
     this.isOpen = false;

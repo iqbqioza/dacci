@@ -222,6 +222,45 @@ describe("uploadFile", () => {
     expect((form.get("file") as File).name).toBe("shot.png");
   });
 
+  it("does not invent a url for a NIP-96 server that said no", async () => {
+    // NIP-96 refuses in the body, inside a response the HTTP status calls a
+    // success. That used to be read the same as a server which stored the file
+    // and reported no url — for which the caller builds one from the download
+    // base — so a refused upload produced a link to a file that was never
+    // written, in the post, under a success message.
+    const calls = stubFetch({
+      document: { api_url: `${NIP96}/upload` },
+      body: { status: "error", message: "Payment required" },
+    });
+    const { uploadFile: upload } = await import("./upload.js");
+    const result = await upload({ url: NIP96 }, file("shot.png", "image/png", 8));
+    expect(result).toEqual({ failure: "rejected", message: "Payment required" });
+    // The upload really was sent, so this is a refusal rather than a fault in
+    // reaching the server: the test would pass for the wrong reason otherwise.
+    expect(calls.length).toBe(2);
+
+    // An error with no message of its own is still a refusal, not a silence.
+    stubFetch({
+      document: { api_url: `${NIP96}/upload` },
+      body: { status: "error" },
+    });
+    const bare = await upload({ url: NIP96 }, file("shot.png", "image/png", 8));
+    expect(bare).toMatchObject({ failure: "rejected" });
+    expect((bare as { message?: string }).message).not.toBe("");
+
+    // And the silence is still a silence: a server that stored the file and
+    // reported no url can be linked by its own hash, which is the case the
+    // fallback exists for and must keep working.
+    const silent = stubFetch({
+      document: { api_url: `${NIP96}/upload` },
+      body: { status: "success", nip94_event: { tags: [] } },
+    });
+    expect(await upload({ url: NIP96 }, file("shot.png", "image/png", 8))).toEqual(
+      { url: expect.stringContaining(NIP96) },
+    );
+    expect(silent.length).toBe(2);
+  });
+
   it.each([
     [413, "too-large"],
     [415, "unsupported-type"],
@@ -542,6 +581,23 @@ describe("file extension", () => {
 });
 
 describe("uploadFailureText", () => {
+  it("does not tell a reader they cancelled a prompt they never saw", async () => {
+    // The server list is read off the wire, so a row in it can hold something
+    // that is not an address. `new URL` threw on it from inside the block whose
+    // `catch` answers "cancelled", so the reader was told they had dismissed a
+    // signing prompt — a prompt that never appeared, on a server they cannot
+    // upload to either way.
+    stubFetch({ document: { accepts: ["*/*"] } });
+    const { uploadFile: upload } = await import("./upload.js");
+    const result = await upload(
+      { url: "not-a-url" },
+      file("shot.png", "image/png", 8),
+    );
+    expect(result).toMatchObject({ failure: "network" });
+    expect((result as { message?: string }).message).toContain("住所");
+    expect((result as { failure?: string }).failure).not.toBe("cancelled");
+  });
+
   it("has a message for every failure", () => {
     for (const reason of [
       "no-signer",
