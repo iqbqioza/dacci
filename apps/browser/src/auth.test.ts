@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { loginWithNsec, logout, restoreSession, useAuth } from "./auth.jsx";
 import { useFeed } from "./relays.js";
+import { stubRelayLayer } from "../test/stub-relay-layer.js";
 
 function stubStorage() {
   const store = new Map<string, string>();
@@ -19,6 +20,47 @@ function stubStorage() {
 }
 
 const PUBKEY = "b".repeat(64);
+
+/**
+ * Signing out restores the default relay set, and every set change fires a status
+ * refresh over the whole set — so `beforeEach` was dialling four public relays
+ * before each test even began. The assertions here are about the session, never
+ * about a relay.
+ *
+ * Hoisted rather than done per test because `./auth.jsx` is imported statically
+ * above, so by the time a `beforeEach` runs the transport is already resolved.
+ */
+vi.mock(new URL("../src/nostr.ts", import.meta.url).pathname, () => {
+  // One connection, handed to whoever asks. Replacing only the socket and leaving
+  // the shape of a connection intact means the code that walks connections —
+  // attaching a signer on sign-in, detaching it on sign-out — still runs here,
+  // and still means what it did.
+  const connection = (url: string) => {
+    const conn = {
+      url,
+      hasSigner: false,
+      setSigner: (signer: unknown) => {
+        conn.hasSigner = signer !== undefined;
+      },
+      query: async () => ({
+        events: [],
+        eose: true,
+        failed: true,
+        authRequired: false,
+      }),
+      publish: async () => ({ accepted: false }),
+      subscribe: () => () => {},
+      close: () => {},
+    };
+    return conn;
+  };
+  return {
+    getConnection: connection,
+    eachConnection: (run: (conn: unknown) => void) => {
+      run(connection("wss://stubbed.example"));
+    },
+  };
+});
 
 beforeEach(() => {
   stubStorage();

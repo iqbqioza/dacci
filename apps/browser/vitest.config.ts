@@ -8,6 +8,10 @@ function src(pkg: string): string {
 export default defineConfig({
   test: {
     environment: "node",
+    // A unit test that opens a socket is a test whose result depends on a relay
+    // being up. Nothing in this package needs one: the transport has its own
+    // tests, with their own sockets, in the package that owns it.
+    setupFiles: [new URL("./test/no-network.ts", import.meta.url).pathname],
   },
   resolve: {
     alias: {

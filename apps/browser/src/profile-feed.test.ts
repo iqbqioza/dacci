@@ -35,14 +35,14 @@ describe("isReply", () => {
   });
 
   it("treats a note pointing at another event as a reply", () => {
-    expect(isReply(note(REPLY, ME, [["e", PARENT, "", ME, "root"]]))).toBe(
+    expect(isReply(note(REPLY, ME, [["e", PARENT, "", "root", ME]]))).toBe(
       true,
     );
   });
 
   it("ignores an e tag that points at the event itself", () => {
     // Clients mark a post's own thread root that way; it is not a reply.
-    expect(isReply(note(TOP, ME, [["e", TOP, "", ME, "root"]]))).toBe(false);
+    expect(isReply(note(TOP, ME, [["e", TOP, "", "root", ME]]))).toBe(false);
   });
 
   it("ignores tags that name neither an event nor an author", () => {
@@ -55,9 +55,9 @@ describe("isReply", () => {
 describe("classifyFeedPost", () => {
   const comment = note(COMMENT, ME, [["I", "30023", AUTHOR, "my-article"]], 1000, COMMENT_KIND);
   const legacyComment = note(COMMENT, ME, [["e", PARENT]], 1000, COMMENT_KIND);
-  const reply = note(REPLY, ME, [["e", PARENT, "", AUTHOR, "root"], ["p", AUTHOR]]);
+  const reply = note(REPLY, ME, [["e", PARENT, "", "root", AUTHOR], ["p", AUTHOR]]);
   const top = note(TOP, ME);
-  const ownRoot = note(TOP, ME, [["e", TOP, "", ME, "root"]]);
+  const ownRoot = note(TOP, ME, [["e", TOP, "", "root", ME]]);
 
   it("calls a top-level kind 1 a note", () => {
     expect(classifyFeedPost(top)).toBe("note");
@@ -99,7 +99,7 @@ describe("classifyFeedPost", () => {
 
 describe("showsCommentLabel", () => {
   const reply = note(REPLY, ME, [
-    ["e", PARENT, "", AUTHOR, "root"],
+    ["e", PARENT, "", "root", AUTHOR],
     ["p", AUTHOR],
   ]);
   const legacyComment = note(COMMENT, ME, [["e", PARENT]], 1000, COMMENT_KIND);

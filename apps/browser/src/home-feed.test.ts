@@ -29,7 +29,7 @@ const TOP = "a".repeat(64);
 const REPLY = "b".repeat(64);
 const COMMENT = "c".repeat(64);
 
-const reply = note(REPLY, [["e", TOP, "", ME, "root"], ["p", ME]]);
+const reply = note(REPLY, [["e", TOP, "", "root", ME], ["p", ME]]);
 const comment = note(COMMENT, [["I", "30023", ME, "my-article"]], COMMENT_KIND);
 const top = note(TOP);
 

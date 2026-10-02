@@ -1,6 +1,7 @@
 import { hasValidId, hasValidSignature } from "dacci-nostr-nips";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fixturePubkey, forgedAs, replayedAs, signAs } from "./fixture-event.js";
+import { stubRelayLayer } from "../test/stub-relay-layer.js";
 
 /**
  * A relay is not asked to vouch for anything. The only check every inbound
@@ -38,6 +39,10 @@ function useMemoryStorage(): void {
 
 beforeEach(() => {
   useMemoryStorage();
+  // Changing the relay set probes every relay in it, so a test that changes the
+  // set dials unless the transport is stubbed. The stub is the point of most of
+  // these: the assertion is about the set, not about any relay.
+  stubRelayLayer();
 });
 
 afterEach(() => {

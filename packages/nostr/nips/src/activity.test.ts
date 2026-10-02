@@ -478,7 +478,7 @@ describe("summarizeMyActivity", () => {
   const repost = signed(6, ME, [["e", targetId]], at(2));
   const quote = signed(6, ME, [["e", targetId], ["q", targetId]], at(3));
   const reply = signed(1, ME, [
-    ["e", targetId, "", AUTHOR, "root"],
+    ["e", targetId, "", "root", AUTHOR],
     ["p", AUTHOR],
   ], at(4));
 

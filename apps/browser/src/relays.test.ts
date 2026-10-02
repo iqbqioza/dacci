@@ -38,6 +38,27 @@ function makeListEvent(
  */
 const PUBKEY = fixturePubkey("reader");
 
+/**
+ * Changing the relay set fires a status refresh over the whole set, and this
+ * file changes the set in every test — so without a stub each one dialled every
+ * relay in it, four of them public, and the result depended on whether they were
+ * up. The assertions here are about the set a test builds, never about a relay.
+ *
+ * Hoisted rather than done per test because `./relays.js` is imported statically
+ * above, so by the time a `beforeEach` runs the transport is already resolved.
+ */
+vi.mock(new URL("../src/nostr.ts", import.meta.url).pathname, () => ({
+  getConnection: (url: string) => ({
+    url,
+    query: async () => ({
+      events: [],
+      eose: true,
+      failed: true,
+      authRequired: false,
+    }),
+  }),
+}));
+
 describe("applyLoginRelaySet", () => {
   it("switches to the read relays of the newest list", async () => {
     restoreDefaults();

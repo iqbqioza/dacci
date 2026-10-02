@@ -1,4 +1,4 @@
-import type { Filter, NostrEvent } from "dacci-nostr-nips";
+import { isHex64, type Filter, type NostrEvent } from "dacci-nostr-nips";
 import { RelayConnection } from "dacci-nostr-ws";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearEventCache } from "./event-cache.js";
@@ -15,7 +15,23 @@ function notification(at: number, index: number): NostrEvent {
     tags: [["p", SELF]],
     content: `n${index}`,
   };
-  return { ...base, id: `${index}`.repeat(64), sig: "s".repeat(128) };
+  // A real id: 64 hex characters that follow from the index. The obvious
+  // `\`${index}\`.repeat(64)` is 128 characters for every index past 9, so a
+  // fixture of a hundred notifications was ninety of them the shape no relay
+  // could ever serve — and the dedupe being tested was being tested over events
+  // the transport would have rejected.
+  return { ...base, id: noteId(index), sig: "s".repeat(128) };
+}
+
+/**
+ * 64 hex characters for a notification, from its index.
+ *
+ * 16 per digit keeps every id the same length whatever the index, which is the
+ * property the old fixture lost: a repeating index is 64 characters for one digit
+ * and 128 for two.
+ */
+function noteId(index: number): string {
+  return index.toString(16).padStart(16, "0").repeat(4).slice(0, 64);
 }
 
 const tick = (ms = 0): Promise<void> =>
@@ -128,5 +144,23 @@ describe("notifications paging", () => {
     const ids = store_.useNotifications().events().map((e) => e.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids.length).toBe(150);
+  });
+});
+
+describe("the fixtures these tests page through", () => {
+  it("are events the transport could actually have delivered", () => {
+    // A relay serves 64 hex characters, and `relay.ts` rejects anything else
+    // before an event reaches a store. A fixture that does not is not a smaller
+    // case of the same thing — it is a case the real code never sees, so a test
+    // paging through it is not paging through anything the app would show.
+    const many = Array.from({ length: 200 }, (_, i) => notification(1000 + i, i));
+    expect(many.length).toBe(200);
+    for (const event of many) {
+      expect(isHex64(event.id), `id is ${event.id.length} characters`).toBe(
+        true,
+      );
+    }
+    // Distinct, or the dedupe being tested would be testing nothing.
+    expect(new Set(many.map((e) => e.id)).size).toBe(200);
   });
 });
