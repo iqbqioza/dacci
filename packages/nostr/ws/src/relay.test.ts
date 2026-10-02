@@ -275,6 +275,58 @@ describe("RelayConnection.query", () => {
     expect(result.eose).toBe(true);
   });
 
+  it("settles both waits when one event is published twice", async () => {
+    // A double press on repost or react builds one event and reaches the
+    // transport twice, and the map held one waiter per event id. The second
+    // publish overwrote the first, so the first was dropped and reported a
+    // timeout — and its timeout then deleted the second's entry, reporting a
+    // relay that had accepted the event as refusing it.
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+    });
+    const event = relayEvent({ pubkey: "b".repeat(64), created_at: 1000 });
+
+    const first = conn.publish(event, 300);
+    await new Promise((r) => setTimeout(r, 0));
+    const second = conn.publish(event, 300);
+    await new Promise((r) => setTimeout(r, 0));
+    socket.peer(["OK", event.id, true, ""]);
+
+    const [a, b] = await Promise.all([first, second]);
+    expect(a.accepted).toBe(true);
+    expect(b.accepted).toBe(true);
+  });
+
+  it("stops answering a relay that keeps asking", async () => {
+    // Answering a NIP-42 challenge costs the reader a confirmation when the
+    // signer is a NIP-07 extension. The dedupe only catches a repeated string,
+    // so a relay sending distinct challenges could pop a dialog for as many as
+    // it liked — from a relay the reader merely reads from.
+    const socket = makeSocket();
+    const authEvent = relayEvent({
+      pubkey: "b".repeat(64),
+      created_at: 1000,
+      kind: 22242,
+      tags: [["relay", "wss://example"]],
+      content: "",
+    });
+    const signer = vi.fn(async () => authEvent);
+    const conn = new RelayConnection("wss://example", () => socket, {
+      signer,
+      authGateProbeMs: 0,
+    });
+    conn.subscribe({ kinds: [1] }, () => {});
+    await new Promise((r) => setTimeout(r, 0));
+
+    for (let i = 0; i < 12; i++) {
+      socket.peer(["AUTH", `challenge-${i}`]);
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    // Bounded, rather than one prompt per challenge the relay invents.
+    expect(signer.mock.calls.length).toBeLessThanOrEqual(5);
+  });
+
   it("flags auth-required CLOSED when no signer is configured", async () => {
     const socket = makeSocket();
     const conn = new RelayConnection("wss://example", () => socket, {

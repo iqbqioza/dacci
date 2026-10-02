@@ -90,6 +90,17 @@ function newSubscriptionId(): string {
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/**
+ * How many NIP-42 challenges one connection will answer.
+ *
+ * Answering costs the reader a confirmation prompt when the signer is a NIP-07
+ * extension, and a relay may send a distinct challenge for as long as it likes.
+ * A handful is enough for the reconnects and re-subscribes a real relay causes;
+ * past that, refusing leaves it unauthenticated, which is already what happens
+ * when a prompt is declined.
+ */
+const MAX_CHALLENGES_ANSWERED = 5;
+
 type SubOutcome = "eose" | "failed";
 
 interface PendingSub {
@@ -137,7 +148,14 @@ export class RelayConnection {
   private openWaiters: Array<() => void> = [];
   private failWaiters: Array<() => void> = [];
   private readonly pendingSubs = new Map<string, PendingSub>();
-  private readonly pendingPublishes = new Map<string, PendingPublish>();
+  /**
+ * Publishes in flight, by event id, each id holding every caller waiting on it.
+ *
+ * A list rather than one waiter, because a caller may publish the same event
+ * twice over — a double press on repost or react builds one event, and the
+ * transport is reached twice.
+ */
+private readonly pendingPublishes = new Map<string, PendingPublish[]>();
   private readonly liveSubs = new Map<string, LiveSubEntry>();
   /**
    * Last NIP-42 challenge seen while no signer was configured. After a
@@ -425,11 +443,19 @@ export class RelayConnection {
       }
       this.finishSub(msg[1], "failed");
     } else if (msg[0] === "OK" && typeof msg[1] === "string") {
-      const pending = this.pendingPublishes.get(msg[1]);
-      if (pending !== undefined) {
+      // NIP-01 answers per event id, so one OK covers every wait for that event.
+      // Holding a list rather than a single waiter is what keeps two concurrent
+      // publishes of one event from clobbering each other: the second used to
+      // overwrite the first, so the first was dropped and reported a timeout
+      // while its own timeout went on to delete the second's entry and report
+      // that one as refused too.
+      const waiting = this.pendingPublishes.get(msg[1]);
+      if (waiting !== undefined) {
         this.pendingPublishes.delete(msg[1]);
-        clearTimeout(pending.timer);
-        pending.resolve({ accepted: msg[2], message: msg[3] });
+        for (const pending of waiting) {
+          clearTimeout(pending.timer);
+          pending.resolve({ accepted: msg[2], message: msg[3] });
+        }
       }
     } else if (msg[0] === "AUTH" && typeof msg[1] === "string") {
       // Connection-level challenge: flag every pending query, then answer
@@ -452,16 +478,31 @@ export class RelayConnection {
     sub.resolve(outcome);
   }
 
+  private dropWaiter(
+    eventId: string,
+    resolve: (result: PublishResult) => void,
+  ): void {
+    const waiting = this.pendingPublishes.get(eventId);
+    if (waiting === undefined) return;
+    const at = waiting.findIndex((entry) => entry.resolve === resolve);
+    if (at !== -1) waiting.splice(at, 1);
+    // The key goes only once nobody is left waiting on it, so one caller timing
+    // out cannot take the others' entries with it.
+    if (waiting.length === 0) this.pendingPublishes.delete(eventId);
+  }
+
   private failPending(_reason: unknown): void {
     for (const [subId, sub] of this.pendingSubs) {
       this.pendingSubs.delete(subId);
       clearTimeout(sub.timer);
       sub.resolve("failed");
     }
-    for (const [id, pending] of this.pendingPublishes) {
+    for (const [id, waiting] of this.pendingPublishes) {
       this.pendingPublishes.delete(id);
-      clearTimeout(pending.timer);
-      pending.resolve({ accepted: false, message: "connection closed" });
+      for (const pending of waiting) {
+        clearTimeout(pending.timer);
+        pending.resolve({ accepted: false, message: "connection closed" });
+      }
     }
   }
 
@@ -472,6 +513,15 @@ export class RelayConnection {
       return;
     }
     if (this.answeredChallenges.has(challenge)) return;
+    // A NIP-07 signer asks the reader to confirm, so an unbounded run of
+    // challenges is an unbounded run of prompts. A relay can send as many
+    // distinct challenge strings as it likes, and the dedupe above only catches
+    // repeats, so one relay the reader merely reads from could pop a dialog for
+    // every one of them. Bailing out after a few leaves the relay
+    // unauthenticated — the gate stays shut and its queries time out, which is
+    // what already happens when the reader declines a prompt — rather than
+    // training the reader to click through them.
+    if (this.answeredChallenges.size >= MAX_CHALLENGES_ANSWERED) return;
     this.answeredChallenges.add(challenge);
     try {
       const authEvent = await this.options.signer(challenge, this.url);
@@ -567,10 +617,15 @@ export class RelayConnection {
     const socket = this.ensureSocket();
     const outcome = await new Promise<PublishResult>((resolve) => {
       const timer = setTimeout(() => {
-        this.pendingPublishes.delete(event.id);
+        this.dropWaiter(event.id, resolve);
         resolve({ accepted: false, message: "timeout" });
       }, timeoutMs);
-      this.pendingPublishes.set(event.id, { timer, resolve });
+      const waiting = this.pendingPublishes.get(event.id);
+      if (waiting === undefined) {
+        this.pendingPublishes.set(event.id, [{ timer, resolve }]);
+      } else {
+        waiting.push({ timer, resolve });
+      }
       this.safeSend(socket, JSON.stringify(["EVENT", event]));
     });
     return outcome;

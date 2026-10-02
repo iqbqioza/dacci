@@ -252,16 +252,32 @@ export function isComment(event: NostrEvent): boolean {
 }
 
 /**
- * NIP-22 parent reference of a comment: the uppercase `I` tag carrying the
- * addressable event being replied to. Clients that predate the tag used a
- * plain `e` tag, so that is still accepted.
+ * NIP-22 parent reference of a comment.
+ *
+ * NIP-22 writes the same shape for the root scope (uppercase `A`/`E`/`I`) and for
+ * the parent item (lowercase `a`/`e`/`i`):
+ *
+ *     ["<A, E, I>", "<address, id or I-value>", "<relay or web page hint>", "<pubkey>"]
+ *
+ * Only the second entry is the reference, and it is there whether the tag has
+ * three entries or four. Reading the tag as kind, pubkey and identifier joined
+ * with colons produced a string that is neither an event id nor an address, so
+ * nothing could query it; and requiring four entries meant every comment that
+ * followed the spec's own two-entry examples — a URL comment, a podcast item —
+ * was read as having no parent at all.
+ *
+ * The lowercase `i` is a NIP-73 external identifier for a live tag such as
+ * `["i", "podcast:item:guid:…"]`, which is why a two-entry `i` is not treated as
+ * a NIP-22 parent: a comment's own `i` names the kind of item it answers, and
+ * the uppercase `I` is the one that carries the scope.
+ *
+ * Clients that predate the tag used a plain `e` tag, so that is still accepted.
  */
 export function commentParent(event: NostrEvent): string | null {
   if (!isComment(event)) return null;
-  const tagged = event.tags.find(
-    (tag) => (tag[0] === "I" || tag[0] === "i") && tag.length >= 4,
-  );
-  if (tagged !== undefined) return tagged.slice(1, 4).join(":");
+  // Uppercase is the root scope, which is what a comment replies to.
+  const scoped = event.tags.find((tag) => tag[0] === "I" && tag.length >= 2);
+  if (scoped !== undefined) return scoped[1];
   const legacy = event.tags.find((tag) => tag[0] === "e");
   return legacy === undefined ? null : (legacy[1] ?? null);
 }

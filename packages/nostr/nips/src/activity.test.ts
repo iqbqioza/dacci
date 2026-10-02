@@ -268,17 +268,47 @@ describe("isComment", () => {
 });
 
 describe("commentParent", () => {
-  it("reads the NIP-22 I tag of a comment", () => {
+  it("reads the reference out of the NIP-22 I tag", () => {
+    // NIP-22 gives every scope tag the same shape:
+    // ["<A, E, I>", "<reference>", "<relay or web hint>", "<pubkey>"].
+    // The second entry is the reference; joining the rest with colons produced a
+    // string that is neither an event id nor an address, so nothing could query
+    // it.
     const event = buildComment(1111, [
-      ["I", "30023", AUTHOR, "my-article"],
+      ["I", `30023:${AUTHOR}:my-article`, "wss://example.relay", AUTHOR],
       ["p", ME],
     ]);
     expect(commentParent(event)).toBe(`30023:${AUTHOR}:my-article`);
   });
 
-  it("accepts the lowercase tag some clients still send", () => {
-    const event = buildComment(1111, [["i", "1", AUTHOR, "d"]]);
-    expect(commentParent(event)).toBe(`1:${AUTHOR}:d`);
+  it("reads the two-entry form the spec's own examples use", () => {
+    // A URL comment and a podcast item are the two NIP-22 writes out, and both
+    // stop after the reference. Requiring a fourth entry read every one of them
+    // as having no parent at all.
+    const url = buildComment(1111, [
+      ["I", "https://abc.com/articles/1"],
+      ["K", "web"],
+      ["i", "https://abc.com/articles/1"],
+      ["k", "web"],
+    ]);
+    expect(commentParent(url)).toBe("https://abc.com/articles/1");
+
+    const podcast = buildComment(1111, [
+      ["I", "podcast:item:guid:d98d", "https://fountain.fm/episode/1"],
+      ["K", "podcast:item"],
+    ]);
+    expect(commentParent(podcast)).toBe("podcast:item:guid:d98d");
+  });
+
+  it("takes the root scope, not a live tag's lowercase i", () => {
+    // A lowercase `i` is a NIP-73 external identifier on an ordinary post
+    // (`["i", "podcast:item:guid:…"]`), so it is never the parent. The uppercase
+    // `I` is the scope a comment replies to.
+    const event = buildComment(1111, [
+      ["I", "30023:pk:d"],
+      ["i", "1", ME, "parent-item"],
+    ]);
+    expect(commentParent(event)).toBe("30023:pk:d");
   });
 
   it("falls back to the legacy e tag", () => {
@@ -289,10 +319,12 @@ describe("commentParent", () => {
   it("returns null for a non-comment or a parentless comment", () => {
     expect(commentParent(buildComment(1, [["e", "f".repeat(64)]]))).toBeNull();
     expect(commentParent(buildComment(1111, []))).toBeNull();
+    // A live tag on its own does not make a comment either.
+    expect(commentParent(buildComment(1111, [["i", "podcast:item:guid:x"]]))).toBeNull();
   });
 
   it("finds the parent of a kind 1 comment too", () => {
-    const event = buildComment(1, [["I", "30023", AUTHOR, "my-article"]]);
+    const event = buildComment(1, [["I", `30023:${AUTHOR}:my-article`]]);
     expect(commentParent(event)).toBe(`30023:${AUTHOR}:my-article`);
   });
 });

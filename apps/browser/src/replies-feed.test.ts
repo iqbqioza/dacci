@@ -46,7 +46,9 @@ afterEach(() => {
  * fresh per test so its module-level signals start empty, exactly as they do
  * on a page load.
  */
-async function withStore(): Promise<typeof import("./replies-feed.js")> {
+async function withStore(
+  answer?: { failed: boolean; events?: NostrEvent[] },
+): Promise<typeof import("./replies-feed.js")> {
   vi.resetModules();
   vi.doMock("./relays.js", () => ({
     useRelays: () => ({ readRelays: () => ["wss://read.example"] }),
@@ -56,14 +58,97 @@ async function withStore(): Promise<typeof import("./replies-feed.js")> {
       url,
       query: async (filter: Record<string, unknown>) => {
         queries.push(filter);
-        return { events: answerWith, failed: false };
+        return {
+          events: answer?.events ?? answerWith,
+          failed: answer?.failed ?? false,
+        };
       },
     }),
   }));
   return import("./replies-feed.js");
 }
 
+/** A promise the test settles by hand, so a round can be held open. */
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
 describe("replies feed", () => {
+  it("asks again when no relay answered, instead of settling on 'no replies'", async () => {
+    // Nobody answering is not the same as nobody having any. Settling it here
+    // left the id in `asked`, so the thread read "no replies" for the rest of
+    // the session with nothing left to fetch it back — while the relays were
+    // merely quiet or refusing.
+    const store = await withStore({ failed: true });
+    await store.loadReplies(POST);
+    const view = store.useReplies(POST);
+    expect(view.searched()).toBe(false);
+    expect(view.events()).toEqual([]);
+    // Asking again is allowed, and a relay that now answers settles it.
+    const healthy = await withStore({
+      failed: false,
+      events: [post(REPLY, [["e", POST, "", "reply", "x"]], 1, 100)],
+    });
+    await healthy.loadReplies(POST);
+    expect(healthy.useReplies(POST).searched()).toBe(true);
+    expect(healthy.useReplies(POST).events()).toHaveLength(1);
+  });
+
+  it("treats a relay that refused as silence, not as an empty thread", async () => {
+    // One relay refusing says nothing about the post. Reading it as an answer
+    // would tell the reader a post nobody replied to that simply had not been
+    // served.
+    vi.resetModules();
+    vi.doMock("./relays.js", () => ({
+      useRelays: () => ({ readRelays: () => ["wss://a", "wss://b"] }),
+    }));
+    vi.doMock("./nostr.js", () => ({
+      getConnection: (url: string) => ({
+        url,
+        query: async () =>
+          url === "wss://a"
+            ? { events: [], failed: true }
+            : { events: [], failed: false },
+      }),
+    }));
+    const store = await import("./replies-feed.js");
+    await store.loadReplies(POST);
+    // One relay did answer, with nothing — so this really is a post with no
+    // answers, and the thread can say so.
+    expect(store.useReplies(POST).searched()).toBe(true);
+  });
+
+  it("throws away an answer that lands after the relay set was dropped", async () => {
+    const gate = deferred<{ events: NostrEvent[]; failed: boolean }>();
+    vi.resetModules();
+    vi.doMock("./relays.js", () => ({
+      useRelays: () => ({ readRelays: () => ["wss://read.example"] }),
+    }));
+    vi.doMock("./nostr.js", () => ({
+      getConnection: () => ({ url: "wss://read.example", query: () => gate.promise }),
+    }));
+    const store = await import("./replies-feed.js");
+
+    const round = store.loadReplies(POST);
+    await tick();
+    // The reader changes their relays while the round is still out.
+    store.resetReplies();
+    gate.resolve({
+      events: [post(REPLY, [["e", POST, "", "reply", "x"]], 1, 100)],
+      failed: false,
+    });
+    await round;
+
+    // The answer was fetched from a relay that is no longer being read, so it
+    // does not appear in the fresh thread.
+    expect(store.useReplies(POST).events()).toEqual([]);
+    expect(store.useReplies(POST).searched()).toBe(false);
+  });
+
   it("asks for both kinds and the post's own id", async () => {
     const store = await withStore();
     await store.loadReplies(POST);

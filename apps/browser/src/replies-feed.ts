@@ -18,6 +18,8 @@ const [searched, setSearched] = createSignal(false);
 
 /** Posts already asked about, so a revisit never queries again. */
 const asked = new Set<string>();
+/** Bumped when the relay set is dropped, so a round still out goes stale. */
+let generation = 0;
 
 /**
  * Asks the read relays for anything pointing at `postId`.
@@ -28,41 +30,64 @@ const asked = new Set<string>();
  * comment scoped to an address rather than an event is simply not found;
  * `directReplies` then decides what is really a direct answer.
  */
-async function queryRelays(postId: string): Promise<NostrEvent[]> {
+async function queryRelays(
+  postId: string,
+): Promise<{ events: NostrEvent[]; answered: number }> {
   const urls = useRelays().readRelays();
-  if (urls.length === 0) return [];
+  if (urls.length === 0) return { events: [], answered: 0 };
   const filter = { kinds: [1, 1111], "#e": [postId] };
   const settled = await Promise.allSettled(
     urls.map(async (url) => {
       const result = await getConnection(url).query(filter, 4000);
-      return result.failed ? [] : result.events;
+      // A relay that refused is counted apart from one that answered, so
+      // "nobody answered" and "nobody has any" cannot be confused.
+      return result.failed ? null : result.events;
     }),
   );
   const seen = new Set<string>();
   const out: NostrEvent[] = [];
+  let answered = 0;
   for (const result of settled) {
-    if (result.status !== "fulfilled") continue;
+    if (result.status !== "fulfilled" || result.value === null) continue;
+    answered += 1;
     for (const event of result.value) {
       if (seen.has(event.id)) continue;
       seen.add(event.id);
       out.push(event);
     }
   }
-  return out;
+  return { events: out, answered };
 }
 
 /** Starts resolving the answers to a post, unless that was already done. */
 export async function loadReplies(postId: string): Promise<void> {
   if (postId === "" || asked.has(postId)) return;
+  const gen = generation;
   asked.add(postId);
   setLoading(true);
   let found: NostrEvent[] = [];
+  let answered = 0;
   try {
-    found = await queryRelays(postId);
+    ({ events: found, answered } = await queryRelays(postId));
   } catch {
-    // A relay that rejects leaves the list empty, which is what a post with
-    // no answers looks like anyway.
+    // A relay that rejects leaves nothing found, which is what a post with no
+    // answers looks like anyway.
     found = [];
+  }
+  // The reader changed relays while this was out. The answer belongs to a list
+  // nobody is looking at now, and `asked` no longer holds the id, so writing it
+  // would fill the fresh map from relays that have just been dropped and leave
+  // the new relay set never asked about this post.
+  if (gen !== generation) return;
+  if (answered === 0) {
+    // Nobody answered, so nothing is known — which is not the same as the post
+    // having no answers. Leaving the id in `asked` would settle that here and
+    // for good: the thread would read "no replies" for the rest of the session
+    // with no way to ask again. It is released instead, and `searched` stays
+    // false so the reader is not shown a conclusion nobody reached.
+    asked.delete(postId);
+    setLoading(false);
+    return;
   }
   rememberEvents(found);
   const answers = directReplies(found, postId);
@@ -121,7 +146,11 @@ export function addReply(event: NostrEvent): void {
 
 /** Drops every cached answer, e.g. after a relay set change. */
 export function resetReplies(): void {
+  // A read in flight belongs to the relay set that asked for it, so the new one
+  // makes that answer stale rather than current.
+  generation += 1;
   setReplies(new Map());
   setSearched(false);
+  setLoading(false);
   asked.clear();
 }

@@ -169,6 +169,41 @@ describe("TimelinePaginator", () => {
     expect(page.coverage).toBe("partial");
   });
 
+  it("stops offering more once a burst exceeds what one page can hold", async () => {
+    // More events than `maxLimit` sharing one second cannot be paged past: the
+    // cursor asks for the same boundary again and gets the same wall back. The
+    // relay is then never asked again, so leaving it counted as "has more" made
+    // every further press do a full round of queries and return nothing, and
+    // the timeline's background retry woke up on that state every 15 seconds.
+    const burst = Array.from({ length: 600 }, (_, i) =>
+      makeEvent(1000, `d${i.toString().padStart(5, "0")}`),
+    );
+    const older = Array.from({ length: 50 }, (_, i) =>
+      makeEvent(999, `f${i.toString().padStart(5, "0")}`),
+    );
+    const paginator = new TimelinePaginator(
+      [stubConnection("wss://a", [...burst, ...older])],
+      { kinds: [1] },
+      { baseLimit: 100, maxLimit: 200, pageSize: 100, maxRounds: 4 },
+    );
+    const seen = new Set<string>();
+    let coverage = "";
+    // Press until the paginator says there is nothing more, but bounded: the
+    // point is that it says so rather than running forever.
+    for (let i = 0; i < 30; i++) {
+      if (!paginator.hasMore()) break;
+      const page = await paginator.loadNextPage();
+      coverage = page.coverage;
+      for (const e of page.events) seen.add(e.id);
+    }
+    expect(paginator.hasMore()).toBe(false);
+    // Nothing is pending either, so nothing schedules a retry against it.
+    expect(paginator.pendingRelays()).toEqual([]);
+    // And it does not claim to have reached the end of history.
+    expect(coverage).toBe("partial");
+    expect(seen.size).toBeGreaterThan(0);
+  });
+
   it("does not wait for a relay that never answers", async () => {
     const good = stubConnection("wss://fast", makeStore(40, 2000));
     // Accepts the connection but never resolves.

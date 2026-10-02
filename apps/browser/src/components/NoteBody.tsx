@@ -1,6 +1,6 @@
 import type { ContentSegment, Emoji, NostrEvent } from "dacci-nostr-nips";
 import { contentSegments, emojisIn, mentionedProfiles } from "dacci-nostr-nips";
-import { createEffect, Index, Show } from "solid-js";
+import { createEffect, Index } from "solid-js";
 import { requestProfiles } from "../profile.js";
 import { nameOf, Mention, TextRun } from "./RichText.jsx";
 import { NoteImage } from "./NoteImage.jsx";
@@ -28,25 +28,20 @@ export function NoteBody(props: { event: NostrEvent }) {
   // The shortcodes come with the post, so there is nothing to ask a relay for.
   const emojis = (): Emoji[] => emojisIn(props.event);
   const segments = (): ContentSegment[] => contentSegments(props.event, nameOf);
-  const hasImages = (): boolean =>
-    segments().some((segment) => segment.kind === "image");
 
   return (
-    <Show
-      when={hasImages()}
-      // Without an image the text is one run, and a segment per piece would
-      // only give the paragraph somewhere to break between words.
-      fallback={<>{segments().map((segment) => renderSegment(segment, emojis()))}</>}
-    >
-      {/* Keyed by position, not by the segment itself. A name arriving anywhere
-          on the page rebuilds every mention's segment, and keying on identity
-          would throw the whole body away with it — including which of an
-          image's addresses has already been tried. The number of segments
-          does not depend on any name, so a row keeps its place and its state. */}
-      <Index each={segments()}>
-        {(segment) => renderSegment(segment(), emojis())}
-      </Index>
-    </Show>
+    /* Keyed by position, not by the segment itself, and for every post rather
+       than only the ones carrying an image.
+       `segments()` is recomputed whenever a profile name arrives anywhere on the
+       page, and it returns a fresh array each time. Keying on identity — or
+       mapping over it, which is not keyed at all — throws the whole body away
+       with it: every mention button the reader had focused is destroyed
+       mid-interaction, and an image loses which of its addresses have already
+       been tried. The number of segments does not depend on any name, so a row
+       keeps its place and its state. */
+    <Index each={segments()}>
+      {(segment) => renderSegment(segment(), emojis())}
+    </Index>
   );
 }
 

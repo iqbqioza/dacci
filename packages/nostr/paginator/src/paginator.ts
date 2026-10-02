@@ -162,7 +162,15 @@ export class TimelinePaginator {
 
   hasMore(): boolean {
     return (
-      [...this.relays.values()].some((r) => !r.exhausted) ||
+      // A relay parked for a split is not counted. It answered with more events
+      // than `maxLimit` sharing one second, and there is no way to page past a
+      // boundary the relay will not break up, so it is never asked again.
+      // Counting it pinned `hasMore` true for the rest of the session: every
+      // press did a full round of queries and returned nothing, and the
+      // timeline's background retry — which polls while anything is pending —
+      // woke up on exactly this state, forever. `coverage` still reads
+      // "partial", which is the honest answer here.
+      [...this.relays.values()].some((r) => !r.exhausted && !r.needsSplit) ||
       this.countCommittable() > 0
     );
   }
@@ -414,9 +422,17 @@ export class TimelinePaginator {
       : "partial";
   }
 
-  private pendingRelays(): string[] {
+  /**
+ * Relays still owed an answer: neither exhausted, parked for a split, nor
+ * waiting on credentials. Public because it is part of every page handed back,
+ * and because what a reader sees next depends on it.
+ */
+pendingRelays(): string[] {
+    // Relays waiting on credentials are not listed either: they are not going to
+    // be asked again until a signer exists, and naming one here is what makes
+    // the timeline retry in a loop for a gate that will not move.
     return [...this.relays.values()]
-      .filter((r) => !r.exhausted)
+      .filter((r) => !r.exhausted && !r.needsSplit && !r.needsAuth)
       .map((r) => r.url);
   }
 

@@ -36,7 +36,11 @@ import { PageBar } from "./components/PageBar.jsx";
 import { EventCard } from "./components/EventCard.jsx";
 import { ProfilePage } from "./components/ProfilePage.jsx";
 import { UploadPicker } from "./components/UploadPicker.jsx";
-import { NotificationsView, SettingsView } from "./components/Views.jsx";
+import {
+  NotificationArrivals,
+  NotificationsView,
+  SettingsView,
+} from "./components/Views.jsx";
 import { getConnection } from "./nostr.js";
 import { noticeMessage } from "./notice.js";
 import { resetHomeFeed } from "./home-feed.js";
@@ -502,7 +506,19 @@ function MenuContent(props: {
     >
       {(menu) => (
         <div>
-          <PageBar id={`#/${menu()}`} />
+          {/* Notifications pin a second row under the page bar, so the two share
+              one sticky container: two bars at `top-0` means the one painted
+              later hides the other, which made `← 戻る` unreachable for as long
+              as anything had arrived. */}
+          <Show
+            when={menu() === "notifications"}
+            fallback={<PageBar id={`#/${menu()}`} />}
+          >
+            <div class="sticky top-0 z-30 bg-(--surface)">
+              <PageBar id={`#/${menu()}`} />
+              <NotificationArrivals />
+            </div>
+          </Show>
           <Switch>
             <Match when={menu() === "notifications"}>
               <NotificationsView onSelect={props.onSelect} />

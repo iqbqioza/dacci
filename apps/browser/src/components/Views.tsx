@@ -29,12 +29,34 @@ function newestFirst(a: NostrEvent, b: NostrEvent): number {
       : 1;
 }
 
+/**
+ * The pinned "new arrivals" row, rendered inside the page's own sticky header.
+ *
+ * It belongs to the header rather than to the list because two bars cannot both
+ * pin at the top: this one and the page bar did, and being painted later it hid
+ * the `← 戻る` button outright for as long as anything had arrived. One sticky
+ * container holds both, so they stack instead of covering each other — the
+ * arrangement the home timeline already uses for its tab row.
+ */
+export function NotificationArrivals() {
+  const { buffered } = useNotificationLive();
+  return (
+    <Show when={true}>
+      <button
+        class="block w-full border-b border-(--line) bg-(--surface) px-4 py-3 text-left hover:bg-(--accent-soft)"
+        onClick={flushNotificationArrivals}
+      >
+        新着 {buffered().length} 件
+      </button>
+    </Show>
+  );
+}
+
 export function NotificationsView(props: {
   onSelect: (event: NostrEvent) => void;
 }) {
   const { pubkey } = useAuth();
   const relays = useRelays();
-  const { buffered } = useNotificationLive();
   const feed = useNotifications();
 
   // Live subscriptions run app-wide; this only seeds history the first time.
@@ -60,16 +82,6 @@ export function NotificationsView(props: {
           </p>
         }
       >
-        <Show when={buffered().length > 0}>
-          {/* It pins above the page bar, since a new arrival is the more
-              urgent of the two and the bar is already at the top. */}
-          <button
-            class="sticky top-0 z-30 block w-full border-b border-(--line) bg-(--surface) px-4 py-3 text-left hover:bg-(--accent-soft)"
-            onClick={flushNotificationArrivals}
-          >
-            新着 {buffered().length} 件
-          </button>
-        </Show>
         <Show when={feed.loading() && feed.events().length === 0}>
           <p class="px-4 py-6 text-(--ink-muted)">読み込み中…</p>
         </Show>
