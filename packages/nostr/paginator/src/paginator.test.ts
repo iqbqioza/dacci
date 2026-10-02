@@ -335,3 +335,79 @@ describe("telling an empty timeline from an unreachable one", () => {
     expect(page.events).toHaveLength(3);
   });
 });
+
+describe("a second too crowded to page through", () => {
+  /**
+   * A relay whose newest second holds more events than the client will ever be
+   * asked for, with ordinary history underneath it.
+   *
+   * The burst cannot be paged: NIP-01 pages by `until`, so there is no way to
+   * ask for the rest of one second. Everything below it is a different second
+   * and is perfectly reachable.
+   */
+  function burstRelay(burstAt: number, burstSize: number, older: number) {
+    const burst = Array.from({ length: burstSize }, (_, i) =>
+      makeEvent(burstAt, `b${i.toString().padStart(6, "0")}`),
+    );
+    const rest = Array.from({ length: older }, (_, i) =>
+      makeEvent(burstAt - 1 - i, `o${i.toString().padStart(6, "0")}`),
+    );
+    return [...burst, ...rest];
+  }
+
+  it("reaches the history below it instead of stopping at the burst", async () => {
+    // Parking the relay at the crowded second made everything older unreachable
+    // as well: a few hundred posts landing in one second cost a reader every post
+    // before them, on that relay, for the rest of the session. The timeline
+    // reported "unconfirmed" and there was no way to ask again.
+    const store = burstRelay(1000, 600, 50);
+    const conn = stubConnection("wss://burst", store);
+    const paginator = new TimelinePaginator([conn], { kinds: [1] }, {}, () => 1001_000);
+
+    const seen = new Set<string>();
+    let guard = 0;
+    while (paginator.hasMore() && guard++ < 60) {
+      for (const e of (await paginator.loadNextPage()).events) seen.add(e.id);
+    }
+
+    // The 50 posts a second older than the burst are all here. Before the fix
+    // the burst was terminal and none of them was.
+    const older = store.filter((e) => e.created_at < 1000);
+    expect(older.length).toBe(50);
+    expect(older.filter((e) => seen.has(e.id))).toHaveLength(50);
+  });
+
+  it("does not call the history whole when a slice is out of reach", async () => {
+    // The other half, and the reason the step-down is not simply "ignore it".
+    // A timeline with a hole in it is partial, whatever else was reached.
+    const store = burstRelay(1000, 600, 50);
+    const paginator = new TimelinePaginator(
+      [stubConnection("wss://burst", store)],
+      { kinds: [1] },
+      {},
+      () => 1001_000,
+    );
+    let guard = 0;
+    let coverage = "partial";
+    while (paginator.hasMore() && guard++ < 60) {
+      coverage = (await paginator.loadNextPage()).coverage;
+    }
+    // It finished — no more history to ask for — and it is still not complete.
+    expect(paginator.hasMore()).toBe(false);
+    expect(coverage).toBe("partial");
+  });
+
+  it("still reports a clean timeline as complete", async () => {
+    // The step-down must not cost the honest answer in the ordinary case, or
+    // every reader would be told their history was unconfirmed.
+    const store = makeStore(200, 2000);
+    const paginator = new TimelinePaginator([stubConnection("wss://a", store)], {
+      kinds: [1],
+    });
+    let coverage = "";
+    while (paginator.hasMore()) {
+      coverage = (await paginator.loadNextPage()).coverage;
+    }
+    expect(coverage).toBe("complete");
+  });
+});

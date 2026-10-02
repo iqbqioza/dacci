@@ -17,7 +17,17 @@ import { NoteImage } from "./NoteImage.jsx";
  * The body is already the text a card should show, so a `nostr:` link whose
  * note is embedded below is not repeated here as a link.
  */
-export function NoteBody(props: { event: NostrEvent }) {
+export function NoteBody(props: {
+  event: NostrEvent;
+  /**
+   * The body is not the post: it is a quotation or an excerpt, and everything
+   * around it already opens somewhere. An image would otherwise be a second,
+   * competing target — a tap meant for the quoted post opening the raw file
+   * instead, which is the one thing inside the embed that goes somewhere else
+   * from every other part of it.
+   */
+  plain?: boolean;
+}) {
   // The profiles a post names are asked for by the same store every other
   // name in the app uses, so one batch covers the screen.
   createEffect(() => {
@@ -40,17 +50,21 @@ export function NoteBody(props: { event: NostrEvent }) {
        been tried. The number of segments does not depend on any name, so a row
        keeps its place and its state. */
     <Index each={segments()}>
-      {(segment) => renderSegment(segment(), emojis())}
+      {(segment) => renderSegment(segment(), emojis(), props.plain === true)}
     </Index>
   );
 }
 
-function renderSegment(segment: ContentSegment, emojis: Emoji[]) {
+function renderSegment(
+  segment: ContentSegment,
+  emojis: Emoji[],
+  plain: boolean,
+) {
   if (segment.kind === "text") return <TextRun text={segment.text} emojis={emojis} />;
   if (segment.kind === "mention") {
     return (
       <Mention pubkey={segment.mention.pubkey} label={segment.mention.label} />
     );
   }
-  return <NoteImage image={segment.image} />;
+  return <NoteImage image={segment.image} plain={plain} />;
 }

@@ -8,6 +8,7 @@ import { clearFeedBuffer, useFeedLive } from "./live.js";
 import { isMutedAuthor } from "./muted.js";
 import { createHomeTimeline } from "./nostr.js";
 import { useFeed, useRelays } from "./relays.js";
+import { createPinnedBars } from "./pinned-bars.js";
 import { preservingViewport } from "./viewport.js";
 
 /**
@@ -29,11 +30,12 @@ const [hasMore, setHasMore] = createSignal(true);
 // Guards late async completions from a discarded paginator generation.
 let paginator = createHomeTimeline(relayUrlsValue(), feedAuthorsValue());
 let generation = 0;
-let listRef: HTMLDivElement | undefined;
-let barRef: HTMLButtonElement | undefined;
-let headerRef: HTMLDivElement | undefined;
-let wasBarVisible = false;
-let wasLoadMoreVisible = false;
+/**
+ * The arrivals row and the load-more control both come and go inside the flow,
+ * and a reader scrolled into the feed must not watch the post they were reading
+ * move. Shared with the profile feed, which owes the same two corrections.
+ */
+const bars = createPinnedBars();
 
 function relayUrlsValue(): string[] {
   // The timeline only ever reads, so write-only relays stay out of it.
@@ -81,7 +83,7 @@ export function selectHomeTab(next: FeedTab): void {
  * pinned header and the reader would be scrolled to the wrong place.
  */
 export function pinnedHeaderHeight(): number {
-  return headerRef?.offsetHeight ?? 0;
+  return bars.headerHeight();
 }
 
 export function useHomeFeed() {
@@ -98,18 +100,9 @@ export function useHomeFeed() {
     pendingRelays,
     failed,
     hasMore,
-    barRef: () => barRef,
-    listRef: () => listRef,
-    setListRef: (el: HTMLDivElement | undefined) => {
-      listRef = el;
-    },
-    setBarRef: (el: HTMLButtonElement | undefined) => {
-      barRef = el;
-      wasBarVisible = false;
-    },
-    setHeaderRef: (el: HTMLDivElement | undefined) => {
-      headerRef = el;
-    },
+    setListRef: bars.listRef,
+    setBarRef: bars.barRef,
+    setHeaderRef: bars.headerRef,
   };
 }
 
@@ -177,38 +170,31 @@ export function resetHomeFeed(): void {
  */
 export function flushNewArrivals(): void {
   const plan = planFlush(useFeedLive().buffered(), all());
-  preservingViewport(listRef, () => {
-    // This function accounts for the bar removal itself.
-    wasBarVisible = false;
-    clearFeedBuffer();
-    if (plan.added.length > 0) {
-      setAll(plan.events);
-    }
-  }, pinnedHeaderHeight());
+  preservingViewport(
+    bars.listElement(),
+    () => {
+      // This function accounts for the bar removal itself.
+      bars.barRemoved();
+      clearFeedBuffer();
+      if (plan.added.length > 0) {
+        setAll(plan.events);
+      }
+    },
+    pinnedHeaderHeight(),
+  );
 }
 
 /**
- * The bar only exists while there are new posts, so appearing pushes the
- * list down by one bar height. Undo that for a scrolled reader; at the top
- * the bar is what should be visible. Removal is corrected in
- * flushNewArrivals, together with the prepend.
+ * Absorbs the arrivals row appearing, and the load-more control coming or going.
+ *
+ * Both are read outside `untrack` by the caller, so this is the effect's own
+ * work rather than its trigger.
  */
 export function noteBarVisibility(visible: boolean): void {
-  if (!visible || wasBarVisible) return;
-  wasBarVisible = true;
-  // Only the bar's own height shifts the list: the tab row above it is
-  // always present, so it moves no content when the bar appears.
-  const height = barRef?.offsetHeight ?? 0;
-  if (height <= 0 || window.scrollY <= 0) return;
-  window.scrollBy({ top: height, behavior: "instant" });
+  bars.noteBarVisibility(visible);
 }
 
-/**
- * The load-more control is in the flow as well, so appearing (first page)
- * or disappearing (history exhausted) has to be absorbed too.
- */
 export function noteLoadMoreVisibility(shown: boolean): void {
-  if (shown === wasLoadMoreVisible) return;
-  wasLoadMoreVisible = shown;
-  preservingViewport(listRef, () => undefined, pinnedHeaderHeight());
+  bars.noteLoadMoreVisibility(shown);
 }
+

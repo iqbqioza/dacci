@@ -15,6 +15,7 @@ import {
   type TimelineFilter,
 } from "./nostr.js";
 import { useRelays } from "./relays.js";
+import { createPinnedBars } from "./pinned-bars.js";
 import { preservingViewport } from "./viewport.js";
 
 /**
@@ -29,9 +30,34 @@ const [coverage, setCoverage] = createSignal("partial");
 const [authRelays, setAuthRelays] = createSignal<string[]>([]);
 const [pendingRelays, setPendingRelays] = createSignal<string[]>([]);
 const [hasMore, setHasMore] = createSignal(false);
+
+/**
+ * The arrivals row and the load-more control, shared with the other two feeds.
+ *
+ * This view has a pinned header too — the page bar and the arrivals row share one
+ * sticky container — so the list is pushed down when the row appears and when the
+ * load-more control comes or goes, exactly as in the other two. It had no
+ * correction for either, and its flush anchored at the top of the page rather
+ * than below the pinned header, which is the offset that decides which card the
+ * reader is held on.
+ */
+const bars = createPinnedBars();
+
+/**
+ * Absorbs the arrivals row appearing, and the load-more control coming or going.
+ *
+ * The caller reads the signals outside `untrack`, so this is the effect's own
+ * work rather than its trigger.
+ */
+export function noteBarVisibility(visible: boolean): void {
+  bars.noteBarVisibility(visible);
+}
+
+export function noteLoadMoreVisibility(shown: boolean): void {
+  bars.noteLoadMoreVisibility(shown);
+}
 // Guard for late async completions from a discarded generation.
 let generation = 0;
-let listRef: HTMLDivElement | undefined;
 let loadedFor: string | null = null;
 /**
  * The paginator that holds where the next page starts.
@@ -55,9 +81,9 @@ export function useNotifications() {
     failed,
     hasMore,
     loadedFor,
-    setListRef: (el: HTMLDivElement | undefined) => {
-      listRef = el;
-    },
+    setListRef: bars.listRef,
+    setBarRef: bars.barRef,
+    setHeaderRef: bars.headerRef,
   };
 }
 
@@ -149,10 +175,19 @@ export function flushNotificationArrivals(): void {
           .buffered()
           .filter((event) => isNotification(event, self));
   const plan = planFlush(arriving, events());
-  preservingViewport(listRef, () => {
-    clearNotificationBuffer();
-    if (plan.added.length > 0) setEvents(plan.events);
-  });
+  preservingViewport(
+    bars.listElement(),
+    () => {
+      // This function accounts for the row's own removal, alongside the prepend.
+      bars.barRemoved();
+      clearNotificationBuffer();
+      if (plan.added.length > 0) setEvents(plan.events);
+    },
+    // Below the pinned header, which is the offset that says which card the
+    // reader is actually looking at. Zero anchors to whatever is under the page
+    // bar instead.
+    bars.headerHeight(),
+  );
 }
 
 export type { TimelineFilter };

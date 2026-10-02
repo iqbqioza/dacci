@@ -7,6 +7,7 @@ import { planFlush } from "./flush.js";
 import { clearProfileBuffer, useProfileLive } from "./live.js";
 import { createTimeline, PROFILE_KINDS } from "./nostr.js";
 import { useRelays } from "./relays.js";
+import { createPinnedBars } from "./pinned-bars.js";
 import { preservingViewport } from "./viewport.js";
 
 /**
@@ -26,12 +27,13 @@ const [authRelays, setAuthRelays] = createSignal<string[]>([]);
 const [pendingRelays, setPendingRelays] = createSignal<string[]>([]);
 const [hasMore, setHasMore] = createSignal(true);
 
+/** The arrivals row and the load-more control, shared with the home timeline. */
+const bars = createPinnedBars();
+
 let paginator = createTimeline(useRelays().readRelays(), {
   kinds: PROFILE_KINDS,
 });
 let generation = 0;
-let listRef: HTMLDivElement | undefined;
-let headerRef: HTMLDivElement | undefined;
 
 /**
  * The tab is a view over the loaded list, not a separate query: no relay
@@ -56,13 +58,26 @@ export function useProfileFeed() {
     pendingRelays,
     failed,
     hasMore,
-    setListRef: (el: HTMLDivElement | undefined) => {
-      listRef = el;
-    },
-    setHeaderRef: (el: HTMLDivElement | undefined) => {
-      headerRef = el;
-    },
+    setListRef: bars.listRef,
+    setBarRef: bars.barRef,
+    setHeaderRef: bars.headerRef,
   };
+}
+
+/**
+ * Absorbs the arrivals row appearing, and the load-more control coming or going.
+ *
+ * The profile feed had neither, and a profile is where a reader is most likely
+ * to be scrolled: they arrived from a link to somebody they already follow. Every
+ * new post from that person pushed the list down by the row's height with nothing
+ * to hold it, so the post they were reading moved on every arrival.
+ */
+export function noteBarVisibility(visible: boolean): void {
+  bars.noteBarVisibility(visible);
+}
+
+export function noteLoadMoreVisibility(shown: boolean): void {
+  bars.noteLoadMoreVisibility(shown);
 }
 
 /** Switches tab without touching the network: the list is already there. */
@@ -151,8 +166,14 @@ export function resetProfileFeed(): void {
 /** New posts by this subject, pinned above the list without moving it. */
 export function flushProfileArrivals(): void {
   const plan = planFlush(useProfileLive().buffered(), all());
-  preservingViewport(listRef, () => {
-    clearProfileBuffer();
-    if (plan.added.length > 0) setAll(plan.events.sort(compareEvents));
-  }, headerRef?.offsetHeight ?? 0);
+  preservingViewport(
+    bars.listElement(),
+    () => {
+      // This function accounts for the row's own removal, alongside the prepend.
+      bars.barRemoved();
+      clearProfileBuffer();
+      if (plan.added.length > 0) setAll(plan.events.sort(compareEvents));
+    },
+    bars.headerHeight(),
+  );
 }

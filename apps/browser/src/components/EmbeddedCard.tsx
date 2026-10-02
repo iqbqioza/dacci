@@ -47,7 +47,10 @@ export function EmbeddedCard(props: {
                 <p class="line-clamp-4 text-sm break-words whitespace-pre-wrap text-(--ink)">
                   {/* The embed shows no note of its own, so a link to a post
                       that is not rendered here stays in the quoted text. */}
-                  <NoteBody event={note} />
+                  {/* Plain: the card around this already opens the
+                      quoted post, so an image inside it must not open the
+                      raw file instead. */}
+                  <NoteBody event={note} plain />
                 </p>
               </SensitiveBody>
             </div>

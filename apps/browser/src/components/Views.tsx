@@ -1,5 +1,5 @@
 import type { NostrEvent } from "dacci-nostr-nips";
-import { createEffect, createSignal, For, onMount, Show } from "solid-js";
+import { createEffect, createSignal, For, onMount, Show, untrack } from "solid-js";
 import {
   extensionAvailable,
   loginWithExtension,
@@ -11,6 +11,8 @@ import {
   ensureNotifications,
   flushNotificationArrivals,
   loadMoreNotifications,
+  noteBarVisibility,
+  noteLoadMoreVisibility,
   useNotifications,
 } from "../notifications-feed.js";
 import { retryWhilePending } from "../feed-retry.js";
@@ -41,9 +43,11 @@ function newestFirst(a: NostrEvent, b: NostrEvent): number {
  */
 export function NotificationArrivals() {
   const { buffered } = useNotificationLive();
+  const feed = useNotifications();
   return (
     <Show when={buffered().length > 0}>
       <button
+        ref={feed.setBarRef}
         class="block w-full border-b border-(--line) bg-(--surface) px-4 py-3 text-left hover:bg-(--accent-soft)"
         onClick={flushNotificationArrivals}
       >
@@ -59,6 +63,7 @@ export function NotificationsView(props: {
   const { pubkey } = useAuth();
   const relays = useRelays();
   const feed = useNotifications();
+  const { buffered } = useNotificationLive();
 
   // Live subscriptions run app-wide; this only seeds history the first time.
   onMount(() => {
@@ -77,6 +82,20 @@ export function NotificationsView(props: {
   // for again. Only the home timeline retried, so these two sat on their empty
   // message with no second attempt and nothing saying the load had failed.
   retryWhilePending(feed, loadMoreNotifications);
+
+  // The arrivals row and the load-more control both move the list when they come
+  // or go. The signals are read *outside* `untrack`, or the effect tracks nothing
+  // and runs once for the life of the page — which is what left every arriving
+  // notification pushing the reader's post off the screen.
+  createEffect(() => {
+    const arriving = pubkey() !== null && buffered().length > 0;
+    untrack(() => noteBarVisibility(arriving));
+  });
+
+  createEffect(() => {
+    const more = feed.hasMore() && !feed.loading();
+    untrack(() => noteLoadMoreVisibility(more));
+  });
 
   return (
     <div>
@@ -261,7 +280,11 @@ export function SettingsView() {
   );
 }
 
-const THEME_CHOICES: Array<{ id: Theme; label: string; swatch: string }> = [
+export const THEME_CHOICES: Array<{
+  id: Theme;
+  label: string;
+  swatch: string;
+}> = [
   { id: "system", label: "システム", swatch: "linear-gradient(105deg, #ffffff 50%, #111111 50%)" },
   { id: "light", label: "ライト", swatch: "#ffffff" },
   { id: "dark", label: "ダーク", swatch: "#111111" },

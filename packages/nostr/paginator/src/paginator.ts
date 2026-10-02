@@ -55,7 +55,14 @@ interface RelayState {
   cursor: RelayCursor;
   exhausted: boolean;
   offline: boolean;
-  needsSplit: boolean;
+  /**
+   * One second of this relay's timeline held more events than the client will
+   * ever be handed, so a slice of it cannot be reached. The relay keeps paging
+   * below that second — everything under it is still reachable — but the
+   * history is no longer whole, and `coverage` says so for the rest of the
+   * session rather than calling a timeline with a hole in it complete.
+   */
+  unreachable: boolean;
   /** Relay demands NIP-42 auth. Excluded until a signer is configured. */
   needsAuth: boolean;
   failCount: number;
@@ -123,7 +130,7 @@ export class TimelinePaginator {
         },
         exhausted: false,
         offline: false,
-        needsSplit: false,
+        unreachable: false,
         needsAuth: false,
         failCount: 0,
         nextRetryAt: 0,
@@ -175,7 +182,7 @@ export class TimelinePaginator {
       // timeline's background retry — which polls while anything is pending —
       // woke up on exactly this state, forever. `coverage` still reads
       // "partial", which is the honest answer here.
-      [...this.relays.values()].some((r) => !r.exhausted && !r.needsSplit) ||
+      [...this.relays.values()].some((r) => !r.exhausted) ||
       this.countCommittable() > 0
     );
   }
@@ -191,7 +198,7 @@ export class TimelinePaginator {
       };
       state.exhausted = false;
       state.offline = false;
-      state.needsSplit = false;
+      state.unreachable = false;
       state.needsAuth = false;
       state.failCount = 0;
       state.nextRetryAt = 0;
@@ -213,7 +220,6 @@ export class TimelinePaginator {
     return [...this.relays.values()].filter(
       (r) =>
         !r.exhausted &&
-        !r.needsSplit &&
         !r.needsAuth &&
         (!r.offline || now >= r.nextRetryAt),
     );
@@ -374,9 +380,20 @@ export class TimelinePaginator {
     }
     cursor.limit = Math.min(cursor.limit * 2, this.maxLimit);
     cursor.noProgressRounds += 1;
-    if (cursor.limit >= this.maxLimit && cursor.noProgressRounds >= 2) {
-      state.needsSplit = true;
-    }
+    if (cursor.limit < this.maxLimit) return;
+    // A single second held more events than the client will ever be handed, and
+    // the relay will not break that second up: NIP-01 pages by `until`, so there
+    // is no way to ask for the rest of one. Everything *below* it is still
+    // reachable, though, and parking here threw that away too — a burst of a few
+    // hundred posts in one second made every older post on that relay
+    // permanently unreachable, while the timeline reported "unconfirmed" and
+    // offered no way to ask again. Step below the boundary and keep paging, and
+    // record that a slice is out of reach so the history is not called whole.
+    cursor.until -= 1;
+    cursor.limit = this.baseLimit;
+    cursor.seenAtBoundary = new Set();
+    cursor.noProgressRounds = 0;
+    state.unreachable = true;
   }
 
   private globalWatermark(): number {
@@ -386,7 +403,7 @@ export class TimelinePaginator {
     // Section 13 wants. With no blocking relay left, everything gathered is
     // committable; coverage is reported as partial whenever that happens.
     const blocking = [...this.relays.values()].filter(
-      (r) => !r.exhausted && !r.needsSplit && !r.needsAuth && !r.offline,
+      (r) => !r.exhausted && !r.needsAuth && !r.offline,
     );
     if (blocking.length === 0) return -Infinity;
     return Math.min(...blocking.map((r) => r.cursor.until));
@@ -423,7 +440,12 @@ export class TimelinePaginator {
   }
 
   private coverage(): PageCoverage {
-    return [...this.relays.values()].every((r) => r.exhausted)
+    // A relay that stepped below an unreachable second is still exhausted when
+    // it runs out, but its history has a hole in it, so the timeline is not whole
+    // and must not be reported as though it were.
+    return [...this.relays.values()].every(
+      (r) => r.exhausted && !r.unreachable,
+    )
       ? "complete"
       : "partial";
   }
@@ -438,7 +460,7 @@ pendingRelays(): string[] {
     // be asked again until a signer exists, and naming one here is what makes
     // the timeline retry in a loop for a gate that will not move.
     return [...this.relays.values()]
-      .filter((r) => !r.exhausted && !r.needsSplit && !r.needsAuth)
+      .filter((r) => !r.exhausted && !r.needsAuth)
       .map((r) => r.url);
   }
 

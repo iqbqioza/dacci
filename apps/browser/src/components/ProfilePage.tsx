@@ -11,6 +11,8 @@ import { FeedTabs, type FeedTab } from "../feed-tabs.jsx";
 import {
   flushProfileArrivals,
   loadMoreProfile,
+  noteBarVisibility,
+  noteLoadMoreVisibility,
   openProfile,
   selectProfileTab,
   useProfileFeed,
@@ -168,6 +170,23 @@ export function ProfilePage(props: {
   // second attempt — the reader's only way back was to leave and return.
   retryWhilePending(feed, loadMoreProfile);
 
+  // The arrivals row and the load-more control both move the list when they come
+  // or go. The signals are read *outside* `untrack`, or the effect tracks
+  // nothing and runs once for the life of the page — which is what left every new
+  // post from this person pushing the reader's post off the screen.
+  createEffect(() => {
+    // The row is only ever shown for the profile on screen, so the two have to
+    // agree: a buffered post from somebody else must not make this profile's list
+    // jump.
+    const arriving = subject() === feed.subject() && buffered().length > 0;
+    untrack(() => noteBarVisibility(arriving));
+  });
+
+  createEffect(() => {
+    const more = feed.hasMore() && !feed.loading();
+    untrack(() => noteLoadMoreVisibility(more));
+  });
+
   return (
     <Show
       when={props.invalid === true ? "" : subject0()}
@@ -194,6 +213,7 @@ export function ProfilePage(props: {
             <FeedTabs tab={feed.tab()} onSelect={onTab} />
             <Show when={subject() === author() && buffered().length > 0}>
               <button
+                ref={feed.setBarRef}
                 class="block w-full border-b border-(--line) px-4 py-3 text-left hover:bg-(--accent-soft)"
                 onClick={flushProfileArrivals}
               >

@@ -50,7 +50,7 @@ import { resetDeleted, syncDeleted, isDeleted } from "./deleted.js";
 import { requestMyMutes, resetMyMutes } from "./muted.js";
 import { startLiveFeeds, watchProfileSubject } from "./live.js";
 import { adoptMyActivity, syncMyActivity } from "./my-actions.js";
-import { resetNotifications } from "./notifications-feed.js";
+import { resetNotifications, useNotifications } from "./notifications-feed.js";
 import { resetProfileFeed, openProfile } from "./profile-feed.js";
 import { resetProfiles } from "./profile.js";
 import { ProfileEditor } from "./components/ProfileEditor.jsx";
@@ -526,7 +526,10 @@ function MenuContent(props: {
             when={menu() === "notifications"}
             fallback={<PageBar id={`#/${menu()}`} />}
           >
-            <div class="sticky top-0 z-30 bg-(--surface)">
+            <div
+              ref={useNotifications().setHeaderRef}
+              class="sticky top-0 z-30 bg-(--surface)"
+            >
               <PageBar id={`#/${menu()}`} />
               <NotificationArrivals />
             </div>
