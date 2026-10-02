@@ -262,7 +262,21 @@ export class RelayConnection {
     // the page's life, leaving its history permanently empty.
     this.answeredChallenges.clear();
     this.setStatus("connecting");
+    // Both handlers are guarded on still being the current socket. A browser
+    // fires `error` and then `close` for the same socket, so the first one puts a
+    // reconnect on the timer; by the time the second arrives the redial may
+    // already have installed a healthy socket, and without this the stale
+    // `close` would fail every query and publish in flight on that healthy
+    // connection, flip the status to closed, orphan it without closing it, and
+    // dial a third — a relay with one flaky frame would refuse to settle
+    // anything until the tab was reloaded.
+    const isCurrent = (): boolean => this.socket === socket;
     socket.onopen = () => {
+      if (!isCurrent()) {
+        // A socket that was replaced before it opened is nobody's connection.
+        socket.close();
+        return;
+      }
       this.isOpen = true;
       this.reconnectAttempts = 0;
       if (this.reconnectTimer !== null) {
@@ -275,6 +289,7 @@ export class RelayConnection {
       this.resubscribeLive(socket);
     };
     const fail = () => {
+      if (!isCurrent()) return;
       this.failWaiters.splice(0).forEach((run) => run());
       this.handleDisconnect();
     };

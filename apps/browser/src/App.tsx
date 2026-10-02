@@ -54,6 +54,7 @@ import { resetNotifications } from "./notifications-feed.js";
 import { resetProfileFeed, openProfile } from "./profile-feed.js";
 import { resetProfiles } from "./profile.js";
 import { ProfileEditor } from "./components/ProfileEditor.jsx";
+import { SensitiveBody } from "./components/SensitiveBody.jsx";
 import { addReply, loadReplies, resetReplies, useReplies } from "./replies-feed.js";
 import { loadServers } from "./servers.js";
 import {
@@ -368,9 +369,17 @@ let composeInput: HTMLTextAreaElement | undefined;
                   <ProfileAvatar pubkey={event().pubkey} size={28} />
                   <div class="min-w-0">
                     <ProfileName pubkey={event().pubkey} class="text-sm" />
-                    <p class="line-clamp-3 text-xs break-words text-(--ink-muted)">
-                      {displayContent(event())}
-                    </p>
+                    {/* The target's body goes through the same gate as the
+                        card it came from. It used to be rendered raw, so a
+                        reader who chose not to have sensitive text in the
+                        document at all still got it — selectable and copyable —
+                        the moment they opened the reply box. `line-clamp` is a
+                        visual clamp; the text underneath it was always there. */}
+                    <SensitiveBody event={event()}>
+                      <p class="line-clamp-3 text-xs break-words text-(--ink-muted)">
+                        {displayContent(event())}
+                      </p>
+                    </SensitiveBody>
                   </div>
                 </div>
               )}

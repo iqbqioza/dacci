@@ -1,8 +1,10 @@
+import type { NostrEvent } from "dacci-nostr-nips";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fixturePubkey, signAs } from "./fixture-event.js";
 
-const ME = "1".repeat(64);
-const ALICE = "2".repeat(64);
-const BOB = "3".repeat(64);
+const ME = fixturePubkey("me");
+const ALICE = fixturePubkey("alice");
+const BOB = fixturePubkey("bob");
 
 let signedInAs: string | null = ME;
 
@@ -11,21 +13,20 @@ async function freshStore() {
   return import("./muted.js");
 }
 
-/** The kind 10000 events a relay answers the list query with. */
-function listEvent(tags: string[][], at = 2000): unknown {
-  return {
-    id: "a".repeat(64),
-    kind: 10000,
-    pubkey: ME,
-    created_at: at,
-    content: "",
-    tags,
-    sig: "c".repeat(128),
-  };
+/**
+ * The kind 10000 events a relay answers the list query with.
+ *
+ * Signed by the reader who is signed in, because a mute list the reader did not
+ * write is not read as the reader's mutes — and that is the whole point of the
+ * check, not something a fixture may skip.
+ */
+function listEvent(tags: string[][], at = 2000, pubkey = ME): NostrEvent {
+  const author = pubkey === ME ? "me" : "other";
+  return signAs(author, { kind: 10000, created_at: at, content: "", tags });
 }
 
 function answerWith(
-  events: unknown[],
+  events: NostrEvent[],
   published: unknown[] = [],
   options: { answering?: boolean } = {},
 ): void {
@@ -218,7 +219,7 @@ describe("my mutes", () => {
     store.requestMyMutes();
     await settled();
     expect(store.useMuteState(ALICE).muted()).toBe(true);
-    signedInAs = "9".repeat(64);
+    signedInAs = fixturePubkey("other");
     store.requestMyMutes();
     expect(store.useMuteState(ALICE).muted()).toBeNull();
   });

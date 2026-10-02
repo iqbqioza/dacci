@@ -1,9 +1,10 @@
 import type { NostrEvent } from "dacci-nostr-nips";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fixturePubkey, signAs } from "./fixture-event.js";
 
-const ME = "1".repeat(64);
-const ALICE = "2".repeat(64);
-const BOB = "3".repeat(64);
+const ME = fixturePubkey("me");
+const ALICE = fixturePubkey("alice");
+const BOB = fixturePubkey("bob");
 
 /** A relay answer the test releases when it chooses. */
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
@@ -25,17 +26,19 @@ async function freshStore() {
   return import("./my-follows.js");
 }
 
-/** The kind 3 events a relay answers the list query with. */
+/**
+ * The kind 3 events a relay answers the list query with.
+ *
+ * Signed by whoever `pubkey` names, because the store reads the reader's own
+ * follow list off it and will not read one the reader did not write.
+ */
 function listEvent(tags: string[][], at = 2000, pubkey = ME): NostrEvent {
-  return {
-    id: "a".repeat(64),
+  return signAs(pubkey === ME ? "me" : "other", {
     kind: 3,
-    pubkey,
     created_at: at,
     content: "",
     tags,
-    sig: "c".repeat(128),
-  };
+  });
 }
 
 /** A relay that answers the list query, and records what was published. */
@@ -255,7 +258,7 @@ describe("my follows", () => {
     store.requestMyFollows();
     await settled();
     expect(store.useFollowState(ALICE).following()).toBe(true);
-    signedInAs = "9".repeat(64);
+    signedInAs = fixturePubkey("other");
     store.requestMyFollows();
     expect(store.useFollowState(ALICE).following()).toBeNull();
   });
@@ -285,11 +288,11 @@ describe("my follows", () => {
     store.requestMyFollows();
     await tick();
     // The reader signs out and someone else signs in while the read is out.
-    signedInAs = "9".repeat(64);
+    signedInAs = fixturePubkey("other");
     store.requestMyFollows();
     await tick();
     // The new reader's list answers first, then the old reader's does.
-    second.resolve([listEvent([["p", BOB]], 2000, "9".repeat(64))]);
+    second.resolve([listEvent([["p", BOB]], 2000, fixturePubkey("other"))]);
     await settled();
     first.resolve([listEvent([["p", ALICE]], 2000, ME)]);
     await settled();
@@ -318,7 +321,7 @@ describe("my follows", () => {
     const store = await freshStore();
     store.requestMyFollows();
     await tick();
-    signedInAs = "9".repeat(64);
+    signedInAs = fixturePubkey("other");
     store.requestMyFollows();
     await settled();
     expect(call).toBe(2);

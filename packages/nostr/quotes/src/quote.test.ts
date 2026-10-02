@@ -181,3 +181,41 @@ describe("EmbedStore", () => {
     store.clear();
   });
 });
+
+describe("a note that arrives while its request is out", () => {
+  it("is not thrown away when the relay's answer lacks it", async () => {
+    // The reachable case: a feed shows a note as a post of its own *and* a
+    // repost of it, so the embed is seeded from what the feed already holds
+    // while another card's request for the same id is still in flight. A relay
+    // that no longer has the note — NIP-09, a retention policy — answers without
+    // it, and the answer used to overwrite the seeded note with a failure. The
+    // quoted card then showed a placeholder for something the reader was looking
+    // at two cards above.
+    const query = vi.fn(async () => []);
+    const store = new EmbedStore(query, { flushDelayMs: 1 });
+    store.request([A]);
+    const known = note(A, A, "on screen already");
+    store.put(known);
+    await tick(20);
+    expect(store.peek(A)).toEqual(known);
+    store.clear();
+  });
+
+  it("still lets a failed request be retried when nothing seeded it", async () => {
+    // The other half. The guard above is about a note that exists, and must not
+    // become a way to make a genuinely missing note look present — nor a way to
+    // stop the retries that eventually surface it.
+    let call = 0;
+    const query = vi.fn(async (ids: string[]) => {
+      call += 1;
+      return call === 1 ? [] : ids.map((id) => note(id, A));
+    });
+    const store = new EmbedStore(query, { flushDelayMs: 1, baseRetryMs: 1 });
+    store.request([A]);
+    await tick(20);
+    // Asked again, and the note is there the second time.
+    expect(query.mock.calls.length).toBeGreaterThan(1);
+    expect(store.peek(A)?.id).toBe(A);
+    store.clear();
+  });
+});

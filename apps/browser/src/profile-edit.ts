@@ -2,7 +2,7 @@ import type { MetadataValue } from "dacci-nostr-nips";
 import { birthdayFrom, buildMetadata, withMetadata } from "dacci-nostr-nips";
 import { createSignal } from "solid-js";
 import { useAuth } from "./auth.jsx";
-import { publishEvent } from "./compose.js";
+import { publishEvent, publishFailureText } from "./compose.js";
 import { showNotice } from "./notice.js";
 import { applyProfile, requestProfiles, useProfile } from "./profile.js";
 
@@ -139,12 +139,9 @@ export async function saveProfile(
       }),
       // The editor shows the reason itself rather than the compose dialog's
       // line, which this never opens.
-      () => undefined,
+      (reason) => setError(publishFailureText(reason, "プロフィールの保存")),
     );
-    if (sent === null) {
-      setError("プロフィールを保存できませんでした");
-      return false;
-    }
+    if (sent === null) return false;
     applyProfile(sent);
     setOpen(false);
     showNotice("プロフィールを保存しました");

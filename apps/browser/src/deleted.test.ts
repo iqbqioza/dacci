@@ -1,20 +1,24 @@
 import type { NostrEvent } from "dacci-nostr-nips";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fixturePubkey, signAs } from "./fixture-event.js";
 
-const ME = "1".repeat(64);
-const OTHER = "2".repeat(64);
+const ME = fixturePubkey("me");
+const OTHER = fixturePubkey("other");
 
-/** A NIP-09 request the reader published, naming what it takes away. */
+/**
+ * A NIP-09 request the reader published, naming what it takes away.
+ *
+ * Signed, because a deletion request makes posts disappear. A relay that could
+ * serve one the reader never signed would be able to hide anything from anyone,
+ * so the store reads none.
+ */
 function deletion(id: string, pubkey = ME, at = 1000): NostrEvent {
-  return {
-    id: id.padEnd(64, "0"),
-    pubkey,
+  return signAs(pubkey === ME ? "me" : "other", {
     created_at: at,
     kind: 5,
     tags: [["e", id]],
     content: "",
-    sig: "s".repeat(128),
-  };
+  });
 }
 
 /** A relay answer the test releases when it chooses. */

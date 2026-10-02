@@ -1,20 +1,24 @@
 import type { NostrEvent } from "dacci-nostr-nips";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fixturePubkey, signAs } from "./fixture-event.js";
 
-const SUBJECT = "a".repeat(64);
+const SUBJECT = fixturePubkey("subject");
+/** A followed pubkey. It authors nothing, so it is only ever a tag value. */
 const ONE = "b".repeat(64);
 
-/** A NIP-02 contact list by the subject, naming whoever they follow. */
+/**
+ * A NIP-02 contact list by the subject, naming whoever they follow.
+ *
+ * Signed, because the store reads a follow count off this list and will not
+ * read one off an event the subject did not write.
+ */
 function contacts(follows: string[]): NostrEvent {
-  return {
-    id: "d".repeat(64),
-    pubkey: SUBJECT,
+  return signAs("subject", {
     created_at: 1000,
     kind: 3,
     tags: follows.map((key) => ["p", key]),
     content: "",
-    sig: "s".repeat(128),
-  };
+  });
 }
 
 const tick = (ms = 0): Promise<void> => new Promise((r) => setTimeout(r, ms));

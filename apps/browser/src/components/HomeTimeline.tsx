@@ -1,5 +1,5 @@
 import type { NostrEvent } from "dacci-nostr-nips";
-import { createEffect, For, onCleanup, Show, untrack } from "solid-js";
+import { createEffect, For, Show, untrack } from "solid-js";
 import { FeedTabs, type FeedTab } from "../feed-tabs.jsx";
 import {
   flushNewArrivals,
@@ -9,6 +9,7 @@ import {
   selectHomeTab,
   useHomeFeed,
 } from "../home-feed.js";
+import { retryWhilePending } from "../feed-retry.js";
 import { useFeedLive } from "../live.js";
 import { feedHash, navigate } from "../router.js";
 import { EventCard } from "./EventCard.jsx";
@@ -35,34 +36,25 @@ export function HomeTimeline(props: {
     navigate(feedHash("#/home", tab === "replies"));
   };
 
+  // The signal is read *outside* `untrack`. Reading it inside left the effect
+  // tracking nothing, so it ran once for the life of the page and the arrivals
+  // bar appeared with no correction at all — the list jumped down by the bar's
+  // whole height every single time something arrived, which is the common case
+  // in an active timeline. Only the measurement and the scroll move belong
+  // untracked; they are the effect's own work, not its trigger.
   createEffect(() => {
-    untrack(() => noteBarVisibility(buffered().length > 0));
+    const arriving = buffered().length > 0;
+    untrack(() => noteBarVisibility(arriving));
   });
 
   createEffect(() => {
-    untrack(() => noteLoadMoreVisibility(feed.hasMore() && !feed.loading()));
+    const more = feed.hasMore() && !feed.loading();
+    untrack(() => noteLoadMoreVisibility(more));
   });
 
   // Background retry: while history is still pending on retryable relays
   // (failures, not auth gates), re-attempt without user scrolling.
-  createEffect(() => {
-    const retryable = feed
-      .pendingRelays()
-      .filter((url) => !feed.authRelays().includes(url));
-    if (
-      !feed.hasMore() ||
-      feed.loading() ||
-      feed.loadingMore() ||
-      retryable.length === 0
-    ) {
-      return;
-    }
-    const timer = setTimeout(
-      () => untrack(() => void loadMoreHome()),
-      15000,
-    );
-    onCleanup(() => clearTimeout(timer));
-  });
+  retryWhilePending(feed, loadMoreHome);
 
   return (
     <div>
@@ -88,8 +80,13 @@ export function HomeTimeline(props: {
         <p class="px-4 py-6 text-(--ink-muted)">読み込み中…</p>
       </Show>
       <Show when={!feed.loading() && feed.events().length === 0}>
+        {/* One message for both cases sent a reader to check their relay list
+            over a feed that was merely empty, and hid the one case that was
+            actually a failure behind a page of nothing. */}
         <p class="px-4 py-6 text-(--ink-muted)">
-          イベントを取得できませんでした。リレーの接続を確認してください。
+          {feed.failed()
+            ? "イベントを取得できませんでした。リレーの接続を確認してください。"
+            : "まだ投稿がありません。"}
         </p>
       </Show>
       <Show when={feed.authRelays().length > 0}>

@@ -15,6 +15,7 @@ import {
   selectProfileTab,
   useProfileFeed,
 } from "../profile-feed.js";
+import { retryWhilePending } from "../feed-retry.js";
 import { feedHash, navigate, profileHash } from "../router.js";
 import { formatDate } from "../nostr.js";
 import { useProfileLive } from "../live.js";
@@ -162,6 +163,11 @@ export function ProfilePage(props: {
     navigate(feedHash(base, tab === "replies"));
   };
 
+  // A profile that could not be loaded has to be asked for again. Only the home
+  // timeline retried, so this one sat on "this person has not posted" with no
+  // second attempt — the reader's only way back was to leave and return.
+  retryWhilePending(feed, loadMoreProfile);
+
   return (
     <Show
       when={props.invalid === true ? "" : subject0()}
@@ -206,10 +212,16 @@ export function ProfilePage(props: {
               <p class="px-4 py-6 text-(--ink-muted)">読み込み中…</p>
             </Show>
             <Show when={!feed.loading() && feed.events().length === 0}>
+              {/* Two different things, and the difference is about someone
+                  else: "this person has never posted" is a claim about a third
+                  party, and it is false every time the reason is that no relay
+                  answered. */}
               <p class="px-4 py-6 text-(--ink-muted)">
-                {feed.tab() === "notes"
-                  ? "这只の投稿はまだありません。"
-                  : "投稿はまだありません。"}
+                {feed.failed()
+                  ? "投稿を取得できませんでした。リレーの接続を確認してください。"
+                  : feed.tab() === "notes"
+                    ? "这只の投稿はまだありません。"
+                    : "投稿はまだありません。"}
               </p>
             </Show>
             <For each={feed.events()}>

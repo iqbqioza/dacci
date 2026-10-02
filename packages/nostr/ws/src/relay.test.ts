@@ -624,6 +624,50 @@ describe("RelayConnection.query", () => {
     conn.close();
   });
 
+  it("does not let a stale socket's close tear down its replacement", async () => {
+    // A browser fires `error` and then `close` for the same socket. The first
+    // one puts a reconnect on the timer, so by the time the second arrives the
+    // redial has usually installed a healthy socket — and the stale `close` used
+    // to run as if it were that socket's. It failed every query and publish in
+    // flight on the healthy connection, reported the relay closed, orphaned it
+    // without closing it and dialled a third. One flaky frame, and the relay
+    // settled nothing until the reader reloaded the tab.
+    const sockets: Array<ReturnType<typeof makeSocket>> = [];
+    const factory = () => {
+      const socket = makeSocket();
+      sockets.push(socket);
+      return socket;
+    };
+    const conn = new RelayConnection("wss://example", factory, {
+      baseReconnectMs: 5,
+      maxReconnectMs: 10,
+      authGateProbeMs: 0,
+    });
+    // Get a first connection up, then let it fail the way a browser reports one
+    // broken socket: error, then close.
+    const first = conn.query({ kinds: [1] });
+    await new Promise((r) => setTimeout(r, 0));
+    sockets[0].onerror?.();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sockets.length).toBe(2);
+    sockets[0].onclose?.();
+    await new Promise((r) => setTimeout(r, 50));
+
+    // The replacement is untouched: still open, and still answering.
+    expect(conn.status).toBe("open");
+    expect(sockets.length).toBe(2);
+    const second = conn.query({ kinds: [1] });
+    await new Promise((r) => setTimeout(r, 0));
+    const subId = JSON.parse(
+      vi.mocked(sockets[1].send).mock.calls.at(-1)?.[0] ?? "null",
+    )[1] as string;
+    sockets[1].peer(["EOSE", subId]);
+    expect((await second).eose).toBe(true);
+
+    conn.close();
+    void first;
+  });
+
   it("stops retrying after close()", async () => {
     const sockets: Array<ReturnType<typeof makeSocket>> = [];
     const factory = () => {

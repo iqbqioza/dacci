@@ -1,7 +1,12 @@
 import { COMMENT_KIND, type NostrEvent } from "dacci-nostr-nips";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { postsForTab } from "./feed-tabs.jsx";
-import { homePostsFor, selectHomeTab, useHomeFeed } from "./home-feed.js";
+import {
+  homePostsFor,
+  noteBarVisibility,
+  selectHomeTab,
+  useHomeFeed,
+} from "./home-feed.js";
 
 function note(
   id: string,
@@ -96,5 +101,59 @@ describe("who a mute keeps out of the home feed", () => {
 
   it("keeps every post when nobody is muted", () => {
     expect(homePostsFor([top, reply], "replies", muted([]))).toEqual([top, reply]);
+  });
+});
+
+describe("the arrivals bar moving the list", () => {
+  const BAR = 52;
+  let scrolled: number[];
+
+  beforeEach(() => {
+    scrolled = [];
+    // The store measures the bar and the window, and nothing else.
+    vi.stubGlobal("window", {
+      scrollY: 400,
+      scrollBy: (opts: { top: number }) => scrolled.push(opts.top),
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** Registers a fresh bar, the way the component's ref does on creation. */
+  function mountBar(): void {
+    useHomeFeed().setBarRef({ offsetHeight: BAR } as HTMLButtonElement);
+  }
+
+  it("absorbs the bar arriving under a scrolled reader", () => {
+    // The bar is inserted into the sticky header, so the list below it is pushed
+    // down by its whole height. Left alone, the post the reader was reading jumps
+    // on every arrival — which in an active timeline is every few seconds.
+    mountBar();
+    noteBarVisibility(true);
+    expect(scrolled).toEqual([BAR]);
+  });
+
+  it("absorbs it again on the next arrival", () => {
+    // The second arrival is the one that used to go unnoticed: the flag left set
+    // from the first, and the bar is created afresh each time.
+    mountBar();
+    noteBarVisibility(true);
+    noteBarVisibility(false);
+    mountBar();
+    noteBarVisibility(true);
+    expect(scrolled).toEqual([BAR, BAR]);
+  });
+
+  it("does not scroll for a reader already at the top", () => {
+    // At the top the bar is what should be visible, so nothing is corrected.
+    vi.stubGlobal("window", {
+      scrollY: 0,
+      scrollBy: (opts: { top: number }) => scrolled.push(opts.top),
+    });
+    mountBar();
+    noteBarVisibility(true);
+    expect(scrolled).toEqual([]);
   });
 });

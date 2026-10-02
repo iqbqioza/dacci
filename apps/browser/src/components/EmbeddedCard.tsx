@@ -1,6 +1,6 @@
 import type { NostrEvent } from "dacci-nostr-nips";
 import { Show } from "solid-js";
-import { useEmbed } from "../embeds.js";
+import { useEmbed, useEmbedLoading } from "../embeds.js";
 import { formatTime } from "../nostr.js";
 import { NoteBody } from "./NoteBody.jsx";
 import { ProfileAvatar, ProfileName } from "./ProfileAvatar.jsx";
@@ -64,8 +64,12 @@ export function EmbeddedCard(props: {
  * and says plainly when no relay has the note, instead of spinning forever.
  */
 export function EmbeddedPlaceholder(props: { event: NostrEvent }) {
+  // The cheap question. Asking `useEmbed` for this flag re-read the note, and
+  // reading a note inline in a repost means verifying a signature — so the
+  // placeholder was paying for work it does not use, once per card per render.
+  const loading = useEmbedLoading(props.event);
   return (
-    <Show when={useEmbed(props.event).loading}>
+    <Show when={loading()}>
       <div
         class="mt-2 rounded-2xl border border-(--line) px-3 py-2.5 text-sm text-(--ink-muted)"
         aria-live="polite"

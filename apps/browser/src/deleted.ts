@@ -1,3 +1,4 @@
+import { authenticatedAnswer } from "./authored.js";
 import type { Filter, NostrEvent } from "dacci-nostr-nips";
 import { DELETION_KIND, deletedEventIds } from "dacci-nostr-nips";
 import { createSignal } from "solid-js";
@@ -116,7 +117,8 @@ export async function syncDeleted(pubkey: string): Promise<void> {
         ]);
         // A relay that refused is not an answer, so it is kept apart from one
         // that replied with nothing.
-        return result?.failed === true || result === null ? null : result.events;
+        if (result?.failed === true || result === null) return null;
+        return authenticatedAnswer(result.events, pubkey);
       }),
   );
   const events: NostrEvent[] = [];

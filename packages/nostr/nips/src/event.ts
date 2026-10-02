@@ -104,6 +104,17 @@ export function hasValidSignature(event: NostrEvent): boolean {
   }
 }
 
+/**
+ * The pubkey a 32-byte secret signs under.
+ *
+ * The other half of `hasValidSignature`: given the key, the pubkey the events
+ * will carry. Kept here so a caller that holds a key never has to reach for
+ * `@noble/curves` itself to name the author it is signing as.
+ */
+export function pubkeyFor(secretKeyHex: string): string {
+  return bytesToHex(schnorr.getPublicKey(hexToBytes(secretKeyHex)));
+}
+
 /** Newest-first order: created_at desc, id asc (NIP-01 tie-break). */
 export function compareEvents(a: NostrEvent, b: NostrEvent): number {
   if (a.created_at !== b.created_at) {

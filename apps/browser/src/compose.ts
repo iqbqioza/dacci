@@ -190,6 +190,21 @@ const FAILURE_TEXT: Record<PublishFailure, string> = {
   empty: "本文を入力してください",
 };
 
+/**
+ * The sentence to show when a publish of `action` failed for `reason`.
+ *
+ * A caller that never opens the compose dialog has to report the reason itself,
+ * and reporting only "the follow failed" is a false statement about half the
+ * reasons: a reader who dismissed the signing prompt was never refused by any
+ * relay. Two of the reasons are about the reader's setup rather than the
+ * action, and are already worded for them.
+ */
+export function publishFailureText(reason: PublishFailure, action: string): string {
+  if (reason === "no-signer" || reason === "no-relay") return FAILURE_TEXT[reason];
+  if (reason === "cancelled") return FAILURE_TEXT.cancelled;
+  return `${action}に失敗しました`;
+}
+
 function now(): number {
   return Math.floor(Date.now() / 1000);
 }
@@ -217,6 +232,10 @@ export async function publishReply(
   const body = text.trim();
   if (pubkey === null) return { failure: "no-signer" };
   if (body === "") return { failure: "empty" };
+  // The reason is captured rather than assumed: reporting "the relays refused"
+  // after the reader dismissed the signing prompt describes a refusal that never
+  // happened, and the reply form shows this sentence as the reason it failed.
+  let failure: PublishFailure = "rejected";
   const sent = await publishEvent(
     buildReply({
       pubkey,
@@ -225,9 +244,11 @@ export async function publishReply(
       text: body,
       createdAt: now(),
     }),
-    () => undefined,
+    (reason) => {
+      failure = reason;
+    },
   );
-  if (sent === null) return { failure: "rejected" };
+  if (sent === null) return { failure };
   // Remember the action, so the post's row shows it was answered. Recorded
   // against the account that signed, not against whoever is signed in now.
   markReplied(target.id, pubkey);

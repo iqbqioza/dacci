@@ -1,10 +1,10 @@
+import { fixturePubkey, signAs } from "./fixture-event.js";
 import type { NostrEvent } from "dacci-nostr-nips";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const ME = "1".repeat(64);
-const OTHER = "2".repeat(64);
+const ME = fixturePubkey("me");
+const OTHER = fixturePubkey("other");
 const POST = "a".repeat(64);
-const REACTION = "b".repeat(64);
 
 class MemoryStorage {
   private readonly items = new Map<string, string>();
@@ -19,31 +19,42 @@ class MemoryStorage {
   }
 }
 
-/** A NIP-25 reaction by the reader, naming the post it is on. */
+/**
+ * A NIP-25 reaction by the reader, naming the post it is on.
+ *
+ * Signed, because reconciling against these events is what erases an action the
+ * reader took, and an unsigned answer from a relay must not be able to do that.
+ */
 function reaction(at = 1000): NostrEvent {
-  return {
-    id: REACTION,
-    pubkey: ME,
+  return signAs("me", {
     created_at: at,
     kind: 7,
     tags: [["e", POST]],
     content: "+",
-    sig: "s".repeat(128),
-  };
+  });
 }
 
 /** The reader's NIP-09 request taking that reaction back. */
 function undo(at = 1100): NostrEvent {
-  return {
-    id: "c".repeat(64),
-    pubkey: ME,
+  return signAs("me", {
     created_at: at,
     kind: 5,
-    tags: [["e", REACTION]],
+    tags: [["e", reactionId()]],
     content: "",
-    sig: "s".repeat(128),
-  };
+  });
 }
+
+/**
+ * The id of the reaction `undo()` takes back.
+ *
+ * A real signature makes the id depend on every field including `created_at`, so
+ * it cannot be a constant beside the fixture — and a fixture that pretended
+ * otherwise was describing an event no client could have signed.
+ */
+function reactionId(): string {
+  return reaction(1000).id;
+}
+
 
 const tick = (ms = 0): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -152,13 +163,13 @@ describe("reconciling with the relays", () => {
     // ME signs the reaction, then OTHER is on screen by the time it resolves.
     who = OTHER;
     store.adoptMyActivity(OTHER);
-    store.markReacted(POST, REACTION, ME);
+    store.markReacted(POST, reactionId(), ME);
 
     expect(store.hasDone("react", POST)).toBe(false);
     // Recorded with the account it belongs to, the same account's own use does.
     who = ME;
     store.adoptMyActivity(ME);
-    store.markReacted(POST, REACTION, ME);
+    store.markReacted(POST, reactionId(), ME);
     expect(store.hasDone("react", POST)).toBe(true);
   });
 
@@ -171,7 +182,7 @@ describe("reconciling with the relays", () => {
         ? { failed: false, events: [] }
         : new Promise(() => {}),
     );
-    store.markReacted(POST, REACTION);
+    store.markReacted(POST, reactionId());
     expect(store.hasDone("react", POST)).toBe(true);
 
     void store.syncMyActivity();
@@ -185,16 +196,27 @@ describe("reconciling with the relays", () => {
   it("keeps an action the queried window does not reach", async () => {
     // A full window means older events exist that were never asked for, so the
     // answer is not entitled to remove what it did not see.
-    const full = Array.from({ length: 500 }, (_, i) => ({
-      ...reaction(2000 + i),
-      id: `${i.toString().padStart(4, "0")}`.padEnd(64, "0"),
-      tags: [["e", `${i}`.padStart(64, "0")]],
-    }));
+    //
+    // 50 is the window the app asks for, and a full one is the case this test
+    // exists for: fewer than that and the store would treat the answer as the
+    // whole truth. It is written out rather than imported because a test that
+    // read the constant could not tell that the constant had changed.
+    // Each reaction is signed separately, which is what it costs to fill a
+    // window: the id is the hash of the author's own fields, so a fixture that
+    // overwrote it was describing 500 events no client could have produced.
+    const full = Array.from({ length: 50 }, (_, i) =>
+      signAs("me", {
+        created_at: 2000 + i,
+        kind: 7,
+        tags: [["e", `${i}`.padStart(64, "0")]],
+        content: "+",
+      }),
+    );
     const store = await signedIn(async () => ({
       failed: false,
       events: full,
     }));
-    store.markReacted(POST, REACTION);
+    store.markReacted(POST, reactionId());
     await store.syncMyActivity();
     expect(store.hasDone("react", POST)).toBe(true);
   });
@@ -207,7 +229,7 @@ describe("reconciling with the relays", () => {
         ? { failed: false, events: [reaction(), undo()] }
         : new Promise(() => {}),
     );
-    store.markReacted(POST, REACTION);
+    store.markReacted(POST, reactionId());
     expect(store.hasDone("react", POST)).toBe(true);
     void store.syncMyActivity();
     await vi.advanceTimersByTimeAsync(6000);
@@ -219,12 +241,12 @@ describe("reconciling with the relays", () => {
       failed: false,
       events: [reaction()],
     }));
-    store.markReacted(POST, REACTION);
+    store.markReacted(POST, reactionId());
     void store.syncMyActivity();
     await vi.advanceTimersByTimeAsync(100);
     // Kept, because the relays did report it.
     expect(store.hasDone("react", POST)).toBe(true);
-    expect(store.activityFor(POST).react).toBe(REACTION);
+    expect(store.activityFor(POST).react).toBe(reactionId());
   });
 
   it("leaves the state alone when no relay answers", async () => {
@@ -235,7 +257,7 @@ describe("reconciling with the relays", () => {
     const store = await signedIn(
       async () => new Promise(() => {}) as Promise<{ failed: boolean; events: NostrEvent[] }>,
     );
-    store.markReacted(POST, REACTION);
+    store.markReacted(POST, reactionId());
     expect(store.hasDone("react", POST)).toBe(true);
 
     const round = store.syncMyActivity();

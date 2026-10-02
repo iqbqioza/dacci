@@ -286,3 +286,49 @@ describe("quoting by link", () => {
     expect(embeds.useEmbed(post)).toEqual({ event: null, loading: false });
   });
 });
+
+describe("the inline note memo", () => {
+  it("does not let a tampered post read another post's answer", async () => {
+    // The memo is keyed by the event's id, which is only a sound key while the
+    // id is the hash of the event's own fields. A post that keeps an id it no
+    // longer matches would otherwise be handed whatever was cached for the id it
+    // is claiming — so the answer to "what does this post embed" would come from
+    // a different post entirely, and nothing about the second post would say so.
+    const embeds = createEmbeds(async () => [], FAST);
+    const inner = await inlineNote("the original");
+
+    // A well-formed repost carrying the note inline, id and all.
+    const base = quoteRepost(inner.id);
+    const fields = { ...base, content: JSON.stringify(inner) };
+    const honest: NostrEvent = { ...fields, id: computeEventId(fields) };
+    expect(embeds.useEmbed(honest).event).toEqual(inner);
+
+    // The same post with the note's words swapped, keeping the id it no longer
+    // matches. Asked second, so an unsound memo would hand it the answer above.
+    const tampered: NostrEvent = {
+      ...honest,
+      content: JSON.stringify({ ...inner, content: "TRUST ME" }),
+    };
+    expect(tampered.id).toBe(honest.id);
+    expect(embeds.useEmbed(tampered).event).toBeNull();
+  });
+
+  it("answers the same post the same way however often it is asked", async () => {
+    // The memo is a cost measure, not a rule, so what is worth pinning is that it
+    // did not quietly become a different answer on the second and third reading.
+    // A timing assertion is deliberately absent: a memo this large either saves
+    // far more than any budget a test could set or the budget is machine-shaped,
+    // and a test that only fails on slow hardware is not a test.
+    const embeds = createEmbeds(async () => [], FAST);
+    const inner = await inlineNote("the original");
+    const base = quoteRepost(inner.id);
+    const fields = { ...base, content: JSON.stringify(inner) };
+    const repost: NostrEvent = { ...fields, id: computeEventId(fields) };
+
+    for (let i = 0; i < 5; i++) {
+      expect(embeds.useEmbed(repost).event).toEqual(inner);
+    }
+    // And a different post embedding nothing still gets nothing, after all that.
+    expect(embeds.useEmbed(quoteRepost(OTHER_ID)).event).toBeNull();
+  });
+});

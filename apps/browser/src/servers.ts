@@ -1,7 +1,9 @@
 import type { Filter } from "dacci-nostr-nips";
+import type { NostrEvent } from "dacci-nostr-nips";
+import { signedBy } from "./authored.js";
 import { createSignal } from "solid-js";
 import { useAuth } from "./auth.js";
-import { publishEvent } from "./compose.js";
+import { publishEvent, publishFailureText } from "./compose.js";
 import { getConnection } from "./nostr.js";
 import { showNotice } from "./notice.js";
 import { useRelays } from "./relays.js";
@@ -205,16 +207,23 @@ export async function publishServers(): Promise<boolean> {
     return false;
   }
   const created_at = Math.floor(Date.now() / 1000);
-  const sent = await publishEvent({
-    pubkey,
-    created_at,
-    kind: CURRENT_SERVER_LIST_KIND,
-    // The reader's own servers, and only those: BUD-03 has a client upload to
-    // the first server in the list, so the app's own defaults written here
-    // would take uploads away from the server the reader chose.
-    tags: servers().map((server) => ["server", server.url]),
-    content: "",
-  }, () => undefined);
+  const sent = await publishEvent(
+    {
+      pubkey,
+      created_at,
+      kind: CURRENT_SERVER_LIST_KIND,
+      // The reader's own servers, and only those: BUD-03 has a client upload to
+      // the first server in the list, so the app's own defaults written here
+      // would take uploads away from the server the reader chose.
+      tags: servers().map((server) => ["server", server.url]),
+      content: "",
+    },
+    // The local list has already changed by the time this runs, so a failure
+    // that says nothing leaves the reader looking at an edit that was never
+    // written to their account — on another client the server they just added
+    // is simply absent, and the one they removed is still there.
+    (reason) => showNotice(publishFailureText(reason, "サーバー一覧の保存")),
+  );
   if (sent === null) return false;
   // Remember when this browser wrote, so a relay answer that predates the
   // write is recognised as stale instead of undoing the edit.
@@ -371,10 +380,17 @@ async function fetchServerPreference(pubkey: string): Promise<FetchedList> {
   // No `limit`: the read relays disagree about which kinds they store, so
   // asking each for a single event can lose the whole list to one relay that
   // happens to answer first with nothing. Every reply is merged.
-  const events = await oneQuery({
-    kinds: SERVER_LIST_KINDS,
-    authors: [pubkey],
-  });
+  // These events are where the app sends the reader's uploads, signed with the
+  // reader's key. A forged list is therefore a redirect, so it is read only if
+  // the reader signed it — and an answer made entirely of forgeries is no
+  // answer, which leaves the device's own list in place.
+  const events = signedBy(
+    (await oneQuery({
+      kinds: SERVER_LIST_KINDS,
+      authors: [pubkey],
+    })) as NostrEvent[],
+    pubkey,
+  );
   // A replaceable event: relays lag behind each other, so only the newest
   // answer describes the list the reader has now. The newer kind wins over
   // an older one even when its copy was published earlier, because the

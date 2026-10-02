@@ -22,6 +22,8 @@ export interface TimelinePage {
   pendingRelays: string[];
   /** URLs of relays waiting for NIP-42 auth. UI should prompt for login. */
   authRequiredRelays: string[];
+  /** URLs of relays that refused the round or missed its deadline. */
+  failedRelays: string[];
 }
 
 export interface PaginatorOptions {
@@ -136,6 +138,9 @@ export class TimelinePaginator {
         coverage: this.coverage(),
         pendingRelays: this.pendingRelays(),
         authRequiredRelays: this.authRequiredRelays(),
+        // Still reported: a page handed back because another is already in
+        // flight is not a statement that the relays are all well.
+        failedRelays: this.failedRelays(),
       };
     }
     this.loading = true;
@@ -413,6 +418,7 @@ export class TimelinePaginator {
       coverage: this.coverage(),
       pendingRelays: this.pendingRelays(),
       authRequiredRelays: this.authRequiredRelays(),
+      failedRelays: this.failedRelays(),
     };
   }
 
@@ -433,6 +439,22 @@ pendingRelays(): string[] {
     // the timeline retry in a loop for a gate that will not move.
     return [...this.relays.values()]
       .filter((r) => !r.exhausted && !r.needsSplit && !r.needsAuth)
+      .map((r) => r.url);
+  }
+
+  /**
+   * Relays that refused the round or missed its deadline.
+   *
+   * This is what separates "there is nothing here" from "nobody was able to tell
+   * us". A feed that renders one message for both tells a reader their own
+   * account has never posted when the truth is that every relay refused, and a
+   * reader of someone else's profile that this person has never written a word.
+   * A relay is listed only while it is actually failing, so an empty list means
+   * the relays did answer.
+   */
+  failedRelays(): string[] {
+    return [...this.relays.values()]
+      .filter((r) => r.failCount > 0)
       .map((r) => r.url);
   }
 

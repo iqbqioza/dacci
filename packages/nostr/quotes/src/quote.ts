@@ -158,6 +158,12 @@ export class EmbedStore {
         continue;
       }
       const previous = this.entries.get(id);
+      // A note that arrived while the request was out is known, whatever the
+      // relay says. Overwriting it with a failure is what made an embed vanish:
+      // the reader was already looking at that note elsewhere on the feed, so it
+      // was seeded, and a relay that no longer had it (NIP-09, retention) took it
+      // back out of the card that quoted it.
+      if (previous !== undefined && previous.status === "loaded") continue;
       const attempts =
         previous !== undefined && previous.status === "failed"
           ? previous.attempts + 1

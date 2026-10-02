@@ -1,5 +1,10 @@
+import type { NostrEvent } from "dacci-nostr-nips";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { addServer, BUILTIN_SERVERS, removeServer } from "./servers.js";
+import { fixturePubkey, signAs } from "./fixture-event.js";
+
+/** The account whose BUD-03 list these tests publish. */
+const READER = fixturePubkey("reader");
 
 /** The store is module level, so a fresh import gives a clean list. */
 async function freshStore() {
@@ -47,18 +52,23 @@ function answerWith(
   }));
 }
 
-/** A kind 10063 list event, as a client would have published it. */
+/**
+ * A kind 10063 list event, as a client would have published it.
+ *
+ * Signed, because this list is where the app sends the reader's uploads. A relay
+ * that could serve one the reader never signed would be choosing where their
+ * signed Blossom and NIP-98 authorizations go.
+ */
 function listEvent(
   urls: string[],
-  options: { kind?: number; at?: number; id?: string } = {},
-): unknown {
-  return {
-    id: options.id ?? "b".repeat(64),
+  options: { kind?: number; at?: number; author?: string } = {},
+): NostrEvent {
+  return signAs(options.author ?? "reader", {
     kind: options.kind ?? 10063,
     created_at: options.at ?? 2000,
     content: "",
     tags: urls.map((url) => ["server", url]),
-  };
+  });
 }
 
 beforeEach(() => {
@@ -146,7 +156,7 @@ describe("upload servers", () => {
   it("keeps a built-in once when a published list names it too", async () => {
     // A list published on another client can name a server the app already
     // offers, and the reader should not see the same address twice.
-    const pubkey = "a".repeat(64);
+    const pubkey = READER;
     const first = BUILTIN_SERVERS[0].url;
     vi.resetModules();
     vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
@@ -162,7 +172,7 @@ describe("upload servers", () => {
 
 describe("loadServers", () => {
   it("reads the published list when signed in", async () => {
-    const pubkey = "a".repeat(64);
+    const pubkey = READER;
     const asked: unknown[] = [];
     vi.resetModules();
     vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
@@ -176,7 +186,7 @@ describe("loadServers", () => {
   });
 
   it("keeps the stored list when the account published nothing", async () => {
-    const pubkey = "a".repeat(64);
+    const pubkey = READER;
     vi.resetModules();
     vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
     vi.doMock("./compose.js", () => ({ publishEvent: async () => null }));
@@ -188,7 +198,7 @@ describe("loadServers", () => {
   });
 
   it("asks for both list kinds in one filter", async () => {
-    const pubkey = "a".repeat(64);
+    const pubkey = READER;
     const asked: unknown[] = [];
     vi.resetModules();
     vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
@@ -201,7 +211,7 @@ describe("loadServers", () => {
   });
 
   it("reads a list published under the deprecated kind 10096 too", async () => {
-    const pubkey = "a".repeat(64);
+    const pubkey = READER;
     vi.resetModules();
     vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
     vi.doMock("./compose.js", () => ({ publishEvent: async () => null }));
@@ -214,13 +224,13 @@ describe("loadServers", () => {
   });
 
   it("serves both kinds when the account published each", async () => {
-    const pubkey = "a".repeat(64);
+    const pubkey = READER;
     vi.resetModules();
     vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
     vi.doMock("./compose.js", () => ({ publishEvent: async () => null }));
     answerWith([
       listEvent(["https://current.example"], { kind: 10063, at: 1000 }),
-      listEvent(["https://older.example"], { kind: 10096, at: 3000, id: "c".repeat(64) }),
+      listEvent(["https://older.example"], { kind: 10096, at: 3000 }),
     ]);
     const store = await import("./servers.js");
     await store.loadServers();
@@ -233,7 +243,7 @@ describe("loadServers", () => {
   });
 
   it("keeps only the newest copy of a replaceable event", async () => {
-    const pubkey = "a".repeat(64);
+    const pubkey = READER;
     vi.resetModules();
     vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
     vi.doMock("./compose.js", () => ({ publishEvent: async () => null }));
@@ -246,7 +256,7 @@ describe("loadServers", () => {
           failed: false,
           events: [
             listEvent(["https://new.example"], { at: 2000 }),
-            listEvent(["https://old.example"], { at: 1000, id: "c".repeat(64) }),
+            listEvent(["https://old.example"], { at: 1000 }),
           ],
         }),
       }),
@@ -258,7 +268,7 @@ describe("loadServers", () => {
   });
 
   it("ignores an event of another kind that a relay returns anyway", async () => {
-    const pubkey = "a".repeat(64);
+    const pubkey = READER;
     vi.resetModules();
     vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
     vi.doMock("./compose.js", () => ({ publishEvent: async () => null }));
@@ -282,7 +292,7 @@ describe("loadServers", () => {
   });
 
   it("serves overlapping callers one round of queries", async () => {
-    const pubkey = "a".repeat(64);
+    const pubkey = READER;
     let rounds = 0;
     vi.resetModules();
     vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
@@ -304,7 +314,7 @@ describe("loadServers", () => {
   });
 
   it("does not let a late relay answer undo a change just made", async () => {
-    const pubkey = "a".repeat(64);
+    const pubkey = READER;
     let answer: unknown[] = [];
     vi.resetModules();
     vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
@@ -336,7 +346,7 @@ describe("loadServers", () => {
     // The servers on this device may be all this device ever saw, and BUD-03
     // replaces the whole list, so writing them would delete every server the
     // reader configured on another client.
-    const pubkey = "a".repeat(64);
+    const pubkey = READER;
     const sent: unknown[] = [];
     vi.resetModules();
     vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
@@ -366,7 +376,7 @@ describe("loadServers", () => {
     // no list but has nothing to publish, and treating that as "read" left the
     // gate open for whoever signed in next — so an account whose own list was
     // never read could publish this device's list and lose their own servers.
-    let pubkey: string | null = "a".repeat(64);
+    let pubkey: string | null = READER;
     let answering = true;
     const sent: unknown[] = [];
     vi.resetModules();
@@ -409,7 +419,7 @@ describe("loadServers", () => {
   it("still publishes for an account whose own list has been read", async () => {
     // The guard above only refuses the wrong account. Pinning the other half
     // matters as much: a gate that never opens is worse than no gate.
-    const pubkey = "a".repeat(64);
+    const pubkey = READER;
     const sent: unknown[] = [];
     vi.resetModules();
     vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
@@ -434,7 +444,7 @@ describe("loadServers", () => {
   it("publishes once the list has been read, even when nothing was published", async () => {
     // Asked and answered with nothing is an answer: it says the account has no
     // list, so publishing one cannot lose anything.
-    const pubkey = "a".repeat(64);
+    const pubkey = READER;
     const sent: unknown[] = [];
     vi.resetModules();
     vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
@@ -452,7 +462,7 @@ describe("loadServers", () => {
   });
 
   it("brings in a list published on another client", async () => {
-    const pubkey = "a".repeat(64);
+    const pubkey = READER;
     let answer: unknown[] = [];
     vi.resetModules();
     vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
@@ -474,7 +484,7 @@ describe("loadServers", () => {
 describe("publishServers", () => {
   /** A signed-in store whose publishes are recorded instead of sent. */
   async function signedIn() {
-    const pubkey = "a".repeat(64);
+    const pubkey = READER;
     const sent: Array<Record<string, unknown>> = [];
     vi.resetModules();
     vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));

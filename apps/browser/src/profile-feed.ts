@@ -19,6 +19,7 @@ const [all, setAll] = createSignal<NostrEvent[]>([]);
 const [subject, setSubject] = createSignal<string | null>(null);
 const [tab, setTab] = createSignal<FeedTab>("notes");
 const [loading, setLoading] = createSignal(false);
+const [failed, setFailed] = createSignal(false);
 const [loadingMore, setLoadingMore] = createSignal(false);
 const [coverage, setCoverage] = createSignal("partial");
 const [authRelays, setAuthRelays] = createSignal<string[]>([]);
@@ -53,6 +54,7 @@ export function useProfileFeed() {
     coverage,
     authRelays,
     pendingRelays,
+    failed,
     hasMore,
     setListRef: (el: HTMLDivElement | undefined) => {
       listRef = el;
@@ -100,6 +102,7 @@ function rebuild(pubkey: string | null): void {
   setCoverage("partial");
   setAuthRelays([]);
   setPendingRelays([]);
+  setFailed(false);
   setHasMore(true);
   setLoading(false);
   setLoadingMore(false);
@@ -128,6 +131,7 @@ export async function loadMoreProfile(): Promise<void> {
     setCoverage(page.coverage);
     setAuthRelays(page.authRequiredRelays);
     setPendingRelays(page.pendingRelays);
+    setFailed(page.events.length === 0 && page.failedRelays.length > 0);
     setHasMore(active.hasMore());
   } finally {
     if (gen === generation) {

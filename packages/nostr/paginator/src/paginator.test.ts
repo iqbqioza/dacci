@@ -265,3 +265,73 @@ describe("TimelinePaginator", () => {
     expect(page.authRequiredRelays).toEqual([]);
   });
 });
+
+describe("telling an empty timeline from an unreachable one", () => {
+  it("names the relays that refused, so a view need not guess", async () => {
+    // A feed that renders one message for both cases tells a reader their own
+    // account has never posted when the truth is that every relay refused, and a
+    // reader of someone else's profile that this person has never written a
+    // word. The page has to carry which relays actually failed, because nothing
+    // else in it can tell an empty answer from a missing one.
+    const dead = new RelayConnection("wss://dead", () => {
+      throw new Error("no socket in unit test");
+    });
+    vi.spyOn(dead, "query").mockResolvedValue({
+      events: [],
+      eose: false,
+      failed: true,
+      authRequired: false,
+    });
+    const paginator = new TimelinePaginator([dead], { kinds: [1] });
+    const page = await paginator.loadNextPage();
+    expect(page.events).toEqual([]);
+    expect(page.failedRelays).toEqual(["wss://dead"]);
+  });
+
+  it("reports no failures once a relay answers", async () => {
+    // The other half: an empty answer from a working relay is not a failure, and
+    // the list must be able to tell the reader so.
+    const store = makeStore(0, 2000);
+    const paginator = new TimelinePaginator([stubConnection("wss://a", store)], {
+      kinds: [1],
+    });
+    const page = await paginator.loadNextPage();
+    expect(page.events).toEqual([]);
+    expect(page.failedRelays).toEqual([]);
+    expect(page.coverage).toBe("complete");
+  });
+
+  it("stops naming a relay once it recovers", async () => {
+    // A list that only ever grows would leave a recovered relay reported as
+    // broken for the rest of the session, and the view would keep saying the
+    // feed could not be fetched.
+    const store = makeStore(3, 2000);
+    const flaky = stubConnection("wss://flaky", []);
+    let refuse = true;
+    vi.spyOn(flaky, "query").mockImplementation(async (filter) => {
+      if (refuse) {
+        return { events: [], eose: false, failed: true, authRequired: false };
+      }
+      return stubConnection("wss://x", store).query(filter);
+    });
+    // The clock is driven by hand so the backoff is waited out rather than
+    // skipped: the relay has to be asked again, not merely believed to be well.
+    // Far enough past the store's newest event (2000) to cover it, and moved
+    // by hand so the backoff is waited out rather than skipped.
+    let clock = 3_000_000;
+    const paginator = new TimelinePaginator(
+      [flaky],
+      { kinds: [1] },
+      { baseBackoffMs: 1000, maxBackoffMs: 1000 },
+      () => clock,
+    );
+    expect((await paginator.loadNextPage()).failedRelays).toEqual([
+      "wss://flaky",
+    ]);
+    refuse = false;
+    clock += 5000;
+    const page = await paginator.loadNextPage();
+    expect(page.failedRelays).toEqual([]);
+    expect(page.events).toHaveLength(3);
+  });
+});

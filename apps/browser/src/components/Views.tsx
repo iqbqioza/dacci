@@ -13,6 +13,7 @@ import {
   loadMoreNotifications,
   useNotifications,
 } from "../notifications-feed.js";
+import { retryWhilePending } from "../feed-retry.js";
 import { useNotificationLive } from "../live.js";
 import { useRelays } from "../relays.js";
 import { useSensitiveMode, type SensitiveMode } from "../sensitive.js";
@@ -72,6 +73,11 @@ export function NotificationsView(props: {
     ensureNotifications(pubkey());
   });
 
+  // A profile or notifications list that could not be loaded has to be asked
+  // for again. Only the home timeline retried, so these two sat on their empty
+  // message with no second attempt and nothing saying the load had failed.
+  retryWhilePending(feed, loadMoreNotifications);
+
   return (
     <div>
       <Show
@@ -87,7 +93,9 @@ export function NotificationsView(props: {
         </Show>
         <Show when={!feed.loading() && feed.events().length === 0}>
           <p class="px-4 py-6 text-(--ink-muted)">
-            自分へのメンション・リアクションはまだありません。
+            {feed.failed()
+              ? "通知を取得できませんでした。リレーの接続を確認してください。"
+              : "自分へのメンション・リアクションはまだありません。"}
           </p>
         </Show>
         <Show when={feed.authRelays().length > 0}>

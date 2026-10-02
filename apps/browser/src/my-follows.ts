@@ -1,3 +1,4 @@
+import { authenticatedAnswer } from "./authored.js";
 import type { Filter, NostrEvent } from "dacci-nostr-nips";
 import {
   buildFollowList,
@@ -8,7 +9,7 @@ import {
 } from "dacci-nostr-nips";
 import { createSignal } from "solid-js";
 import { useAuth } from "./auth.jsx";
-import { publishEvent } from "./compose.js";
+import { publishEvent, publishFailureText } from "./compose.js";
 import { showNotice } from "./notice.js";
 import { getConnection } from "./nostr.js";
 import { useRelays } from "./relays.js";
@@ -101,7 +102,8 @@ async function loadMyFollows(key: string): Promise<void> {
         ]);
         // A relay that refused is not an answer, so it is kept apart from one
         // that replied with nothing.
-        return result?.failed === true || result === null ? null : result.events;
+        if (result?.failed === true || result === null) return null;
+        return authenticatedAnswer(result.events, key);
       }),
   );
   const events: NostrEvent[] = [];
@@ -170,12 +172,9 @@ export async function toggleFollow(pubkey: string): Promise<void> {
       }),
       // The reason is reported here rather than in the compose dialog's error
       // line, which a follow never opens.
-      () => undefined,
+      (reason) => showNotice(publishFailureText(reason, was ? "フォロー解除" : "フォロー")),
     );
-    if (sent === null) {
-      showNotice(was ? "フォロー解除に失敗しました" : "フォローに失敗しました");
-      return;
-    }
+    if (sent === null) return;
     if (generation !== readGeneration || useAuth().pubkey() !== key) return;
     setTags(next);
     setLoaded(true);

@@ -1,4 +1,5 @@
 import type { NostrEvent } from "dacci-nostr-nips";
+import { authenticatedAnswer } from "./authored.js";
 import {
   deletedEventIds,
   summarizeMyActivity,
@@ -22,7 +23,15 @@ const STORAGE_PREFIX = "dacci.my-activity:";
 
 /** Kinds of our own events that describe what we did: reply, delete, repost, react. */
 const ACTIVITY_KINDS = [1, 5, 6, 7];
-const SYNC_LIMIT = 500;
+/**
+ * How much of the reader's own history one round covers.
+ *
+ * A signed answer is the only one allowed to remove an action, so every event
+ * in it is verified, and a verification costs about 370× an id check. 500 would
+ * be well over a second of blocked tab; this is a few days of reactions and
+ * reposts, which is the part a stale answer could plausibly contradict.
+ */
+const SIGNED_WINDOW = 50;
 const SYNC_TIMEOUT_MS = 5000;
 
 const [activity, setActivity] = createSignal<MyActivityMap>(new Map());
@@ -218,7 +227,14 @@ export async function syncMyActivity(): Promise<void> {
   const filter = {
     kinds: ACTIVITY_KINDS,
     authors: [key],
-    limit: SYNC_LIMIT,
+    // Small, and deliberately so. A signed answer is the only one that may
+    // remove an action, so every event in it is verified, and verification is
+    // expensive enough that a window of 500 would block the tab for over a
+    // second. This is the reader's own recent history — a handful of days of
+    // reactions and reposts — which is the part a stale answer could plausibly
+    // contradict. What a full window would be used for is the opposite check, at
+    // line below, which only needs to know that the window came back full.
+    limit: SIGNED_WINDOW,
   };
   const settled = await Promise.allSettled(
     urls.map(async (url) => {
@@ -234,10 +250,15 @@ export async function syncMyActivity(): Promise<void> {
   const events: NostrEvent[] = [];
   let answered = 0;
   for (const result of settled) {
-    if (result.status === "fulfilled" && result.value !== null) {
-      answered += 1;
-      events.push(...result.value.events);
-    }
+    if (result.status !== "fulfilled" || result.value === null) continue;
+    // These events are the reader's own actions — reactions, reposts, replies —
+    // and reconciling against them is what erases an action. A relay that forges
+    // one is therefore a relay that has not answered: counted as an answer it
+    // would say the reader never reacted to a post they did react to.
+    const kept = authenticatedAnswer(result.value.events, key);
+    if (kept === null) continue;
+    answered += 1;
+    events.push(...kept);
   }
   // A round that is still out when the reader changes accounts answers about
   // the account that asked for it. Applying it would put the previous reader's
@@ -249,7 +270,7 @@ export async function syncMyActivity(): Promise<void> {
   const fresh = summarizeMyActivity(events);
   // Every relay answered and the window was not full, so this really is the
   // whole of what the reader has done lately: deletions and all.
-  if (answered === urls.length && events.length < SYNC_LIMIT) {
+  if (answered === urls.length && events.length < SIGNED_WINDOW) {
     setActivity(fresh);
     write(key, fresh);
     return;

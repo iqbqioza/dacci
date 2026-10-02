@@ -263,23 +263,27 @@ export function contentSegments(
  * goes, which is what the single filter was for.
  */
 function tidy(segments: ContentSegment[]): ContentSegment[] {
+  /** The same normalisation a written run gets, applied to a kept gap. */
+  const collapse = (text: string): string =>
+    text.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n");
+
   const out: ContentSegment[] = [];
   for (const [index, segment] of segments.entries()) {
     if (segment.kind === "text" && segment.text.trim() === "") {
       const before = segments[index - 1];
       const after = segments[index + 1];
-      // Whitespace between two written things is a gap the author chose.
+      // Whitespace between two written things is a gap the author chose, so it is
+      // kept — but kept the way every other run is kept. Pushed verbatim it was
+      // the one run that escaped normalisation, so the same blank line rendered
+      // as a single break between two words and as four between two images.
       if (before !== undefined && after !== undefined) {
-        out.push(segment);
+        out.push({ kind: "text", text: collapse(segment.text) });
       }
       continue;
     }
     out.push(
       segment.kind === "text"
-        ? {
-            kind: "text",
-            text: segment.text.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n"),
-          }
+        ? { kind: "text", text: collapse(segment.text) }
         : segment,
     );
   }

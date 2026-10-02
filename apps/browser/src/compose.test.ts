@@ -236,3 +236,71 @@ describe("broadcastEvent", () => {
     ]);
   });
 });
+describe("why a publish failed", () => {
+  /** A signer that refuses, the way a dismissed NIP-07 prompt does. */
+  function stubRefusingSigner(): void {
+    vi.doMock("./auth.jsx", () => ({
+      useAuth: () => ({ pubkey: () => signedInAs }),
+      getSigner: () => ({
+        signEvent: async () => {
+          throw new Error("User rejected the request");
+        },
+      }),
+    }));
+  }
+
+  it("does not tell the reader the relays refused when they refused nothing", async () => {
+    // The distinction is the whole point. Dismissing the signing prompt means
+    // nothing was ever sent, so "the relays refused" is a claim about a refusal
+    // that did not happen — and it sends the reader off to check their relay
+    // list instead of their signing prompt.
+    vi.resetModules();
+    stubRelay();
+    stubRefusingSigner();
+    const compose = await import("./compose.js");
+    const seen: string[] = [];
+    const sent = await compose.publishEvent(
+      { pubkey: ME, created_at: 1, kind: 1, tags: [], content: "x" },
+      (reason) => seen.push(compose.publishFailureText(reason, "投稿")),
+    );
+    expect(sent).toBeNull();
+    expect(seen).toEqual(["署名をキャンセルしました"]);
+  });
+
+  it("returns the real reason from a reply instead of assuming a rejection", async () => {
+    // `publishReply` reports why it failed through the reply form, and it used to
+    // hand back a hardcoded "rejected" for every failure.
+    vi.resetModules();
+    stubRelay();
+    stubRefusingSigner();
+    const compose = await import("./compose.js");
+    const result = await compose.publishReply(post(OTHER), "x");
+    expect(result).toEqual({ failure: "cancelled" });
+  });
+
+  it("still says the action failed when the relays are what refused", async () => {
+    // The action-specific wording is kept for the one reason it is true of.
+    vi.resetModules();
+    accepted = false;
+    stubRelay();
+    const compose = await import("./compose.js");
+    expect(
+      compose.publishFailureText("rejected", "フォロー"),
+    ).toBe("フォローに失敗しました");
+    expect(
+      compose.publishFailureText("rejected", "ミュート"),
+    ).toBe("ミュートに失敗しました");
+  });
+
+  it("prefers the reader's own setup over the action when it is the cause", async () => {
+    // These two reasons are not about the action at all, and their existing
+    // wording is what tells the reader what to do next.
+    const compose = await import("./compose.js");
+    expect(compose.publishFailureText("no-signer", "フォロー")).toBe(
+      "ログインが必要です (Settings)",
+    );
+    expect(compose.publishFailureText("no-relay", "フォロー")).toBe(
+      "書き込むリレーがありません (Network)",
+    );
+  });
+});

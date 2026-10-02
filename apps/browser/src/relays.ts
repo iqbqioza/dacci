@@ -1,3 +1,4 @@
+import { signedBy } from "./authored.js";
 import {
   CONTACTS_KIND,
   isHex64,
@@ -421,9 +422,11 @@ export async function loadRelayInfo(
   pubkey: string,
   queryFn: RelayQueryFn = defaultQuery,
 ): Promise<void> {
-  const candidates = await firstAnswer(
-    { kinds: [RELAY_LIST_KIND], authors: [pubkey], limit: 5 },
-    queryFn,
+  // Only a list the reader signed describes the reader's relays. A forgery is
+  // answered like no answer at all, which leaves the current set in place.
+  const candidates = signedBy(
+    await firstAnswer({ kinds: [RELAY_LIST_KIND], authors: [pubkey], limit: 5 }, queryFn),
+    pubkey,
   );
   if (candidates.length === 0) return;
   candidates.sort(newestFirst);
@@ -471,9 +474,12 @@ export async function applyLoginFeed(
   pubkey: string,
   queryFn: RelayQueryFn = defaultQuery,
 ): Promise<void> {
-  const candidates = await firstAnswer(
-    { kinds: [CONTACTS_KIND], authors: [pubkey], limit: 5 },
-    queryFn,
+  // A forged follow list would decide whose posts the home feed shows, so it is
+  // dropped rather than read. Falling back to self-only is the same place a
+  // missing list lands.
+  const candidates = signedBy(
+    await firstAnswer({ kinds: [CONTACTS_KIND], authors: [pubkey], limit: 5 }, queryFn),
+    pubkey,
   );
   let authors = [pubkey];
   if (candidates.length > 0) {
@@ -518,9 +524,12 @@ export async function applyLoginRelaySet(
   pubkey: string,
   queryFn: RelayQueryFn = defaultQuery,
 ): Promise<void> {
-  const candidates = await firstAnswer(
-    { kinds: [RELAY_LIST_KIND], authors: [pubkey], limit: 5 },
-    queryFn,
+  // This is the one that redirects every publish the reader makes, so the list
+  // is adopted only if the reader signed it. A relay that forges one is treated
+  // as a relay that had none, and the set the reader chose is left alone.
+  const candidates = signedBy(
+    await firstAnswer({ kinds: [RELAY_LIST_KIND], authors: [pubkey], limit: 5 }, queryFn),
+    pubkey,
   );
   if (candidates.length === 0) return;
   candidates.sort(newestFirst);

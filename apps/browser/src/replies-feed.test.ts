@@ -270,3 +270,62 @@ describe("directReplies on the store's own output", () => {
     expect(directReplies([reply], POST)).toHaveLength(1);
   });
 });
+
+
+describe("a thread's own state", () => {
+  const OTHER_POST = "9".repeat(64);
+
+  it("does not carry one thread's answer over to a post never asked about", async () => {
+    // The two flags were one value for the whole app, so they read as if they
+    // described the thread on screen and did not. One thread resolved, and every
+    // post after it claimed to have been searched — so a post nobody had ever
+    // queried rendered "this post has no replies yet", a conclusion stated
+    // about a post the client had not asked a single relay about.
+    const store = await withStore({ failed: false, events: [] });
+    await store.loadReplies(POST);
+    expect(store.useReplies(POST).searched()).toBe(true);
+
+    // A different post, never asked about: nothing is known about it yet.
+    const other = store.useReplies(OTHER_POST);
+    expect(other.searched()).toBe(false);
+    expect(other.loading()).toBe(false);
+    expect(other.events()).toEqual([]);
+  });
+
+  it("keeps a half-answered thread reading as still loading", async () => {
+    // Two posts opened in a row: the first is still out when the second is asked
+    // for. With one flag, the first round settling cleared it for both, so the
+    // thread on screen stopped saying it was loading while its own answers were
+    // still in flight — and a half-loaded thread read as a complete one.
+    const gate = deferred<{ events: NostrEvent[]; failed: boolean }>();
+    vi.resetModules();
+    vi.doMock("./relays.js", () => ({
+      useRelays: () => ({ readRelays: () => ["wss://read.example"] }),
+    }));
+    vi.doMock("./nostr.js", () => ({
+      getConnection: (url: string) => ({
+        url,
+        query: async (filter: Record<string, unknown>) => {
+          queries.push(filter);
+          if ((filter["#e"] as string[])[0] === POST) return gate.promise;
+          return { events: [], failed: false };
+        },
+      }),
+    }));
+    const store = await import("./replies-feed.js");
+
+    const first = store.loadReplies(POST);
+    await tick();
+    expect(store.useReplies(POST).loading()).toBe(true);
+
+    // The other post answers at once, and must not stand in for the first.
+    await store.loadReplies(OTHER_POST);
+    expect(store.useReplies(OTHER_POST).loading()).toBe(false);
+    expect(store.useReplies(POST).loading()).toBe(true);
+
+    gate.resolve({ events: [], failed: false });
+    await first;
+    expect(store.useReplies(POST).loading()).toBe(false);
+    expect(store.useReplies(POST).searched()).toBe(true);
+  });
+});

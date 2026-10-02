@@ -1,6 +1,6 @@
-import { computeEventId } from "dacci-nostr-nips";
-import type { NostrEvent } from "dacci-nostr-nips";
+import { computeEventId, type NostrEvent } from "dacci-nostr-nips";
 import { describe, expect, it, vi } from "vitest";
+import { fixturePubkey, signAs } from "./fixture-event.js";
 import {
   addRelay,
   applyLoginFeed,
@@ -21,17 +21,22 @@ function makeListEvent(
   createdAt: number,
   relays: string[],
 ): NostrEvent {
-  const base = {
-    pubkey,
+  return signAs("reader", {
     created_at: createdAt,
     kind: 10002,
     tags: relays.map((url) => ["r", url]),
     content: "",
-  };
-  return { ...base, id: computeEventId(base), sig: "s".repeat(128) };
+  });
 }
 
-const PUBKEY = "p".repeat(64);
+/**
+ * The reader's own pubkey.
+ *
+ * Every list in this file is a relay list or a follow list the reader
+ * published, and both are now read only if the reader signed them — so the
+ * fixtures are signed by the same label the constant is derived from.
+ */
+const PUBKEY = fixturePubkey("reader");
 
 describe("applyLoginRelaySet", () => {
   it("switches to the read relays of the newest list", async () => {
@@ -58,22 +63,17 @@ describe("applyLoginRelaySet", () => {
 
   it("keeps write-only relays out of reads and in writes", async () => {
     restoreDefaults();
-    const base = {
-      pubkey: PUBKEY,
+    // Marked relays, which is the part of NIP-65 this test is about, and signed
+    // by the reader so the store will read it at all.
+    const event = signAs("reader", {
       created_at: 100,
       kind: 10002,
       content: "",
-    };
-    const tags = [
-      ["r", "wss://read.example", "read"],
-      ["r", "wss://write.example", "write"],
-    ];
-    const event: NostrEvent = {
-      ...base,
-      tags,
-      id: computeEventId({ ...base, tags }),
-      sig: "s".repeat(128),
-    };
+      tags: [
+        ["r", "wss://read.example", "read"],
+        ["r", "wss://write.example", "write"],
+      ],
+    });
     await applyLoginRelaySet(PUBKEY, async () => [event]);
     const relays = useRelays();
     expect(relays.relayUrls()).toEqual([
@@ -92,14 +92,12 @@ describe("applyLoginRelaySet", () => {
 });
 
 function makeContactsEvent(pubkey: string, createdAt: number, follows: string[]) {
-  const base = {
-    pubkey,
+  return signAs("reader", {
     created_at: createdAt,
     kind: 3,
     tags: follows.map((p) => ["p", p]),
     content: "",
-  };
-  return { ...base, id: computeEventId(base), sig: "s".repeat(128) };
+  });
 }
 
 describe("applyLoginFeed", () => {
@@ -202,7 +200,7 @@ describe("relay/feed persistence", () => {
       );
       initRelays();
       const started = Date.now();
-      await applyLoginRelaySet("1".repeat(64), async (url) => {
+      await applyLoginRelaySet(PUBKEY, async (url) => {
         if (url === "wss://dead.example") {
           // Never answers: only the deadline can end the wait.
           return new Promise<NostrEvent[]>(() => {});
@@ -211,7 +209,7 @@ describe("relay/feed persistence", () => {
           await new Promise((r) => setTimeout(r, 900));
           return [];
         }
-        return [makeListEvent("1".repeat(64), 1, ["wss://answer.example"])];
+        return [makeListEvent(PUBKEY, 1, ["wss://answer.example"])];
       });
       expect(Date.now() - started).toBeLessThan(700);
       expect(useRelays().relayUrls()).toEqual(["wss://answer.example"]);

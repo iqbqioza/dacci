@@ -3,6 +3,7 @@ import {
   parseContacts,
   type NostrEvent,
 } from "dacci-nostr-nips";
+import { authenticatedAnswer } from "./authored.js";
 import { createSignal } from "solid-js";
 import { getConnection } from "./nostr.js";
 import { useRelays } from "./relays.js";
@@ -55,7 +56,9 @@ async function loadFollowCount(pubkey: string): Promise<void> {
         // subject follows nobody. It is counted apart from an empty answer so
         // the two cannot be confused.
         if (result === null || result.failed) return null;
-        return result.events;
+        // The count comes off this subject's own contact list, so a relay that
+        // forges one is a relay that has not answered.
+        return authenticatedAnswer(result.events, pubkey);
       }),
   );
   const events: NostrEvent[] = [];

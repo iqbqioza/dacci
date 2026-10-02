@@ -213,3 +213,42 @@ describe("urlSpans", () => {
     expect(urlSpans("https://x.example/a https://y.example/b")).toHaveLength(2);
   });
 });
+
+describe("the gap between two images", () => {
+  it("collapses it the same way it collapses anywhere else", () => {
+    // A run of whitespace between two written things is kept — it is the gap the
+    // author chose, not leftover space — but it used to be pushed verbatim, the
+    // one run that skipped normalisation. So the same blank line came out as one
+    // break between two words and as four between two images, and which one you
+    // got depended on what happened to be on either side of it.
+    // The gap is the only text left once the two urls have become images, so
+    // what is compared is the width of the break: the same number of newlines
+    // whichever side of it is a word.
+    const breakWidth = (runs: string[]): number =>
+      Math.max(0, ...runs.map((t) => (t.match(/\n+/g) ?? [""])[0].length));
+    const betweenImages = textOf(
+      contentSegments(note("https://a.example/1.png\n\n\n\nhttps://a.example/2.png")),
+    );
+    const betweenWords = textOf(contentSegments(note("one\n\n\n\ntwo")));
+    expect(breakWidth(betweenImages)).toBe(breakWidth(betweenWords));
+    expect(betweenImages.some((t) => t.includes("\n\n\n"))).toBe(false);
+    expect(betweenWords.some((t) => t.includes("\n\n\n"))).toBe(false);
+  });
+
+  it("still leaves a gap, so two figures are not glued together", () => {
+    // The reason the run is kept at all. Collapsing is not the same as deleting.
+    const runs = textOf(
+      contentSegments(note("https://a.example/1.png\n\n\n\nhttps://a.example/2.png")),
+    );
+    expect(runs.some((t) => t.trim() === "" && t.includes("\n"))).toBe(true);
+  });
+
+  it("keeps trailing spaces off the ends of the kept gap", () => {
+    // The other half of the same normalisation, and the one that shows in the
+    // rendered gap's width.
+    const runs = textOf(
+      contentSegments(note("https://a.example/1.png  \n  \n  https://a.example/2.png")),
+    );
+    expect(runs.some((t) => /[ \t]+\n/.test(t))).toBe(false);
+  });
+});

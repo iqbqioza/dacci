@@ -1,5 +1,9 @@
 import type { NostrEvent } from "dacci-nostr-nips";
-import { embeddedEventIdWithText, embeddedNote } from "dacci-nostr-nips";
+import {
+  embeddedEventIdWithText,
+  embeddedNote,
+  hasValidId,
+} from "dacci-nostr-nips";
 import { EmbedStore } from "dacci-nostr-quotes";
 import { createSignal } from "solid-js";
 import { lookupEvent } from "./event-cache.js";
@@ -25,6 +29,36 @@ async function queryRelays(ids: string[]): Promise<NostrEvent[]> {
 }
 
 /**
+ * The inline note each post carries, or null, remembered by event id.
+ *
+ * NIP-18 lets a repost carry the note in its own content, and reading it means
+ * verifying a signature — about 370× the cost of the id check the relay already
+ * did. That work belongs once per post, not once per render: a card re-renders
+ * whenever anything it shows changes, and the placeholder asked the same
+ * question again on top of that, so one feed full of inline notes paid for the
+ * same verification a dozen times over.
+ *
+ * Bounded like the event cache it shadows.
+ */
+const inlineNotes = new Map<string, NostrEvent | null>();
+const MAX_INLINE_NOTES = 2000;
+
+function inlineNoteOf(event: NostrEvent): NostrEvent | null {
+  // The id is only a sound key for an event whose id is the hash of its own
+  // fields. A tampered event keeps an id it no longer matches, and keying on that
+  // would hand it whatever answer was cached for the id it is claiming — so an
+  // id that does not check out gets no cache at all, in either direction. The
+  // check is one hash; what it guards is three hundred and seventy.
+  if (!hasValidId(event)) return embeddedNote(event);
+  const cached = inlineNotes.get(event.id);
+  if (cached !== undefined) return cached;
+  const note = embeddedNote(event);
+  if (inlineNotes.size >= MAX_INLINE_NOTES) inlineNotes.clear();
+  inlineNotes.set(event.id, note);
+  return note;
+}
+
+/**
  * The app-wide embed cache. Bumped on every change so views re-read it, and
  * built over the event cache so a repost of a post already on screen costs
  * no request. The factory exists so tests can drive the same wiring.
@@ -36,6 +70,7 @@ export function createEmbeds(
   store: EmbedStore;
   useEmbed: (event: NostrEvent) => { event: NostrEvent | null; loading: boolean };
   requestEmbeds: (events: Iterable<NostrEvent>) => void;
+  useEmbedLoading: (event: NostrEvent) => () => boolean;
   reset: () => void;
 } {
   const [version, setVersion] = createSignal(0);
@@ -62,9 +97,26 @@ export function createEmbeds(
     const id = embeddedEventIdWithText(event);
     if (id === null || isDeleted(id)) return { event: null, loading: false };
     // NIP-18 lets a repost carry the note inline; that needs no query.
-    const inline = embeddedNote(event);
+    const inline = inlineNoteOf(event);
     if (inline !== null && inline.id === id) return { event: inline, loading: false };
     return { event: store.peek(id), loading: store.isLoading(id) };
+  };
+
+  /**
+   * Whether this post's embed is still being fetched, and nothing else.
+   *
+   * The placeholder needs the flag, not the note, and the note is what costs a
+   * signature verification. Asking the full question here ran that work a second
+   * time for every card on screen, on every render.
+   */
+  const useEmbedLoading = (event: NostrEvent): (() => boolean) => {
+    const id = embeddedEventIdWithText(event);
+    return () => {
+      version();
+      if (id === null || isDeleted(id)) return false;
+      if (inlineNoteOf(event) !== null) return false;
+      return store.peek(id) === null && store.isLoading(id);
+    };
   };
 
   /**
@@ -79,7 +131,7 @@ export function createEmbeds(
       // Nothing to ask a relay for: a note a NIP-09 request has taken away is
       // not shown, so fetching it would only fill a cache nobody reads.
       if (id === null || isDeleted(id)) continue;
-      const inline = embeddedNote(event);
+      const inline = inlineNoteOf(event);
       if (inline !== null && inline.id === id) {
         store.put(inline);
         continue;
@@ -97,6 +149,7 @@ export function createEmbeds(
   return {
     store,
     useEmbed,
+    useEmbedLoading,
     requestEmbeds,
     // The version bump matters: a view holding a stale entry must re-read.
     reset: () => {
@@ -110,6 +163,7 @@ export function createEmbeds(
 const app = createEmbeds(queryRelays);
 
 export const useEmbed = app.useEmbed;
+export const useEmbedLoading = app.useEmbedLoading;
 export const requestEmbeds = app.requestEmbeds;
 
 /** Drops the cache, e.g. after a relay set change. */

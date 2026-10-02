@@ -23,6 +23,7 @@ import { preservingViewport } from "./viewport.js";
  */
 const [events, setEvents] = createSignal<NostrEvent[]>([]);
 const [loading, setLoading] = createSignal(false);
+const [failed, setFailed] = createSignal(false);
 const [loadingMore, setLoadingMore] = createSignal(false);
 const [coverage, setCoverage] = createSignal("partial");
 const [authRelays, setAuthRelays] = createSignal<string[]>([]);
@@ -51,6 +52,7 @@ export function useNotifications() {
     coverage,
     authRelays,
     pendingRelays,
+    failed,
     hasMore,
     loadedFor,
     setListRef: (el: HTMLDivElement | undefined) => {
@@ -90,6 +92,7 @@ async function loadPage(reset: boolean): Promise<void> {
     setCoverage(page.coverage);
     setAuthRelays(page.authRequiredRelays);
     setPendingRelays(page.pendingRelays);
+    setFailed(page.events.length === 0 && page.failedRelays.length > 0);
     setHasMore(active.hasMore());
   } finally {
     if (gen === generation) {
@@ -121,6 +124,7 @@ export function resetNotifications(): void {
   setCoverage("partial");
   setAuthRelays([]);
   setPendingRelays([]);
+  setFailed(false);
   setHasMore(false);
   setLoading(false);
   setLoadingMore(false);

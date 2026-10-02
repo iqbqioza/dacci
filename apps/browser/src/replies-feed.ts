@@ -1,5 +1,5 @@
 import type { NostrEvent } from "dacci-nostr-nips";
-import { createSignal } from "solid-js";
+import { createSignal, type Setter } from "solid-js";
 import { rememberEvents } from "./event-cache.js";
 import { getConnection } from "./nostr.js";
 import { commentReplyParent, directReplies, replyParent } from "./replies.js";
@@ -13,8 +13,36 @@ import { useRelays } from "./relays.js";
 const [replies, setReplies] = createSignal<Map<string, NostrEvent[]>>(
   new Map(),
 );
-const [loading, setLoading] = createSignal(false);
-const [searched, setSearched] = createSignal(false);
+
+/**
+ * Whether a round is out, and whether one has ever finished, per post.
+ *
+ * Both were single flags for the whole app, which read as if they described the
+ * thread on screen and did not: open one thread successfully and every later
+ * post claimed to have been searched, so a post nobody had asked about rendered
+ * as "this post has no replies yet" — a conclusion about a post the client had
+ * never queried. And a second post opened while the first was still in flight
+ * cleared the flag for the first, so a half-loaded thread read as complete.
+ */
+const [loadingFor, setLoadingFor] = createSignal<Map<string, boolean>>(
+  new Map(),
+);
+const [searchedFor, setSearchedFor] = createSignal<Map<string, boolean>>(
+  new Map(),
+);
+
+/** Writes one post's flag without disturbing another's. */
+function flag(
+  set: Setter<Map<string, boolean>>,
+  postId: string,
+  value: boolean,
+): void {
+  set((prev) => {
+    const next = new Map(prev);
+    next.set(postId, value);
+    return next;
+  });
+}
 
 /** Posts already asked about, so a revisit never queries again. */
 const asked = new Set<string>();
@@ -64,7 +92,7 @@ export async function loadReplies(postId: string): Promise<void> {
   if (postId === "" || asked.has(postId)) return;
   const gen = generation;
   asked.add(postId);
-  setLoading(true);
+  flag(setLoadingFor, postId, true);
   let found: NostrEvent[] = [];
   let answered = 0;
   try {
@@ -86,7 +114,7 @@ export async function loadReplies(postId: string): Promise<void> {
     // with no way to ask again. It is released instead, and `searched` stays
     // false so the reader is not shown a conclusion nobody reached.
     asked.delete(postId);
-    setLoading(false);
+    flag(setLoadingFor, postId, false);
     return;
   }
   rememberEvents(found);
@@ -103,8 +131,8 @@ export async function loadReplies(postId: string): Promise<void> {
     next.set(postId, directReplies([...answers, ...kept], postId));
     return next;
   });
-  setLoading(false);
-  setSearched(true);
+  flag(setLoadingFor, postId, false);
+  flag(setSearchedFor, postId, true);
 }
 
 /** The direct answers to a post, oldest first. Empty until they arrive. */
@@ -118,8 +146,8 @@ export function useReplies(postId: string): {
     // An answer the reader deleted is not an answer any more, so the thread is
     // read through the deletions rather than straight from the cache.
     events: () => withoutDeleted(replies().get(postId) ?? []),
-    loading,
-    searched,
+    loading: () => loadingFor().get(postId) ?? false,
+    searched: () => searchedFor().get(postId) ?? false,
   };
 }
 
@@ -141,7 +169,7 @@ export function addReply(event: NostrEvent): void {
     );
     return next;
   });
-  setSearched(true);
+  flag(setSearchedFor, postId, true);
 }
 
 /** Drops every cached answer, e.g. after a relay set change. */
@@ -150,7 +178,7 @@ export function resetReplies(): void {
   // makes that answer stale rather than current.
   generation += 1;
   setReplies(new Map());
-  setSearched(false);
-  setLoading(false);
+  setSearchedFor(new Map());
+  setLoadingFor(new Map());
   asked.clear();
 }

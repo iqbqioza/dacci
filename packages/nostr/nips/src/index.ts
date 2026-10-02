@@ -4,6 +4,7 @@ export {
   computeEventId,
   hasValidId,
   hasValidSignature,
+  pubkeyFor,
   isHex64,
   isValidEventStructure,
 } from "./event.js";

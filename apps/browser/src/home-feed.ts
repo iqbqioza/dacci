@@ -19,6 +19,7 @@ import { preservingViewport } from "./viewport.js";
 const [all, setAll] = createSignal<NostrEvent[]>([]);
 const [tab, setTab] = createSignal<FeedTab>("notes");
 const [loading, setLoading] = createSignal(true);
+const [failed, setFailed] = createSignal(false);
 const [loadingMore, setLoadingMore] = createSignal(false);
 const [coverage, setCoverage] = createSignal("partial");
 const [authRelays, setAuthRelays] = createSignal<string[]>([]);
@@ -95,6 +96,7 @@ export function useHomeFeed() {
     coverage,
     authRelays,
     pendingRelays,
+    failed,
     hasMore,
     barRef: () => barRef,
     listRef: () => listRef,
@@ -140,6 +142,7 @@ export async function loadMoreHome(): Promise<void> {
     setCoverage(page.coverage);
     setAuthRelays(page.authRequiredRelays);
     setPendingRelays(page.pendingRelays);
+    setFailed(page.events.length === 0 && page.failedRelays.length > 0);
     // NOTE: hasMore follows the paginator, not the page size, so a page
     // emptied by failures keeps retrying instead of looking finished.
     setHasMore(active.hasMore());
@@ -160,6 +163,7 @@ export function resetHomeFeed(): void {
   setCoverage("partial");
   setAuthRelays([]);
   setPendingRelays([]);
+  setFailed(false);
   setHasMore(true);
   setLoading(true);
   setLoadingMore(false);
