@@ -228,11 +228,22 @@ describe("reconciling with the relays", () => {
   });
 
   it("leaves the state alone when no relay answers", async () => {
+    // Every relay silent is not a relay saying the reader has done nothing.
+    // Without this round actually being run, the guard that keeps the reader's
+    // actions out of the erase path has no coverage at all — the test would
+    // pass whatever the answer did.
     const store = await signedIn(
       async () => new Promise(() => {}) as Promise<{ failed: boolean; events: NostrEvent[] }>,
     );
     store.markReacted(POST, REACTION);
-    await tick(10);
     expect(store.hasDone("react", POST)).toBe(true);
+
+    const round = store.syncMyActivity();
+    await vi.advanceTimersByTimeAsync(6000);
+    await round;
+
+    expect(store.hasDone("react", POST)).toBe(true);
+    // And it must not be written away either, or the loss outlives a reload.
+    expect(localStorage.getItem(`dacci.my-activity:${ME}`)).toContain(POST);
   });
 });

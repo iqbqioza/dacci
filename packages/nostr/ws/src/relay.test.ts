@@ -130,6 +130,37 @@ describe("RelayConnection.query", () => {
     expect(result.events[0].content).toBe("hi");
   });
 
+  it("fails a query at once when CLOSED carries no reason", async () => {
+    // NIP-01 leaves the reason optional, and `isRelayMessage` checks only that
+    // the value is an array whose first entry is the type — so a bare
+    // ["CLOSED", <id>] reached the dispatcher. Reading the "auth-required:"
+    // prefix off a missing reason threw there, and everything after the throw was
+    // skipped: the query hung for its whole timeout, no CLOSE went back for the
+    // subscription the client had abandoned, and a live stream on that id was
+    // neither dropped nor reported.
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+    });
+    const pending = conn.query({ kinds: [1] }, 3000);
+    await new Promise((r) => setTimeout(r, 0));
+    const sent = vi.mocked(socket.send).mock.calls.map((call) => call[0]);
+    const subId = JSON.parse(sent[0])[1] as string;
+
+    socket.peer(["CLOSED", subId]);
+
+    // Settled now, rather than waiting out its budget.
+    const result = await pending;
+    expect(result.failed).toBe(true);
+    // And the subscription it gave up on was closed, so the relay stops sending.
+    const closed = vi
+      .mocked(socket.send)
+      .mock.calls.map((call) => call[0])
+      .map((raw) => JSON.parse(raw))
+      .filter((frame) => frame[0] === "CLOSE");
+    expect(closed.map((frame) => frame[1])).toContain(subId);
+  });
+
   it("marks CLOSED as failed", async () => {
     const socket = makeSocket();
     const conn = new RelayConnection("wss://example", () => socket, {
@@ -325,6 +356,53 @@ describe("RelayConnection.query", () => {
     }
     // Bounded, rather than one prompt per challenge the relay invents.
     expect(signer.mock.calls.length).toBeLessThanOrEqual(5);
+  });
+
+  it("gives a reconnecting relay its prompt budget back", async () => {
+    // The cap exists to stop a relay asking for a signature once per challenge
+    // it invents. Held across sockets it counted reconnects instead, and those
+    // are unbounded — so five drops (a relay restart, a network flap, a laptop
+    // waking) left the sixth connection unable to authenticate at all, and its
+    // history permanently empty for the rest of the page's life.
+    const socket = makeSocket();
+    const authEvent = relayEvent({
+      pubkey: "b".repeat(64),
+      created_at: 1000,
+      kind: 22242,
+      tags: [["relay", "wss://example"]],
+      content: "",
+    });
+    const signer = vi.fn(async () => authEvent);
+    // One socket per round, so each challenge really belongs to a new one.
+    const sockets: Array<ReturnType<typeof makeSocket>> = [];
+    const conn = new RelayConnection(
+      "wss://example",
+      () => {
+        const s = makeSocket();
+        sockets.push(s);
+        return s;
+      },
+      { signer, authGateProbeMs: 0, baseReconnectMs: 1 },
+    );
+
+    const round = async (n: number) => {
+      conn.subscribe({ kinds: [1] }, () => {});
+      await new Promise((r) => setTimeout(r, 5));
+      const live = sockets[sockets.length - 1];
+      live.peer(["AUTH", `challenge-${n}`]);
+      await new Promise((r) => setTimeout(r, 5));
+      // The relay drops us; the client redials on the backoff above.
+      live.onclose?.();
+      await new Promise((r) => setTimeout(r, 5));
+    };
+
+    for (let n = 0; n < 8; n++) {
+      await round(n);
+    }
+    const prompts = signer.mock.calls.length;
+    // Eight reconnects, each asked once: the budget was refilled rather than
+    // spent down to silence.
+    expect(prompts).toBeGreaterThan(5);
   });
 
   it("flags auth-required CLOSED when no signer is configured", async () => {

@@ -367,6 +367,7 @@ describe("loadServers", () => {
     // gate open for whoever signed in next — so an account whose own list was
     // never read could publish this device's list and lose their own servers.
     let pubkey: string | null = "a".repeat(64);
+    let answering = true;
     const sent: unknown[] = [];
     vi.resetModules();
     vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
@@ -379,22 +380,55 @@ describe("loadServers", () => {
     vi.doMock("./nostr.js", () => ({
       getConnection: () => ({
         url: "wss://read.example",
-        query: async () => ({ failed: true, events: [] }),
+        query: async () =>
+          answering
+            ? { failed: false, events: [] }
+            : { failed: true, events: [] },
       }),
     }));
     const store = await import("./servers.js");
 
-    // The first account is read successfully, so its gate opens.
+    // The first account's list is read and answered, so its gate opens.
+    await store.loadServers();
+
+    // Signing out reads nothing and has nothing to publish.
+    answering = false;
     pubkey = null;
     await store.loadServers();
 
-    // A different account signs in, and its own list never gets answered.
+    // A different account signs in, and its own list is never answered.
     pubkey = "b".repeat(64);
     await store.loadServers();
     await store.addServerAndPublish("https://my.blossom.example");
 
-    // The second account's list was never read, so nothing goes out under it.
+    // That account's list was never read, so nothing goes out under it — even
+    // though an earlier account's read is still on file.
     expect(sent).toEqual([]);
+  });
+
+  it("still publishes for an account whose own list has been read", async () => {
+    // The guard above only refuses the wrong account. Pinning the other half
+    // matters as much: a gate that never opens is worse than no gate.
+    const pubkey = "a".repeat(64);
+    const sent: unknown[] = [];
+    vi.resetModules();
+    vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
+    vi.doMock("./compose.js", () => ({
+      publishEvent: async (template: Record<string, unknown>) => {
+        sent.push(template);
+        return { ...template, id: "f".repeat(64), sig: "e".repeat(128) };
+      },
+    }));
+    vi.doMock("./nostr.js", () => ({
+      getConnection: () => ({
+        url: "wss://read.example",
+        query: async () => ({ failed: false, events: [] }),
+      }),
+    }));
+    const store = await import("./servers.js");
+    await store.loadServers();
+    await store.addServerAndPublish("https://my.blossom.example");
+    expect(sent).toHaveLength(1);
   });
 
   it("publishes once the list has been read, even when nothing was published", async () => {

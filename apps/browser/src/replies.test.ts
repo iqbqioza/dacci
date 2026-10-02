@@ -36,11 +36,15 @@ describe("replyParent", () => {
   });
 
   it("treats a lone root marker as answering the root directly", () => {
-    // NIP-10 prescribes exactly this for a top-level reply. The mention that
-    // follows it keeps the fallback from agreeing by accident.
+    // NIP-10 prescribes exactly this for a top-level reply: one marked `e` tag
+    // of type `root`.
+    //
+    // The unmarked tag after it is what makes the assertion mean something. Read
+    // by position, the last `e` would be the answer and this would pass with the
+    // root marker never consulted — so the two rules disagree here on purpose.
     const reply = post(MIDDLE, [
       ["e", ROOT, "", "root", "a".repeat(64)],
-      ["e", LEAF, "", "mention", "a".repeat(64)],
+      ["e", LEAF],
     ]);
     expect(replyParent(reply)).toBe(ROOT);
   });
@@ -137,7 +141,9 @@ describe("isDirectReply", () => {
   });
 
   it("leaves a NIP-22 comment scoped to an address without a parent", () => {
-    // An `A` scope names an address, so no event answers this comment.
+    // An `A` scope names an address, so no event answers this comment and the
+    // lower-case scope tag names one too. There is no `e` here: an address has
+    // no event to answer.
     const comment = post(
       MIDDLE,
       [
@@ -149,6 +155,18 @@ describe("isDirectReply", () => {
       COMMENT_KIND,
     );
     expect(isDirectReply(comment, ROOT)).toBe(false);
+  });
+
+  it("does not read a NIP-22 comment's own e tag as its parent without a scope", () => {
+    // A kind 1111 comment carrying only a lowercase `e` is the legacy form, not
+    // a NIP-22 scope. The comment path must leave it alone, or the uppercase
+    // scope guard it exists to enforce is dead: accepting any `e` here is what
+    // reads a reply's own `root` marker as a parent and hangs a whole thread off
+    // the top post.
+    const legacy = post(MIDDLE, [["e", ROOT]], COMMENT_KIND);
+    expect(commentReplyParent(legacy)).toBeNull();
+    // The NIP-10 path still finds it, so the thread link is not lost.
+    expect(isDirectReply(legacy, ROOT)).toBe(true);
   });
 
   it("ignores posts that are neither kind 1 nor NIP-22", () => {

@@ -64,9 +64,18 @@ export function signAuthEvent(
   );
 }
 
-/** True for CLOSED machine-readable prefix "auth-required:". */
-export function isAuthRequiredMessage(message: string): boolean {
-  return message.startsWith("auth-required:");
+/**
+ * True for the CLOSED machine-readable prefix "auth-required:".
+ *
+ * The reason is optional in NIP-01, so a relay may send `["CLOSED", <id>]` with
+ * nothing after it. Reading the prefix off a missing reason threw, and the throw
+ * came from inside the relay's message handler — which meant every step after it
+ * was skipped: the query hung for its whole timeout instead of failing at once,
+ * no CLOSE went back for the subscription the client had given up on, and the
+ * live stream was neither dropped nor reported.
+ */
+export function isAuthRequiredMessage(message: string | undefined): boolean {
+  return message?.startsWith("auth-required:") === true;
 }
 
 /** NIP-98 HTTP API auth event kind. */

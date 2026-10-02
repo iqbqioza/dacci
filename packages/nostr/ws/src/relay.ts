@@ -147,15 +147,15 @@ export class RelayConnection {
   private socket: Socket | null = null;
   private openWaiters: Array<() => void> = [];
   private failWaiters: Array<() => void> = [];
-  private readonly pendingSubs = new Map<string, PendingSub>();
+    private readonly pendingSubs = new Map<string, PendingSub>();
   /**
- * Publishes in flight, by event id, each id holding every caller waiting on it.
- *
- * A list rather than one waiter, because a caller may publish the same event
- * twice over — a double press on repost or react builds one event, and the
- * transport is reached twice.
- */
-private readonly pendingPublishes = new Map<string, PendingPublish[]>();
+   * Publishes in flight, by event id, each id holding every caller waiting on it.
+   *
+   * A list rather than one waiter, because a caller may publish the same event
+   * twice over — a double press on repost or react builds one event, and the
+   * transport is reached twice.
+   */
+  private readonly pendingPublishes = new Map<string, PendingPublish[]>();
   private readonly liveSubs = new Map<string, LiveSubEntry>();
   /**
    * Last NIP-42 challenge seen while no signer was configured. After a
@@ -254,6 +254,13 @@ private readonly pendingPublishes = new Map<string, PendingPublish[]>();
     // A fresh connection gets a fresh challenge, so the gate closes again.
     this.authGateOpen = false;
     this.authRequiredOnConnection = false;
+    // And so the prompt budget starts over. The count is there to stop a relay
+    // from asking for a signature once per challenge it invents; carried across
+    // sockets it stopped counting reconnects instead, and reconnects are
+    // unbounded. Five drops — a relay restart, a network flap, a laptop waking —
+    // and the sixth connection could never authenticate again for the rest of
+    // the page's life, leaving its history permanently empty.
+    this.answeredChallenges.clear();
     this.setStatus("connecting");
     socket.onopen = () => {
       this.isOpen = true;

@@ -33,6 +33,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.resetModules();
+  asked.length = 0;
 });
 
 afterEach(() => {
@@ -53,12 +54,36 @@ async function withRelay(
     useRelays: () => ({ readRelays: () => ["wss://a"] }),
   }));
   vi.doMock("./nostr.js", () => ({
-    getConnection: () => ({ url: "wss://a", query: () => answer() }),
+    getConnection: () => ({
+      url: "wss://a",
+      // The filter is recorded so a test can assert what was actually asked for.
+      // Without it, asking a relay about a different kind, or a different
+      // author, would still pass every test in this file.
+      query: (filter: Record<string, unknown>) => {
+        asked.push(filter);
+        return answer();
+      },
+    }),
   }));
   return import("./follows.js");
 }
 
+/** Every filter the store has put to a relay, in order. */
+const asked: Array<Record<string, unknown>> = [];
+
 describe("follow counts", () => {
+  it("asks the relay for that subject's contact list, and nothing else", async () => {
+    // The count is read off a kind 3 authored by the subject. Asking for any
+    // other kind, or for any other author, returns someone else's follows and
+    // the row would show a number about a different person.
+    asked.length = 0;
+    const store = await withRelay(async () => ({ failed: false, events: [] }));
+    store.useFollowCount(SUBJECT);
+    await tick();
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({ kinds: [3], authors: [SUBJECT] });
+  });
+
   it("reports zero for a subject who follows nobody", async () => {
     // An answered round with an empty list is an answer, and it is the only
     // thing that says a subject follows nobody. Reading it as "nothing came

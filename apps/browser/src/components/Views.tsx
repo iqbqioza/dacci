@@ -41,7 +41,7 @@ function newestFirst(a: NostrEvent, b: NostrEvent): number {
 export function NotificationArrivals() {
   const { buffered } = useNotificationLive();
   return (
-    <Show when={true}>
+    <Show when={buffered().length > 0}>
       <button
         class="block w-full border-b border-(--line) bg-(--surface) px-4 py-3 text-left hover:bg-(--accent-soft)"
         onClick={flushNotificationArrivals}

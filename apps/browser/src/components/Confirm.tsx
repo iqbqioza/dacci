@@ -76,13 +76,14 @@ export function Confirm(props: {
         // A click on the scrim is a change of mind; a click on the dialog is
         // not, so it is stopped from reaching the scrim.
         //
-        // The scrim itself has to stop there as well. `Confirm` is opened from
-        // inside a post card, and `position: fixed` moves the box without
-        // moving the node, so the scrim is a descendant of the card that opens
-        // the question. A click that only means "never mind" would go on to
-        // open that post. `onCancel` tears the dialog down, and the click still
-        // travels the path it was dispatched along, so the card sees it whether
-        // or not the scrim is in the document by the time it gets there.
+        // The scrim has to stop there as well. `Confirm` is opened from inside a
+        // post card, and `position: fixed` moves the box without moving the
+        // node, so the scrim is a descendant of the card that opens the
+        // question: a click that only means "never mind" would go on to open that
+        // post. Solid delegates events and walks the captured `composedPath()`,
+        // ending the walk where `cancelBubble` is set — so this is what keeps the
+        // card's own `onClick` from running, and it holds even though `onCancel`
+        // tears the scrim out of the document first.
         onClick={(e) => {
           e.stopPropagation();
           props.onCancel();
