@@ -74,6 +74,38 @@ describe("parseRelayInfoDocument", () => {
     expect(info?.supportedNips).toEqual([]);
   });
 
+  it("reads a count written as a number or as a string", () => {
+    // `supported_nips` already took both spellings, because relays write the two
+    // forms mixed in the same list, and the counts sat beside it taking only the
+    // numeric one. So `"relay_count": "5"` lost the figure, and the reader was
+    // shown a relay with no count at all rather than a relay that had spelled it
+    // differently.
+    const written = parseRelayInfoDocument({
+      relay_count: "42",
+      listeners: "7",
+    });
+    expect(written?.relayCount).toBe(42);
+    expect(written?.listeners).toBe(7);
+
+    const numeric = parseRelayInfoDocument({ relay_count: 42, listeners: 7 });
+    expect(numeric?.relayCount).toBe(42);
+    expect(numeric?.listeners).toBe(7);
+
+    // With padding, because a document written by hand has spaces in it.
+    expect(parseRelayInfoDocument({ relay_count: " 42 " })?.relayCount).toBe(42);
+
+    // And not anything else. A string that only starts with a figure is not one:
+    // reading it as a count would put a number on screen that the relay never
+    // wrote, which is the failure this tolerance is meant to avoid.
+    for (const bad of ["", " ", "five", "5 relays", "42.0", "0x2a", "1e3", "-"]) {
+      expect(parseRelayInfoDocument({ relay_count: bad })?.relayCount).toBeUndefined();
+    }
+    // A non-finite number is not a count either, and JSON cannot carry one —
+    // but a caller can build the object by hand, so the guard earns its place.
+    expect(parseRelayInfoDocument({ listeners: Infinity })?.listeners).toBeUndefined();
+    expect(parseRelayInfoDocument({ listeners: NaN })?.listeners).toBeUndefined();
+  });
+
   it("rejects bodies that are not relay documents", () => {
     expect(parseRelayInfoDocument(null)).toBeNull();
     expect(parseRelayInfoDocument("<html>")).toBeNull();

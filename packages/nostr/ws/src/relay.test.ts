@@ -512,6 +512,82 @@ describe("RelayConnection.query", () => {
     });
   });
 
+  it("does not believe an OK that is not one", async () => {
+    // NIP-01's `OK` is `[id, boolean, prefix]`. The result's `accepted` is
+    // declared a boolean, so passing the field through unchanged meant a relay
+    // sending `["OK", id, "false", ""]` put the *string* `"false"` there — a
+    // truthy value in a field the type promises is a boolean, and a publish that
+    // reads as delivered to anything comparing loosely.
+    //
+    // The app's own checks are strict, so nothing shipped wrong. What was wrong
+    // is that the field contradicted its type, which is exactly the kind of
+    // thing the next caller inherits.
+    // What the relay sends for the third and fourth fields, and what the result
+    // must read as. Kept apart on purpose: a test that reused one value for
+    // both proved nothing about the field it was checking, because it handed
+    // the code the answer it was asked to give.
+    const shapes: Array<{
+      sent: unknown[];
+      accepted: boolean;
+      message: string;
+    }> = [
+      // NIP-01 says a boolean and a prefix. Everything else is read as a refusal
+      // with a reason we can show, rather than passed through.
+      { sent: ["false"], accepted: false, message: "malformed: no reason given" },
+      { sent: [0], accepted: false, message: "malformed: no reason given" },
+      { sent: [null], accepted: false, message: "malformed: no reason given" },
+      { sent: [1], accepted: false, message: "malformed: no reason given" },
+      {
+        sent: [{ accepted: true }, ""],
+        accepted: false,
+        message: "malformed: no reason given",
+      },
+      {
+        sent: [false, "blocked: not-authorized"],
+        accepted: false,
+        message: "blocked: not-authorized",
+      },
+      // A well-formed refusal keeps its reason: that is what tells the reader,
+      // and the Network page, that the relay is up and refusing.
+      {
+        sent: [false, "duplicate: already have it"],
+        accepted: false,
+        message: "duplicate: already have it",
+      },
+      // A well-formed acceptance with no prefix is not malformed — NIP-01 makes
+      // the prefix optional — so it is not reported as one.
+      { sent: [true], accepted: true, message: "" },
+      {
+        sent: [true, "duplicate: already have it"],
+        accepted: true,
+        message: "duplicate: already have it",
+      },
+    ];
+    for (const { sent, accepted, message } of shapes) {
+      const conn = new RelayConnection("wss://example", () => makeSocket(), {
+        authGateProbeMs: 0,
+      });
+      const event = relayEvent({
+        pubkey: "b".repeat(64),
+        created_at: 1000,
+        kind: 1,
+        tags: [],
+        content: `shape ${JSON.stringify(sent)}`,
+      });
+      const pending = conn.publish(event);
+      await new Promise((r) => setTimeout(r, 0));
+      const socket = (
+        conn as unknown as { socket: ReturnType<typeof makeSocket> }
+      ).socket;
+      socket.peer(["OK", event.id, ...sent]);
+      await expect(pending).resolves.toEqual({
+        accepted,
+        message,
+        fromRelay: true,
+      });
+    }
+  });
+
   it("streams live events after EOSE", async () => {
     const socket = makeSocket();
     const conn = new RelayConnection("wss://example", () => socket, {

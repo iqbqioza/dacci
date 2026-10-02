@@ -490,13 +490,27 @@ export class RelayConnection {
       const waiting = this.pendingPublishes.get(msg[1]);
       if (waiting !== undefined) {
         this.pendingPublishes.delete(msg[1]);
+        // NIP-01 puts a boolean third and a machine-readable prefix fourth, and
+        // the two are obeyed as types rather than trusted as values. `accepted`
+        // is declared a boolean, so handing it whatever arrived meant a relay
+        // sending `["OK", id, "false", ""]` produced the *string* `"false"` in a
+        // field typed `boolean` — truthy, and a publish that reads as delivered
+        // under any check looser than `=== true`. Nothing in this app was that
+        // loose, so the field simply disagreed with its own type until a caller
+        // was. A relay that does not follow the shape is read as refusing, which
+        // is the direction that does not tell the reader their post went out.
+        const accepted = msg[2] === true;
+        const message =
+          typeof msg[3] === "string" && msg[3] !== ""
+            ? msg[3]
+            : accepted
+              ? ""
+              : "malformed: no reason given";
         for (const pending of waiting) {
           clearTimeout(pending.timer);
-          pending.resolve({
-            accepted: msg[2],
-            message: msg[3],
-            fromRelay: true,
-          });
+          // The relay spoke either way, so it answered even when the answer was
+          // not one NIP-01 describes.
+          pending.resolve({ accepted, message, fromRelay: true });
         }
       }
     } else if (msg[0] === "AUTH" && typeof msg[1] === "string") {

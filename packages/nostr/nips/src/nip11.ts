@@ -39,8 +39,20 @@ export function parseRelayInfoDocument(raw: unknown): RelayInformation | null {
     const value = doc[key];
     return typeof value === "string" && value !== "" ? value : undefined;
   };
-  const num = (key: string): number | undefined =>
-    typeof doc[key] === "number" ? (doc[key] as number) : undefined;
+  // Read as a number, and read as a number written as one. `supported_nips`
+  // already had to take both forms — relays write the two spellings mixed in
+  // the same list — and the counts sat next to it taking only one, so a relay
+  // that wrote `"relay_count": "5"` lost the figure for no reason a reader can
+  // see. The string has to be the whole value: `"5 relays"` is not a number,
+  // and reading it as one would put a figure on screen that the document never
+  // claimed.
+  const num = (key: string): number | undefined => {
+    const value = doc[key];
+    if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+    if (typeof value !== "string") return undefined;
+    const text = value.trim();
+    return /^-?\d+$/.test(text) ? Number(text) : undefined;
+  };
   const obj = (key: string): Record<string, unknown> | undefined => {
     const value = doc[key];
     return typeof value === "object" && value !== null && !Array.isArray(value)

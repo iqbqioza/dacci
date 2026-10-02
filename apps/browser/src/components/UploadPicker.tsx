@@ -14,6 +14,15 @@ import {
   type UploadFailure,
 } from "../upload.js";
 
+/**
+ * The list's id, so the button that opens it can point at it.
+ *
+ * One list per picker, and a picker appears at most once on a page, so a fixed
+ * name is not a collision. `generateId` would be tidier and would also mean the
+ * name changed every render, which is the one thing `aria-controls` must not do.
+ */
+const LIST_ID = "upload-picker-list";
+
 const EDIT_ERROR: Record<"invalid" | "duplicate", string> = {
   invalid: "https:// で始まるURLを入力してください",
   duplicate: "このサーバーはすでに登録されています",
@@ -282,6 +291,12 @@ export function UploadPicker(props: {
         class="flex size-8 items-center justify-center rounded-full text-(--ink-muted) hover:bg-(--fill-soft) hover:text-(--accent)"
         aria-label={props.label ?? "画像をアップロード"}
         aria-expanded={open()}
+        // The list is portalled into the body, so nothing in the accessibility
+        // tree connected the button to the thing it opens. `aria-haspopup` says
+        // a popup is what opens; `aria-controls` says which one, so a reader can
+        // be sent to it rather than hunting for it at the end of the page.
+        aria-haspopup="true"
+        aria-controls={open() ? LIST_ID : undefined}
         title={props.label ?? "画像をアップロード"}
         disabled={!props.canUpload}
         onClick={() => setOpen(!open())}
@@ -305,7 +320,13 @@ export function UploadPicker(props: {
         <Portal mount={document.body}>
           <div
             ref={list}
+            id={LIST_ID}
             data-list
+            // Not `role="menu"`: the rows are ordinary buttons and the last of
+            // them opens a field rather than performing an action, and a menu
+            // would have to claim otherwise. Naming it and pointing the button
+            // at it is the relationship that was missing.
+            aria-label="アップロード先"
             class="fixed top-0 left-0 z-50 max-h-[calc(100dvh-1rem)] w-72 overflow-y-auto overscroll-contain rounded-2xl border border-(--line) bg-(--surface) p-1 shadow-lg"
             style={{ transform: `translate(${at().x}px, ${at().y}px)` }}
           >

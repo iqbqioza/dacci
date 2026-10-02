@@ -59,6 +59,17 @@ export function EventCard(props: {
       // this, cancelling the delete question on a post's own page dropped a
       // screen reader at the top of the document.
       tabIndex={0}
+      // Named, because it is in the tab order and nothing said what it was for.
+      // The accessibility tree reported every card as an `article` with an empty
+      // name, so a reader moving through the feed by keyboard heard a list of
+      // unlabelled articles and had to work out from the controls inside each one
+      // that the whole thing went somewhere.
+      //
+      // A name and not a role: `role="link"` would nest the body's own links,
+      // which is what the comment above is about. What the name cannot do is say
+      // that the card is activatable — that is what the overflow menu's
+      // "詳細を開く" is for, and it names the same destination.
+      aria-label="投稿を開く"
       onClick={() => {
         // On its own page the post is already open, so clicking must not
         // navigate to the very same route.
