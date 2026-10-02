@@ -6,6 +6,7 @@ import {
   isValidEventStructure,
   type NostrEvent,
 } from "./event.js";
+import { mentionedProfiles } from "./profile-reference.js";
 
 /**
  * Builders for the four post actions. Tag layouts follow the NIPs exactly,
@@ -14,7 +15,7 @@ import {
  * - NIP-10 positional reply markers (`root`, `reply`)
  * - NIP-18 repost (`e`, `p`, `a`) and quote repost (adds `q`)
  * - NIP-25 reaction (`e`, `p`, `k`)
- * - NIP-27 `mentions` for anything addressed in the text
+ * - NIP-27/NIP-22 `p` for anyone addressed in the text
  */
 
 export const REPLY_KIND = 1;
@@ -32,16 +33,20 @@ function addressTag(event: NostrEvent): string[] | null {
   return d === undefined ? null : [`a`, `${event.kind}:${event.pubkey}:${d}`];
 }
 
-/** Every pubkey the text addresses, for the NIP-27 mentions tag. */
-export function mentionedPubkeys(text: string, candidates: string[]): string[] {
-  const out = new Set<string>();
-  for (const pubkey of candidates) {
-    if (pubkey.length !== 64) continue;
-    if (text.includes(pubkey) || text.includes(`nostr:${pubkey}`)) {
-      out.add(pubkey);
-    }
-  }
-  return [...out];
+/**
+ * Every pubkey the text addresses, as `p` tags.
+ *
+ * NIP-27 asks for a mention to be written as a NIP-21 code — an `npub` or an
+ * `nprofile` — and NIP-22 asks for everyone a reply names to carry a `p` tag,
+ * which is what makes a relay notify them. Matching the text for anything but
+ * bare hex meant a mention written the way the NIP says was read as naming
+ * nobody, so the person written about was never told.
+ *
+ * The author is excluded: they are already tagged as the reply's target.
+ */
+export function mentionedPubkeys(text: string, exclude: string[]): string[] {
+  const skip = new Set(exclude.filter((key) => key.length === 64));
+  return mentionedProfiles(text).filter((key) => !skip.has(key));
 }
 
 export interface ReplyInput {
@@ -93,8 +98,11 @@ export function buildReply(input: ReplyInput): UnsignedEvent {
   }
   const a = addressTag(target);
   if (a !== null) tags.push(a);
-  const mentions = mentionedPubkeys(text, [target.pubkey]);
-  if (mentions.length > 0) tags.push(["mentions", ...mentions]);
+  // Everyone the text names gets a `p` tag, which is what a relay notifies on.
+  // The target's own tag is already there, so it is not added twice.
+  for (const named of mentionedPubkeys(text, [target.pubkey])) {
+    tags.push(["p", named]);
+  }
   return {
     pubkey,
     created_at: createdAt,
@@ -132,8 +140,9 @@ export function buildQuoteRepost(input: {
     ["q", base.tags[0][1]],
     ...base.tags,
   ];
-  const mentions = mentionedPubkeys(input.text, [input.target.pubkey]);
-  if (mentions.length > 0) tags.push(["mentions", ...mentions]);
+  for (const named of mentionedPubkeys(input.text, [input.target.pubkey])) {
+    tags.push(["p", named]);
+  }
   return { ...base, tags, content: input.text };
 }
 

@@ -1,6 +1,6 @@
 import type { NostrEvent } from "./event.js";
 import type { ContentSegment } from "./media.js";
-import { decodeNpub } from "./nip19.js";
+import { decodeProfileReference } from "./nip19.js";
 
 /** A person a post names, and the text to show for them. */
 export interface ProfileMention {
@@ -43,7 +43,20 @@ export interface ProfileReference {
  * bio it is also how the person names themselves, which is the one place a
  * bare `npub1…` is a reference.
  */
-const PROFILE = /\b(?:nostr:)?(npub1[023456789acdefghjklmnpqrstuvwxyz]{20,})\b/gi;
+/**
+ * Matches either spelling of a profile reference: the bare `npub` entity, and
+ * the `nprofile` entity NIP-27 asks writers to use for a mention, which carries
+ * relay hints alongside the key. The body is bounded to bech32's charset so
+ * trailing prose is never swallowed, and the checksum decides what is real, so
+ * an ordinary word is never taken for a name.
+ *
+ * Whether the prefix counts is the caller's decision: in a post, a reference is
+ * part of a `nostr:` uri the author chose to write, while in a profile's own bio
+ * it is also how the person names themselves, which is the one place a bare
+ * entity is a reference.
+ */
+const PROFILE =
+  /\b(?:nostr:)?((?:npub|nprofile)1[023456789acdefghjklmnpqrstuvwxyz]{20,})\b/gi;
 
 /**
  * Every profile a post names in its own text, in reading order.
@@ -68,7 +81,8 @@ export function profileReferences(
     // A word that begins like an npub but fails the checksum is not one, and
     // the text keeps it rather than losing it.
     if (prefixed || bare) {
-      const pubkey = decodeNpub(match[1]);
+      // Either spelling resolves to the one thing a mention needs: the pubkey.
+      const pubkey = decodeProfileReference(match[1]);
       if (pubkey !== null) {
         out.push({ pubkey, start: match.index, end: match.index + match[0].length });
       }

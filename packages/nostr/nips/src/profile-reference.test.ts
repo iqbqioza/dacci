@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { bech32Encode } from "./bech32.js";
 import {
   contentSegments,
   encodeNpub,
@@ -14,6 +15,15 @@ const BOB = "4f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa";
 const NOUNCE = "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f";
 
 const npub = (pubkey: string): string => `nostr:${encodeNpub(pubkey)}`;
+
+/** The `nprofile` spelling NIP-27 asks writers to use for a mention. */
+const nprofile = (pubkey: string): string => {
+  const bytes: number[] = [];
+  for (let i = 0; i < pubkey.length; i += 2) {
+    bytes.push(parseInt(pubkey.slice(i, i + 2), 16));
+  }
+  return `nostr:${bech32Encode("nprofile", new Uint8Array([0, 32, ...bytes]))}`;
+};
 const names: Record<string, string> = { [ALICE]: "Alice", [BOB]: "Bob" };
 const nameOf = (pubkey: string): string => names[pubkey] ?? pubkey.slice(0, 8);
 
@@ -40,6 +50,29 @@ describe("profileReferences", () => {
     const text = `hi ${npub(ALICE)}`;
     const [found] = profileReferences(text);
     expect(text.slice(found.start, found.end)).toBe(npub(ALICE));
+  });
+
+  it("reads the nprofile spelling NIP-27 asks writers to use", () => {
+    // Without this the mention renders as raw bech32, which is what a reader
+    // following NIP-27 wrote and cannot read.
+    const found = profileReferences(`hi ${nprofile(ALICE)}`);
+    expect(found).toHaveLength(1);
+    expect(found[0].pubkey).toBe(ALICE);
+  });
+
+  it("shows an nprofile mention by name, like any other", () => {
+    const segments = textSegments(`hi ${nprofile(ALICE)}!`, nameOf);
+    const mention = segments.find((s) => s.kind === "mention");
+    expect(mention?.kind === "mention" && mention.mention.label).toBe("Alice");
+  });
+
+  it("counts both spellings of the same person once", () => {
+    expect(mentionedProfiles(`${nprofile(ALICE)} ${npub(ALICE)}`)).toEqual([ALICE]);
+  });
+
+  it("finds both spellings in one post, in reading order", () => {
+    const found = profileReferences(`${npub(ALICE)} and ${nprofile(BOB)}`);
+    expect(found.map((f) => f.pubkey)).toEqual([ALICE, BOB]);
   });
 
   it("leaves a word that only looks like one", () => {

@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest";
 import { bech32Decode, bech32Encode } from "./bech32.js";
 import {
   decodeEventReference,
+  decodeNaddr,
   decodeNote,
   decodeNevent,
+  decodeNprofile,
   decodeNpub,
+  decodeNrelay,
   decodeNsec,
+  decodeProfileReference,
   encodeNote,
   encodeNpub,
   encodeNsec,
@@ -131,6 +135,145 @@ describe("decodeNevent", () => {
 
   it("keeps the prefixes apart", () => {
     expect(decodeNevent(encodeNote(KEY) as string)).toBeNull();
+  });
+});
+
+describe("nprofile", () => {
+  it("reads the pubkey and the relay hints", () => {
+    // NIP-27 asks writers to mention a profile with this, so a client that
+    // cannot read it shows the reader raw bech32.
+    const encoded = bech32Encode(
+      "nprofile",
+      tlv([
+        [0, bytesOf(KEY)],
+        [1, [...new TextEncoder().encode("wss://one.example")]],
+        [1, [...new TextEncoder().encode("wss://two.example")]],
+      ]),
+    );
+    expect(decodeNprofile(encoded)).toEqual({
+      pubkey: KEY,
+      relays: ["wss://one.example", "wss://two.example"],
+    });
+  });
+
+  it("reads one with no relay hints at all", () => {
+    const encoded = bech32Encode("nprofile", tlv([[0, bytesOf(KEY)]]));
+    expect(decodeNprofile(encoded)).toEqual({ pubkey: KEY, relays: [] });
+  });
+
+  it("rejects one with no key, since there is nobody to show", () => {
+    const encoded = bech32Encode(
+      "nprofile",
+      tlv([[1, [...new TextEncoder().encode("wss://one.example")]]]),
+    );
+    expect(decodeNprofile(encoded)).toBeNull();
+  });
+
+  it("rejects a key of the wrong length", () => {
+    expect(decodeNprofile(bech32Encode("nprofile", tlv([[0, [1, 2, 3]]])))).toBeNull();
+  });
+
+  it("keeps the prefixes apart", () => {
+    expect(decodeNprofile(encodeNpub(KEY) as string)).toBeNull();
+    expect(decodeNpub(bech32Encode("nprofile", tlv([[0, bytesOf(KEY)]])))).toBeNull();
+  });
+});
+
+describe("naddr", () => {
+  /** TLV 3 is a big-endian uint32. */
+  const kind = (n: number): number[] => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+
+  it("reads the coordinate of an addressable event", () => {
+    const encoded = bech32Encode(
+      "naddr",
+      tlv([
+        [0, [...new TextEncoder().encode("my-article")]],
+        [1, [...new TextEncoder().encode("wss://one.example")]],
+        [2, bytesOf(KEY)],
+        [3, kind(30023)],
+      ]),
+    );
+    expect(decodeNaddr(encoded)).toEqual({
+      identifier: "my-article",
+      pubkey: KEY,
+      kind: 30023,
+      relays: ["wss://one.example"],
+    });
+  });
+
+  it("reads the empty identifier a replaceable kind uses", () => {
+    // The `special` type is the identifier here, and for a parameterised
+    // replaceable event it is an empty string — so it cannot be held to the 32
+    // bytes the same type means for nprofile and nevent.
+    const encoded = bech32Encode(
+      "naddr",
+      tlv([
+        [0, []],
+        [2, bytesOf(KEY)],
+        [3, kind(30023)],
+      ]),
+    );
+    expect(decodeNaddr(encoded)).toEqual({
+      identifier: "",
+      pubkey: KEY,
+      kind: 30023,
+      relays: [],
+    });
+  });
+
+  it("rejects a coordinate missing any part of it", () => {
+    // Without the identifier, the author or the kind, the address names nothing
+    // that can be asked for.
+    expect(decodeNaddr(bech32Encode("naddr", tlv([[2, bytesOf(KEY)], [3, kind(1)]])))).toBeNull();
+    expect(decodeNaddr(bech32Encode("naddr", tlv([[0, [1]], [3, kind(1)]])))).toBeNull();
+    expect(decodeNaddr(bech32Encode("naddr", tlv([[0, [1]], [2, bytesOf(KEY)]])))).toBeNull();
+  });
+
+  it("keeps the prefixes apart", () => {
+    expect(
+      decodeNaddr(bech32Encode("nevent", tlv([[0, bytesOf(KEY)]]))),
+    ).toBeNull();
+  });
+});
+
+describe("nrelay", () => {
+  it("reads the URL it wraps", () => {
+    // Deprecated by NIP-19, but a reference a client was handed should resolve
+    // rather than be shown as raw text.
+    const encoded = bech32Encode(
+      "nrelay",
+      new TextEncoder().encode("wss://relay.example"),
+    );
+    expect(decodeNrelay(encoded)).toBe("wss://relay.example");
+  });
+
+  it("rejects an empty one, which names no relay", () => {
+    expect(decodeNrelay(bech32Encode("nrelay", new Uint8Array([])))).toBeNull();
+  });
+});
+
+describe("decodeProfileReference", () => {
+  it("takes either spelling a mention is written in", () => {
+    const profile = bech32Encode("nprofile", tlv([[0, bytesOf(KEY)]]));
+    expect(decodeProfileReference(encodeNpub(KEY) as string)).toBe(KEY);
+    expect(decodeProfileReference(profile)).toBe(KEY);
+  });
+
+  it("takes the nostr: prefix off either one", () => {
+    const profile = bech32Encode("nprofile", tlv([[0, bytesOf(KEY)]]));
+    expect(decodeProfileReference(`nostr:${profile}`)).toBe(KEY);
+    expect(decodeProfileReference(`nostr:${encodeNpub(KEY) as string}`)).toBe(KEY);
+  });
+
+  it("takes an entity whose checksum does not hold as naming nobody", () => {
+    // The checksum is what decides whether a word is a reference at all, so a
+    // string that merely begins like one must not resolve.
+    expect(decodeProfileReference("npub1notarealkey")).toBeNull();
+    expect(decodeProfileReference("nprofile1nope")).toBeNull();
+  });
+
+  it("takes an event reference as naming nobody", () => {
+    expect(decodeProfileReference(encodeNote(KEY) as string)).toBeNull();
   });
 });
 

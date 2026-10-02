@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { schnorr } from "@noble/curves/secp256k1";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
+import { bech32Encode } from "./bech32.js";
 import { computeEventId, type NostrEvent } from "./event.js";
+import { encodeNpub } from "./nip19.js";
 import {
   buildDeletion,
   commentParent,
@@ -33,6 +35,13 @@ const AUTHOR_SECRET = "22".repeat(32);
 const ME = bytesToHex(schnorr.getPublicKey(hexToBytes(ME_SECRET)));
 const AUTHOR = bytesToHex(schnorr.getPublicKey(hexToBytes(AUTHOR_SECRET)));
 const ROOT_AUTHOR = "3".repeat(64);
+/** Hex to bytes, two characters at a time. */
+function hexBytes(hex: string): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < hex.length; i += 2) out.push(parseInt(hex.slice(i, i + 2), 16));
+  return out;
+}
+
 const SECRETS = new Map<string, string>([
   [ME, ME_SECRET],
   [AUTHOR, AUTHOR_SECRET],
@@ -154,14 +163,20 @@ describe("buildReply", () => {
     expect(authors).toEqual([ROOT_AUTHOR, AUTHOR]);
   });
 
-  it("adds a NIP-27 mentions tag for the author named in the text", () => {
+  it("tags the author named in the text, so a relay notifies them", () => {
+    // A `p` tag is what NIP-22 and current NIP-27 ask for. The legacy
+    // `mentions` tag was written for a spelling of the mention no longer in the
+    // NIP, and nothing acted on it.
     const event = buildReply({
       pubkey: ME,
-      text: `@${AUTHOR} さんへ`,
+      text: `nostr:${encodeNpub(AUTHOR)} さんへ`,
       target,
       createdAt: AT,
     });
-    expect(tagValue(event, "mentions")?.slice(1)).toEqual([AUTHOR]);
+    const tagged = event.tags.filter((tag) => tag[0] === "p").map((tag) => tag[1]);
+    // The target is tagged because it is being answered, and the author named in
+    // the text is tagged because they were written about.
+    expect(tagged).toContain(AUTHOR);
   });
 
   it("adds a NIP-18 address tag for a long-form post", () => {
@@ -225,11 +240,22 @@ describe("buildReaction", () => {
 });
 
 describe("mentionedPubkeys", () => {
-  it("matches bare pubkeys and nostr: URIs only", () => {
-    expect(mentionedPubkeys(`hi ${AUTHOR}`, [AUTHOR])).toEqual([AUTHOR]);
-    expect(mentionedPubkeys(`nostr:${AUTHOR}`, [AUTHOR])).toEqual([AUTHOR]);
-    expect(mentionedPubkeys("nothing here", [AUTHOR])).toEqual([]);
-    expect(mentionedPubkeys(AUTHOR, ["short"])).toEqual([]);
+  it("reads a mention written the way NIP-27 asks", () => {
+    // NIP-27 writes a mention as a NIP-21 code. Matching the text for bare hex
+    // instead meant the spelling the NIP prescribes was read as naming nobody,
+    // so the person written about was never tagged and never notified.
+    const profile = bech32Encode("nprofile", new Uint8Array([0, 32, ...hexBytes(AUTHOR)]));
+    expect(mentionedPubkeys(`hi nostr:${encodeNpub(AUTHOR)}`, [])).toEqual([AUTHOR]);
+    expect(mentionedPubkeys(`hi nostr:${profile}`, [])).toEqual([AUTHOR]);
+    expect(mentionedPubkeys("nothing here", [])).toEqual([]);
+  });
+
+  it("leaves out whoever is already tagged, and does not read a bare key", () => {
+    // The reply's own target already has a `p` tag, so it is not added twice.
+    expect(mentionedPubkeys(`hi nostr:${encodeNpub(AUTHOR)}`, [AUTHOR])).toEqual([]);
+    // A bare 64-hex key in a post is as likely to be something pasted for
+    // looking up as a person being written about.
+    expect(mentionedPubkeys(`hi ${AUTHOR}`, [])).toEqual([]);
   });
 });
 
