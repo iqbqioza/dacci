@@ -76,6 +76,46 @@ function absoluteOrResolved(address: string, server: string): string {
   }
 }
 
+/**
+ * True when an address the server's own document wrote may be used to *receive*
+ * the upload: it has to be https, and it has to be the host the reader picked.
+ *
+ * NIP-96's opt-in is an https route, and the document is written by the file
+ * server — so an `api_url` naming another host, or naming itself over cleartext,
+ * is the document talking the reader's browser into sending their file, and the
+ * `Authorization` header that authorises it, somewhere the reader never chose.
+ * The one exception is a host the reader themselves added as `http://`, which
+ * `addServer` accepts today; there the reader's own choice is the scheme.
+ *
+ * The `download_url` is a different matter and gets a different rule: it names
+ * where a *public* file is read from, and a server that keeps its blobs behind a
+ * CDN names another host there. Only the scheme is held there.
+ */
+function isUsableUpload(address: string, server: string): boolean {
+  let parsed: URL;
+  let chosen: URL;
+  try {
+    parsed = new URL(address);
+    chosen = new URL(server);
+  } catch {
+    return false;
+  }
+  if (chosen.protocol === "http:" && parsed.protocol === "http:") {
+    return parsed.host === chosen.host;
+  }
+  return parsed.protocol === "https:" && parsed.host === chosen.host;
+}
+
+/** True when an address a document named may be shown to the reader as a link. */
+function isUsableDownload(address: string, server: string): boolean {
+  try {
+    const parsed = new URL(address);
+    return parsed.protocol === "https:" || new URL(server).protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
 /** How many well-known documents one upload may chase across hosts. */
 const MAX_DELEGATION_HOPS = 2;
 
@@ -83,7 +123,8 @@ async function serverInfo(
   server: string,
   seen: Set<string> = new Set(),
   hops = 0,
-): Promise<ServerInfo> {  const wellKnown = `${server}/.well-known/nostr/nip96.json`;
+): Promise<ServerInfo> {
+  const wellKnown = `${server}/.well-known/nostr/nip96.json`;
   let record: {
     api_url?: unknown;
     download_url?: unknown;
@@ -117,13 +158,19 @@ async function serverInfo(
     // `fetch` would resolve it against the app's own origin and post the
     // reader's file to whoever hosts this page.
     const endpoint = absoluteOrResolved(api, server);
+    // And an endpoint the reader's own server may not be talked into using: the
+    // document is written by that server, so `api_url` is where it says the file
+    // goes, and nothing checked it before. A fallback to BUD-02 is better than
+    // an upload to a host that is in nobody's list.
+    if (!isUsableUpload(endpoint, server)) return bud02(server);
+    const download =
+      typeof record.download_url === "string" && record.download_url !== ""
+        ? absoluteOrResolved(record.download_url, server)
+        : endpoint;
     return {
       endpoint,
       method: "POST",
-      downloadUrl:
-        typeof record.download_url === "string" && record.download_url !== ""
-          ? absoluteOrResolved(record.download_url, server)
-          : endpoint,
+      downloadUrl: isUsableDownload(download, server) ? download : endpoint,
       // A signature is sent either way: NIP-96 marks the upload AUTH required,
       // and a plan that also accepts an unsigned one (`is_nip98_required:
       // false`) still takes a signed one.
@@ -276,7 +323,12 @@ async function authorization(
 function urlFromDescriptor(body: unknown): string | null {
   if (typeof body !== "object" || body === null) return null;
   const url = (body as { url?: unknown }).url;
-  return typeof url === "string" && url.startsWith("http") ? url : null;
+  // Both dialects, same rule: the address a server hands back goes straight
+  // into the reader's post, so it has to be one a browser will open. The NIP-96
+  // reader took any string at all, `javascript:` included.
+  return typeof url === "string" && /^https?:\/\//i.test(url.trim())
+    ? url.trim()
+    : null;
 }
 
 /**
@@ -316,7 +368,12 @@ function nip96Answer(body: unknown): {
   if (!Array.isArray(tags)) return { url: null, error: null };
   for (const tag of tags) {
     if (Array.isArray(tag) && tag[0] === "url" && typeof tag[1] === "string") {
-      return { url: tag[1], error: null };
+      // The address the server named is inserted verbatim into the reader's
+      // post, so it is held to the same rule as the BUD-02 descriptor: http or
+      // https, and nothing else. A NIP-96 server answering
+      // `["url", "javascript:…"]` used to be taken at its word.
+      const url = tag[1].trim();
+      if (/^https?:\/\//i.test(url)) return { url, error: null };
     }
   }
   return { url: null, error: null };
@@ -457,6 +514,15 @@ export async function uploadFile(
     parsed = JSON.parse(text);
   } catch {
     parsed = text;
+  }
+  // A body that is not an object is not an answer from either dialect: it is an
+  // HTML error page from something in between, an empty body, or a proxy's idea
+  // of a 2xx. Both readers below answer "no url" for it, and "no url" is the one
+  // answer that falls through to building a link out of the file's own hash — so
+  // the reader was told the upload worked and a link to a file that was never
+  // written went into their post. HTTP said 2xx; nothing said the file is there.
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return { failure: "rejected", message: "サーバーの返答を読み取れませんでした" };
   }
   const answer =
     info.method === "PUT"

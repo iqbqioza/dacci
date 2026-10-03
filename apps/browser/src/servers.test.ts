@@ -118,6 +118,57 @@ describe("upload servers", () => {
     expect(store.useUploadServers().all()).toEqual(BUILTIN_SERVERS);
   });
 
+  it("refuses an address it could not build a request to", async () => {
+    // The old check was a prefix test, so `https://?q` and `https://:99999` were
+    // accepted, stored, and published as `server` tags — and then failed the
+    // app's own upload on every client, with the address the reader could not
+    // remove either.
+    const store = await freshStore();
+    for (const bad of ["https://?q", "https://:99999", "https:// ", "https:///"]) {
+      expect(store.addServer(bad), bad).toBe("invalid");
+    }
+    expect(own(store)).toEqual([]);
+  });
+
+  it("refuses a password written into the address", async () => {
+    // A `server` tag has no room to say "and here is the credential", and the
+    // list is a replaceable event every relay keeps: a password typed into this
+    // field was published to the world.
+    const store = await freshStore();
+    expect(store.addServer("https://alice:hunter2@files.example")).toBe("invalid");
+    expect(store.addServer("https://alice@files.example")).toBe("invalid");
+    expect(own(store)).toEqual([]);
+  });
+
+  it("holds one server in one spelling", async () => {
+    // A host is case-insensitive and `:443` is what https already means, so two
+    // rows for one server meant two `server` tags for it and two ways for the
+    // reader to think about where their uploads go.
+    const store = await freshStore();
+    expect(store.addServer("https://Files.Example")).toBe("ok");
+    expect(store.addServer("https://files.example")).toBe("duplicate");
+    expect(store.addServer("https://files.example:443")).toBe("duplicate");
+    expect(own(store)).toEqual(["https://files.example"]);
+  });
+
+  it("drops the slash that ends a path and keeps the one in a query", async () => {
+    // The upload endpoint is this address with `/upload` appended, so a trailing
+    // slash has to go — but the slash used to be stripped off the end of the
+    // *whole* address, which on a url with a query rewrote the query and left a
+    // tag naming a resource the reader never typed.
+    const store = await freshStore();
+    expect(store.addServer("https://files.example/base/")).toBe("ok");
+    expect(own(store)).toEqual(["https://files.example/base"]);
+    expect(store.addServer("https://files.example/?token=abc/")).toBe("ok");
+    expect(own(store)).toEqual([
+      "https://files.example/base",
+      "https://files.example?token=abc/",
+    ]);
+    // And the root, which is how every server is written.
+    expect(store.addServer("https://files.example/")).toBe("ok");
+    expect(own(store).at(-1)).toBe("https://files.example");
+  });
+
   it("refuses the same server twice, ignoring a trailing slash", async () => {
     const store = await freshStore();
     expect(store.addServer("https://files.example/")).toBe("ok");
@@ -423,6 +474,188 @@ describe("loadServers", () => {
     expect(sent).toEqual([]);
     // The edit is still on screen; it just was not published.
     expect(own(store)).toEqual(["https://my.blossom.example"]);
+  });
+
+  it("treats a round of nothing but forgeries as no answer at all", async () => {
+    // Three forged events, each newer than the account's real list, are all a
+    // hostile relay has to serve: `id` is the hash of the event's own fields, so
+    // the id check passes and only the signature fails. The list built from such
+    // a round is empty, and an empty list is the one answer that opens the
+    // publish gate — so the reader's next edit published their local additions
+    // alone, a kind 10063 that removed every server they had configured
+    // elsewhere, from every relay. Nothing here may be published.
+    const pubkey = READER;
+    const sent: unknown[] = [];
+    vi.resetModules();
+    vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
+    vi.doMock("./compose.js", () => ({
+      publishEvent: async (template: Record<string, unknown>) => {
+        sent.push(template);
+        return { ...template, id: "f".repeat(64), sig: "e".repeat(128) };
+      },
+    }));
+    const forgeries = [9000, 8999, 8998].map((at) =>
+      forgedAs("reader", {
+        kind: 10063,
+        created_at: at,
+        content: "",
+        tags: [["server", "https://attacker.example"]],
+      }),
+    );
+    vi.doMock("./nostr.js", () => ({
+      getConnection: (url: string) => ({
+        url,
+        // Nothing but forgeries: a relay that has never held the real list, or
+        // one that decides to answer as if it had not.
+        query: async () => ({ failed: false, events: forgeries }),
+      }),
+    }));
+    const store = await import("./servers.js");
+    await store.loadServers();
+    await store.addServerAndPublish("https://mine.example");
+    expect(sent).toEqual([]);
+    // And what the reader had is still what they have.
+    expect(own(store)).toEqual(["https://mine.example"]);
+  });
+
+  it("keeps the account's own list when one honest relay answers beside the forgeries", async () => {
+    // The forged answer must not decide the round on its own, but a relay that
+    // does hold the real list has answered, and its answer is the one to keep.
+    const pubkey = READER;
+    vi.resetModules();
+    vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
+    vi.doMock("./compose.js", () => ({
+      publishEvent: async (template: Record<string, unknown>) => ({
+        ...template,
+        id: "f".repeat(64),
+        sig: "e".repeat(128),
+      }),
+    }));
+    vi.doMock("./relays.js", () => ({
+      useRelays: () => ({
+        readRelays: () => ["wss://hostile.example", "wss://honest.example"],
+      }),
+    }));
+    vi.doMock("./nostr.js", () => ({
+      getConnection: (url: string) => ({
+        url,
+        query: async () => ({
+          failed: false,
+          events:
+            url === "wss://hostile.example"
+              ? [
+                  forgedAs("reader", {
+                    kind: 10063,
+                    created_at: 9000,
+                    content: "",
+                    tags: [["server", "https://attacker.example"]],
+                  }),
+                ]
+              : [listEvent(["https://real.example"], { at: 1000 })],
+        }),
+      }),
+    }));
+    const store = await import("./servers.js");
+    await store.loadServers();
+    expect(own(store)).toEqual(["https://real.example"]);
+  });
+
+  it("does not put one of the app's own servers back into the account's list", async () => {
+    // A list published on another client can name a server the app already
+    // offers. It stayed in the reader's list and therefore in the published
+    // kind 10063, while `all()` hid their copy of it — so there was no row and
+    // no delete button, and BUD-03 tells a client to upload to the *first*
+    // server in the list, which every other client of the account then did.
+    const pubkey = READER;
+    const sent: unknown[] = [];
+    vi.resetModules();
+    vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
+    vi.doMock("./compose.js", () => ({
+      publishEvent: async (template: Record<string, unknown>) => {
+        sent.push(template);
+        return { ...template, id: "f".repeat(64), sig: "e".repeat(128) };
+      },
+    }));
+    const builtin = BUILTIN_SERVERS[0].url;
+    vi.doMock("./nostr.js", () => ({
+      getConnection: (url: string) => ({
+        url,
+        query: async () => ({
+          failed: false,
+          events: [listEvent([builtin, "https://mine.example"], { at: 2000 })],
+        }),
+      }),
+    }));
+    const store = await import("./servers.js");
+    await store.loadServers();
+    // Shown once, as the app's own, and not among the reader's own.
+    expect(
+      store.useUploadServers().all().filter((s) => s.url === builtin),
+    ).toHaveLength(1);
+    expect(own(store)).toEqual([builtin, "https://mine.example"]);
+    // And never written to the account, which is what the publish filters on.
+    await store.addServerAndPublish("https://third.example");
+    expect(
+      sent.flatMap((template) => (template as { tags: string[][] }).tags),
+    ).toEqual([
+      ["server", "https://mine.example"],
+      ["server", "https://third.example"],
+    ]);
+    // A list the account already published is not written back: the write would
+    // move this browser's stamp past a list another client publishes next.
+    expect(sent).toHaveLength(1);
+  });
+
+  it("does not bring a server back that the reader removed mid-read", async () => {
+    // Taking one out publishes at once — but during the startup read the gate is
+    // shut, so nothing is published and no stamp moves, and the answer that was
+    // already in flight put the row back. The list on screen and the list in
+    // storage then disagreed, and the next successful publish wrote it back into
+    // the account.
+    const pubkey = READER;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.resetModules();
+    vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
+    vi.doMock("./compose.js", () => ({
+      publishEvent: async (template: Record<string, unknown>) => {
+        // Whatever the publish is told to write, remember it: the round below is
+        // about the answer, not about the publish succeeding.
+        sentTags.push((template as { tags: string[][] }).tags);
+        return { ...template, id: "f".repeat(64), sig: "e".repeat(128) };
+      },
+    }));
+    const sentTags: string[][][] = [];
+    vi.doMock("./nostr.js", () => ({
+      getConnection: (url: string) => ({
+        url,
+        query: async () => {
+          await gate;
+          return {
+            failed: false,
+            events: [listEvent(["https://a.example", "https://b.example"], { at: 2000 })],
+          };
+        },
+      }),
+    }));
+    const store = await import("./servers.js");
+    // A previous session left both servers here, so the round has something to
+    // remove from.
+    store.addServer("https://a.example");
+    store.addServer("https://b.example");
+    const reading = store.loadServers();
+    await new Promise((r) => setTimeout(r, 5));
+    // The gate is shut while the round is out, so the removal is local for now.
+    expect(await store.removeServerAndPublish("https://b.example")).toBe(false);
+    expect(own(store)).toEqual(["https://a.example"]);
+    release();
+    await reading;
+    expect(own(store)).toEqual(["https://a.example"]);
+    // And the account was told about the edit the closed gate held back.
+    expect(sentTags.length).toBeGreaterThan(0);
+    expect(sentTags.at(-1)).toEqual([["server", "https://a.example"]]);
   });
 
   it("does not publish one account's read on behalf of the next", async () => {

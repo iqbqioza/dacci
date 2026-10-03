@@ -1263,4 +1263,37 @@ describe("RelayConnection subscription limit", () => {
     expect(Date.now() - started).toBeLessThan(1000);
     expect((await inFlight).failed).toBe(true);
   });
+
+  it("says a query it never sent was never sent", async () => {
+    // Both shapes report no answer, so both report `failed` — and the caller
+    // that draws a row per relay needs to tell "this relay said nothing" from
+    // "we never asked it". A probe that never went out as the only evidence of a
+    // dead relay, and the reader is told their network is down while it serves
+    // everyone else.
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+      maxSubscriptions: 1,
+    });
+    const inFlight = conn.query({ kinds: [1] }, 5000);
+    await settle();
+    const queued = await conn.query({ kinds: [1] }, 60);
+    expect(queued.neverSent).toBe(true);
+    expect(queued.failed).toBe(true);
+
+    // A query that was sent and answered is not that.
+    socket.peer(["EOSE", reqs(socket)[0]]);
+    expect((await inFlight).neverSent).toBeUndefined();
+    conn.close();
+
+    // And so is one the socket refused before the relay was ever asked.
+    const closed = makeSocket();
+    const gone = new RelayConnection("wss://example", () => closed, {
+      authGateProbeMs: 0,
+    });
+    gone.close();
+    const refused = await gone.query({ kinds: [1] }, 100);
+    expect(refused.failed).toBe(true);
+    expect(refused.neverSent).toBeUndefined();
+  });
 });

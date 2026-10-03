@@ -348,6 +348,52 @@ describe("relay set editing", () => {
     restoreDefaults();
   });
 
+  it("does not call a relay offline when the probe never reached it", async () => {
+    // A probe is a question, and a question that was never asked says nothing
+    // about the relay it was aimed at: the connection had no room for it inside
+    // the probe's window, or it was closed while it waited. Reading that as a
+    // dead relay is how a reader is told their network is down while it is
+    // serving everyone else — the one thing a status row must never say.
+    vi.stubGlobal("localStorage", {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {},
+    });
+    try {
+      vi.resetModules();
+      vi.doMock("./nostr.js", () => ({
+        getConnection: (url: string) => ({
+          url,
+          query: async () =>
+            url === "wss://busy.example"
+              ? {
+                  events: [],
+                  eose: false,
+                  failed: true,
+                  authRequired: false,
+                  // Nothing was asked, so nothing was refused.
+                  neverSent: true as const,
+                }
+              : { events: [], eose: true, failed: false, authRequired: false },
+          close: () => undefined,
+        }),
+        pruneConnections: () => undefined,
+      }));
+      const fresh = await import("./relays.js");
+      fresh.restoreDefaults();
+      fresh.addRelay("wss://busy.example", "both");
+      await fresh.refreshStatuses();
+      // Unasked, so unknown — and not the offline a refused probe would give.
+      expect(fresh.useRelays().relayStatuses()["wss://busy.example"]).toBe(
+        "unknown",
+      );
+      fresh.restoreDefaults();
+    } finally {
+      vi.doUnmock("./nostr.js");
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("hands the new set to the connection pool on every switch", () => {
     // Removing a relay left its socket open: nothing ever closed it, so the
     // dead relay held a connection until the tab did. The pool itself is

@@ -1,7 +1,7 @@
 import type { Filter } from "dacci-nostr-nips";
 import type { NostrEvent } from "dacci-nostr-nips";
 import { compareEvents } from "dacci-nostr-nips";
-import { isSignedBy } from "./authored.js";
+import { authenticatedAnswer, isSignedBy } from "./authored.js";
 import { createSignal } from "solid-js";
 import { useAuth } from "./auth.js";
 import { publishEvent, publishFailureText } from "./compose.js";
@@ -135,7 +135,41 @@ function isUploadServer(value: unknown): value is UploadServer {
 }
 
 function isHttpUrl(value: string): boolean {
-  return /^https?:\/\/[^\s/]+/i.test(value.trim());
+  return normaliseServerUrl(value) !== null;
+}
+
+/**
+ * The address as it will be stored and published, or null when it is not one.
+ *
+ * Parsed rather than matched, because this string ends up in a replaceable event
+ * every relay keeps and other clients read to decide where the reader's uploads
+ * and their signed NIP-98 authorizations go. A prefix test accepted three things
+ * that are not addresses at all: `https://?q`, which `new URL` refuses, and a
+ * password typed into the field, which was then published to the world because a
+ * `server` tag carries no room to say "and here is the credential".
+ *
+ * Normalised on the way through, so one server in several spellings is one
+ * server: a host is case-insensitive, `:443` is what https already means, and a
+ * trailing slash on the path is dropped because the upload path is appended to
+ * this address. A trailing slash inside a query string is not a path, so it is
+ * left exactly as the reader wrote it.
+ */
+function normaliseServerUrl(value: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(value.trim());
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
+  if (parsed.hostname === "") return null;
+  // Credentials belong in a manager, not in a public list of where to upload.
+  if (parsed.username !== "" || parsed.password !== "") return null;
+  // Assembled rather than read back off the URL, which puts the root slash back
+  // (`new URL("https://x.example").toString()` is `https://x.example/`) and this
+  // store has always held the address without it.
+  const path = parsed.pathname.replace(/\/+$/, "");
+  return `${parsed.protocol}//${parsed.host}${path}${parsed.search}${parsed.hash}`;
 }
 
 function write(next: UploadServer[]): void {
@@ -179,8 +213,8 @@ function all(): UploadServer[] {
  * it below the first.
  */
 export function addServer(url: string): "ok" | "invalid" | "duplicate" {
-  const trimmed = url.trim().replace(/\/+$/, "");
-  if (!isHttpUrl(trimmed)) return "invalid";
+  const trimmed = normaliseServerUrl(url);
+  if (trimmed === null) return "invalid";
   const known = [...BUILTIN_SERVERS, ...servers()];
   if (known.some((server) => server.url === trimmed)) return "duplicate";
   write([...servers(), { url: trimmed }]);
@@ -326,6 +360,21 @@ async function loadServersInner(): Promise<void> {
     const added = now.filter(
       (server) => !atStart.some((known) => known.url === server.url),
     );
+    // And what the reader took away while the round was out, measured the same
+    // way. Only additions were diffed before, so a removal was undone by the
+    // answer that happened to be in flight: the row came back, the list on
+    // screen and the list in storage disagreed, and the next successful publish
+    // wrote the removed server back into the account.
+    //
+    // The reasoning this replaces said a removal publishes at once, so it moves
+    // `lastWrite` past any answer that could bring it back. During a read that is
+    // false: the gate is shut, `publishServers` returns before writing anything,
+    // and no stamp moves.
+    const removed = new Set(
+      atStart
+        .filter((known) => !now.some((server) => server.url === known.url))
+        .map((known) => known.url),
+    );
     // Nothing published leaves the reader with what they had — but a mid-read
     // edit is still unpublished work, so it goes out now that the gate is open.
     if (list.servers.length === 0) {
@@ -341,17 +390,26 @@ async function loadServersInner(): Promise<void> {
     // The answer is older than the tap that just happened by construction —
     // the round started first — so replacing the list with it drops a server
     // the reader has just been told was saved. Additions merge in front, which
-    // is also where the upload order reads them.
-    //
-    // Removals need no half of this: taking one out publishes at once, which
-    // moves `lastWrite` past any answer that could bring it back, and an
-    // answer newer than that is newer than the removal too.
-    const next = dedupe([...added, ...list.servers]);
-    if (sameServers(next, now)) return;
+    // is also where the upload order reads them, and removals are not undone.
+    const next = dedupe([
+      ...added,
+      ...list.servers.filter((server) => !removed.has(server.url)),
+    ]);
+    if (sameServers(next, now)) {
+      // The removal is the case that needs saying here: a pure removal changes
+      // nothing on screen once the answer is filtered by it, so the list matches
+      // what the reader already has and this returns — leaving the account to go
+      // on naming the server they deleted.
+      if (removed.size > 0) void publishServers();
+      return;
+    }
     setServers(next);
     // The gate just opened, so an edit the closed gate turned away can go now.
     // Leaving it unpublished would keep it local-only until the next edit, on
-    // this device alone.
+    // this device alone. A list that merely *changed* is not republished: it
+    // says what the account already says, and the write would move this
+    // browser's stamp past a list another client publishes next, which the
+    // staleness check above would then drop.
     if (added.length > 0) void publishServers();
   } catch {
     // A relay that refuses leaves the stored list in place.
@@ -394,7 +452,7 @@ function sameServers(a: UploadServer[], b: UploadServer[]): boolean {
  * because that is the only answer that lets the list be replaced. A round where
  * every relay refused has to stay a question.
  */
-async function oneQuery(filter: Filter): Promise<unknown[]> {
+async function oneQuery(filter: Filter, pubkey: string): Promise<unknown[]> {
   const urls = useRelays().readRelays();
   if (urls.length === 0) throw new Error("no relay can be read from");
   // A relay that refused still settles its promise, so what answered is
@@ -406,8 +464,20 @@ async function oneQuery(filter: Filter): Promise<unknown[]> {
     urls.map(async (url) => {
       const result = await getConnection(url).query(filter, 4000);
       if (result.failed) return [];
+      // A relay that answered with nothing but forgeries has not answered.
+      //
+      // Counting it as one is how three forged events delete the account's real
+      // server list: the forgeries are newer than the truth, so the list built
+      // from this round is empty, and an empty list is the one answer that opens
+      // the publish gate. The reader's next edit then published their local
+      // additions alone — a kind 10063 that removes every server they had
+      // configured on another client, from every relay. A forged answer has to
+      // be answered like no answer at all, which is what the rest of the app
+      // does with `authenticatedAnswer`.
+      const kept = authenticatedAnswer(result.events, pubkey);
+      if (kept === null) return [];
       answered += 1;
-      return result.events;
+      return kept;
     }),
   );
   if (answered === 0) throw new Error("no relay answered");
@@ -435,10 +505,13 @@ async function fetchServerPreference(pubkey: string): Promise<FetchedList> {
   // over a second of blocked tab, and this runs on every app start. So the list is
   // narrowed to the few events that could actually be used, and only those are
   // verified.
-  const answer = (await oneQuery({
-    kinds: SERVER_LIST_KINDS,
-    authors: [pubkey],
-  })) as NostrEvent[];
+  const answer = (await oneQuery(
+    {
+      kinds: SERVER_LIST_KINDS,
+      authors: [pubkey],
+    },
+    pubkey,
+  )) as NostrEvent[];
   const events = signedCandidates(answer, pubkey);
   // A replaceable event: relays lag behind each other, so only the newest
   // answer per kind describes the list the reader has now. The two kinds are
@@ -472,18 +545,32 @@ async function fetchServerPreference(pubkey: string): Promise<FetchedList> {
     if (Array.isArray(tags)) {
       for (const tag of tags) {
         if (
-          Array.isArray(tag) &&
-          tag[0] === "server" &&
-          typeof tag[1] === "string" &&
-          // Checked, because the other two ways a server enters this list check
-          // it: the stored one and the one a reader typed. An entry read off the
-          // wire was the one way through, so a `server` tag of `not-a-url` or
-          // `javascript:…` became a row the reader could pick and be told the
-          // signature was cancelled for.
-          isHttpUrl(tag[1])
+          !Array.isArray(tag) ||
+          tag[0] !== "server" ||
+          typeof tag[1] !== "string"
         ) {
-          out.push({ url: tag[1].replace(/\/+$/, "") });
+          continue;
         }
+        // Checked, because the other two ways a server enters this list check
+        // it: the stored one and the one a reader typed. An entry read off the
+        // wire was the one way through, so a `server` tag of `not-a-url` or
+        // `javascript:…` became a row the reader could pick and be told the
+        // signature was cancelled for.
+        const url = normaliseServerUrl(tag[1]);
+        if (url === null) continue;
+        // Marked as one of the app's own where that is what it is. The list the
+        // app publishes is the reader's own servers and nothing else — BUD-03
+        // has a client upload to the *first* server in the list, so a default
+        // written here takes uploads away from the server the reader chose. A
+        // `server` tag naming a default therefore has to be marked here as well:
+        // unmarked it stayed in the published list while `all()` hid the reader's
+        // copy of it, so they had no row and no way to remove it, and every other
+        // client of the account uploaded to the default instead.
+        out.push(
+          BUILTIN_SERVERS.some((one) => one.url === url)
+            ? { url, builtin: true }
+            : { url },
+        );
       }
     }
   }
@@ -538,7 +625,8 @@ function signedCandidates(events: NostrEvent[], pubkey: string): NostrEvent[] {
   return out;
 }
 
-function newestPerKind(events: unknown[]): unknown[] {  const byKind = new Map<number, { at: number; event: unknown }>();
+function newestPerKind(events: unknown[]): unknown[] {
+  const byKind = new Map<number, { at: number; event: unknown }>();
   for (const event of events) {
     const kind = (event as { kind?: unknown }).kind;
     const at = (event as { created_at?: unknown }).created_at;

@@ -28,6 +28,18 @@ export interface QueryResult {
   failed: boolean;
   /** True when the relay demanded NIP-42 auth (challenge or auth-required). */
   authRequired: boolean;
+  /**
+   * True when the query was never sent: the relay had no room for it inside its
+   * own window, or the connection was closed while it waited for one.
+   *
+   * These results also report `failed`, because there is no answer — but the
+   * difference is what a caller needs to keep a statement it would otherwise
+   * make about the relay. "It refused" and "it missed its deadline" both say
+   * something about a relay; "we never asked" says nothing at all, and a status
+   * row that reads it as a dead relay tells the reader their network is down
+   * while it is serving.
+   */
+  neverSent?: true;
 }
 
 export interface PublishResult {
@@ -534,6 +546,11 @@ export class RelayConnection {
    * Refuses every parked query at once. Only `close()` does this: a drop leaves
    * the connection to redial, and the queries waiting for a slot are waiting for
    * the relay rather than for the socket, so it will still want them sent.
+   *
+   * Refusing all of them is also what keeps the `explicitClose` check above the
+   * send meaningful for this path. Nothing hands out a slot after the list is
+   * emptied, so a query cannot be granted one on a connection nobody is looking
+   * after any more and go on to dial a socket the reader never asked for.
    */
   private refuseLanes(): void {
     this.laneWaiters.splice(0).forEach((waiter) => waiter(false));
@@ -789,7 +806,13 @@ export class RelayConnection {
     // and the send. A connection closed while this one waited has nothing to
     // query, and saying so is better than dialling one nobody asked for.
     if (this.explicitClose) {
-      return { events: [], eose: false, failed: true, authRequired: false };
+      return {
+        events: [],
+        eose: false,
+        failed: true,
+        authRequired: false,
+        neverSent: true,
+      };
     }
     // And now the relay's room for one more subscription. A relay with a limit
     // does not say so: it answers the surplus with an empty EOSE, and to every
@@ -799,7 +822,13 @@ export class RelayConnection {
     // reported unanswered rather than left waiting for a slot nobody will free.
     const lane = await this.acquireLane(timeoutMs);
     if (!lane) {
-      return { events: [], eose: false, failed: true, authRequired: false };
+      return {
+        events: [],
+        eose: false,
+        failed: true,
+        authRequired: false,
+        neverSent: true,
+      };
     }
     // The socket may have been replaced while waiting; use the live one.
     const socket = this.ensureSocket();

@@ -243,6 +243,70 @@ describe("uploadFile", () => {
     expect((form.get("file") as File).name).toBe("shot.png");
   });
 
+  it("does not invent a url for a 2xx that was not an answer", async () => {
+    // A body that is not a JSON object is not either dialect's answer: it is an
+    // HTML error page from something in between, an empty body, or a proxy's idea
+    // of a success. Both readers answer "no url" for it, and "no url" is the one
+    // answer that falls through to building a link from the file's own hash — so
+    // the reader was told the upload worked and a link to a file that was never
+    // written went into their post. HTTP said 2xx; nothing said the file is there.
+    for (const body of [
+      "<html><body>502 Bad Gateway</body></html>",
+      "not json at all",
+      "",
+      "[]",
+      "null",
+    ]) {
+      const calls = stubFetch({
+        document: { api_url: `${NIP96}/upload` },
+        body,
+      });
+      const { uploadFile: upload } = await import("./upload.js");
+      const result = await upload({ url: NIP96 }, file("shot.png", "image/png", 8));
+      expect(result, body).toMatchObject({ failure: "rejected" });
+      expect(result, body).not.toHaveProperty("url");
+      // The upload was really sent, so this is about the answer rather than about
+      // never reaching the server.
+      expect(calls.length, body).toBe(2);
+    }
+
+    // The same for the BUD-02 dialect, which reads a blob descriptor.
+    const bud = stubFetch({ document: null, body: "not json at all" });
+    const { uploadFile: upload } = await import("./upload.js");
+    expect(await upload({ url: NIP96 }, file("shot.png", "image/png", 8))).toMatchObject({
+      failure: "rejected",
+    });
+    expect(bud.length).toBe(2);
+
+    // And a descriptor that stores the file but names it in no way a browser can
+    // open is not a link: it falls through to the file's own hash on the download
+    // base, which is what a real stored blob is addressed by.
+    const odd = stubFetch({
+      document: null,
+      body: { url: "javascript:alert(document.cookie)" },
+    });
+    const linked = await upload({ url: NIP96 }, file("shot.png", "image/png", 8));
+    expect((linked as { url?: string }).url).toContain(`${NIP96}/`);
+    expect((linked as { url?: string }).url).not.toContain("javascript:");
+    expect(odd.length).toBe(2);
+  });
+
+  it("does not invent a url for a NIP-96 answer that names no address", async () => {
+    // NIP-96's own `url` tag goes into the reader's post verbatim, and the tag
+    // reader took any string at all — `javascript:` included.
+    const calls = stubFetch({
+      document: { api_url: `${NIP96}/upload` },
+      body: {
+        status: "success",
+        nip94_event: { tags: [["url", "javascript:alert(1)"]] },
+      },
+    });
+    const { uploadFile: upload } = await import("./upload.js");
+    const result = await upload({ url: NIP96 }, file("shot.png", "image/png", 8));
+    expect((result as { url?: string }).url ?? "").not.toContain("javascript:");
+    expect(calls.length).toBe(2);
+  });
+
   it("does not invent a url for a NIP-96 server that said no", async () => {
     // NIP-96 refuses in the body, inside a response the HTTP status calls a
     // success. That used to be read the same as a server which stored the file
@@ -531,6 +595,38 @@ describe("the server's own document", () => {
       `${NIP96}/.well-known/nostr/nip96.json`,
       `${NIP96}/upload`,
     ]);
+  });
+
+  it("does not let a document send the file somewhere else", async () => {
+    // The document is written by the file server, so `api_url` is where it says
+    // the upload goes — and nothing checked it. A host the reader never added, or
+    // the same host in cleartext, put their file and the `Authorization` header
+    // that authorises it somewhere else. Falling back to BUD-02 on the host the
+    // reader did choose is the honest answer.
+    for (const api_url of [
+      "http://elsewhere.example/collect",
+      "https://elsewhere.example/collect",
+      "http://nip96.example/api",
+    ]) {
+      const calls = stubFetch({ document: { api_url }, body: { url: "https://x.example/a.png" } });
+      const { uploadFile: upload } = await import("./upload.js");
+      const result = await upload({ url: NIP96 }, file());
+      expect(result, api_url).toEqual({ url: "https://x.example/a.png" });
+      // The upload went to the host the reader picked, as BUD-02.
+      expect(calls.map((call) => call.url).at(-1), api_url).toBe(`${NIP96}/upload`);
+    }
+
+    // A download_url on another host is normal — a CDN — and only its scheme is
+    // held to the rule, because a link to a public file is not the upload.
+    const cdn = stubFetch({
+      document: { api_url: `${NIP96}/upload`, download_url: "https://cdn.example/files" },
+      body: {},
+    });
+    const { uploadFile: upload } = await import("./upload.js");
+    expect(await upload({ url: NIP96 }, file())).toEqual({
+      url: expect.stringContaining("https://cdn.example/files/"),
+    });
+    expect(cdn.map((call) => call.url).at(-1)).toBe(`${NIP96}/upload`);
   });
 
   it("stops chasing a delegation chain and uploads as BUD-02", async () => {

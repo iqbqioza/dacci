@@ -324,6 +324,15 @@ async function checkOne(url: string): Promise<void> {
     // limit: 0 fetches no stored events; EOSE alone proves reachability.
     const result = await getConnection(url).query({ limit: 0 }, 3000);
     if (stale()) return;
+    if (result.neverSent === true) {
+      // The question was never asked: the connection had no room for the probe
+      // inside its window, or it was closed while it waited. That says nothing
+      // about the relay, and a row reading it as a dead one tells the reader
+      // their network is down while it is serving everyone else. "unknown" is
+      // what the row said before anybody asked, and the next tick asks again.
+      setStatus(url, "unknown");
+      return;
+    }
     setStatus(
       url,
       result.failed ? (result.authRequired ? "auth" : "offline") : "online",
