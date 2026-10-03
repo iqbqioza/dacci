@@ -39,9 +39,20 @@ export function contactPubkeys(tags: string[][]): string[] {
   return out;
 }
 
-/** Whether a follow list names this person. */
+/**
+ * Whether a follow list names this person.
+ *
+ * Held to a value NIP-01 allows in a `p` tag, like every other reader of this
+ * list: `contactPubkeys` and `withFollowed` both refuse a non-hex key, the last
+ * because writing one publishes a follow nobody honours. Gated here as well so
+ * the device and the account agree — otherwise a list naming `["p", "alice"]`
+ * read as *followed* here while every client, and this app's own enumerator,
+ * read it as not naming anyone at all.
+ */
 export function followsIn(tags: string[][], pubkey: string): boolean {
-  return tags.some((tag) => tag[0] === "p" && tag[1] === pubkey);
+  return (
+    isHex64(pubkey) && tags.some((tag) => tag[0] === "p" && tag[1] === pubkey)
+  );
 }
 
 /**

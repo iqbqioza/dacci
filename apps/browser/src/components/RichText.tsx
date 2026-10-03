@@ -1,15 +1,15 @@
-import type { ContentSegment, Emoji, Emojified, UrlSpan } from "dacci-nostr-nips";
+import type { ContentSegment, Emoji, Emojified } from "dacci-nostr-nips";
 import {
   emojify,
   mentionedProfiles,
   textSegments,
-  urlSpans,
 } from "dacci-nostr-nips";
 import { profileLabel } from "dacci-nostr-profile";
 import { createEffect, createMemo, For, Index, Show } from "solid-js";
 import { shortNpub } from "../nostr.js";
 import { requestProfiles, useProfile } from "../profile.js";
 import { navigate, profileHash } from "../router.js";
+import { textPieces, type TextPiece } from "../text-pieces.js";
 
 /**
  * The name to show for a pubkey, read from the one store every name in the app
@@ -69,17 +69,7 @@ export function EmojiMark(props: { emoji: Emoji }) {
 }
 
 /** A piece of a run of text: words, an emoji, or an address. */
-type Piece =
-  | { kind: "text"; text: string }
-  | { kind: "link"; url: string }
-  | { kind: "emoji"; emoji: Emoji };
-
-/** Appends a run of text with the author's shortcodes drawn, as pieces. */
-function addEmoji(out: Piece[], text: string, emojis: Emoji[]): void {
-  for (const part of emojify(text, emojis)) {
-    out.push(part);
-  }
-}
+type Piece = TextPiece;
 
 /**
  * A run of text with the author's custom emoji and the addresses in it drawn as
@@ -92,29 +82,15 @@ function addEmoji(out: Piece[], text: string, emojis: Emoji[]): void {
  * hides where they are going. What follows it is the punctuation of the
  * sentence, so a link at the end of a line does not swallow the full stop.
  *
- * What counts as an address is one judgement shared with the image scan, so a
- * url that is an image never also shows up here as a link, and the same
- * trailing punctuation is left out of both.
+ * The split itself is `textPieces`, which is a plain function over a string: a
+ * text with two addresses used to render twice here, because each address was
+ * read against the start of the string instead of against the end of the last
+ * one, and a component is no place to be looking for that.
  */
 export function TextRun(props: { text: string; emojis?: Emoji[] }) {
-  const emojis = (): Emoji[] => props.emojis ?? [];
   // Every piece keeps the space the author wrote, including a run that is only
-  // a space, so a link never ends up glued to the word before it. Emoji are cut
-  // out first: a shortcode is not an address and an address is not an emoji.
-  const pieces = createMemo<Piece[]>(() => {
-    const out: Piece[] = [];
-    for (const chunk of urlSpans(props.text)) {
-      // The address is cut out first and the shortcodes are looked for only in
-      // what surrounds it. Doing it the other way round would let an author's
-      // own `:shortcode:` inside a query string split the address in half, and
-      // the link would go somewhere the reader never wrote.
-      addEmoji(out, props.text.slice(0, chunk.start), emojis());
-      out.push({ kind: "link", url: chunk.url });
-      addEmoji(out, props.text.slice(chunk.end), emojis());
-    }
-    if (out.length === 0) addEmoji(out, props.text, emojis());
-    return out;
-  });
+  // a space, so a link never ends up glued to the word before it.
+  const pieces = createMemo<Piece[]>(() => textPieces(props.text, props.emojis ?? []));
 
   return (
     <span class="whitespace-pre-wrap break-words">

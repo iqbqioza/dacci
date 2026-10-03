@@ -25,9 +25,21 @@ export function muteTags(event: NostrEvent | null): string[][] {
   return event.tags.filter((tag) => Array.isArray(tag));
 }
 
-/** Whether the list holds this person. */
+/**
+ * Whether the list holds this person.
+ *
+ * Held to a value NIP-01 allows in a `p` tag, because that is what every other
+ * reader of this list does — `mutedPubkeys` above and `withMuted` below both
+ * refuse a non-hex key, the last because writing one publishes a mute no client
+ * honours. Reading it here as well is what keeps the device and the account
+ * saying the same thing: with only this half gated, a list naming `["p",
+ * "alice"]` read as *muted* here and as *not in the list* everywhere else, so the
+ * row offered to unmute someone no client was hiding.
+ */
 export function mutedIn(tags: string[][], pubkey: string): boolean {
-  return tags.some((tag) => tag[0] === "p" && tag[1] === pubkey);
+  return (
+    isHex64(pubkey) && tags.some((tag) => tag[0] === "p" && tag[1] === pubkey)
+  );
 }
 
 /** The people a mute list names, in order and without repeats. */

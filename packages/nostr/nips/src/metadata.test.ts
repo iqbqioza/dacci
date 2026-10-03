@@ -211,6 +211,32 @@ describe("buildMetadata", () => {
     expect(JSON.parse(sent.content)).toEqual({ about: "hi", name: "alice" });
   });
 
+  it("keeps a field whose name is a prototype setter", () => {
+    // A profile is free-form JSON and `JSON.parse` really does make `__proto__`
+    // an own property, so a document carrying one reaches the writer readable,
+    // alongside every other field it passes through. A plain assignment does not
+    // copy it: on a plain object it reaches `Object.prototype`'s setter, changes
+    // the prototype, and leaves no field behind — so the name was dropped from
+    // the profile this app published back, in a function whose job is that every
+    // other field survives.
+    const parsed = JSON.parse('{"__proto__":{"x":1},"name":"alice"}');
+    expect(Object.prototype.hasOwnProperty.call(parsed, "__proto__")).toBe(true);
+
+    const sent = buildMetadata({
+      pubkey: ME,
+      metadata: parsed,
+      createdAt: 1,
+    });
+    const back = JSON.parse(sent.content) as Record<string, unknown>;
+    expect(Object.keys(back).sort()).toEqual(["__proto__", "name"]);
+    expect(back.name).toBe("alice");
+
+    // And the same on the way through an edit.
+    const edited = withMetadata({}, parsed as Record<string, never>);
+    expect(Object.prototype.hasOwnProperty.call(edited, "__proto__")).toBe(true);
+    expect(JSON.parse(JSON.stringify(edited))).toEqual(parsed);
+  });
+
   it("writes the keys in one order, so the same profile is the same event", () => {
     const a = buildMetadata({
       pubkey: ME,

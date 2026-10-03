@@ -19,10 +19,11 @@ const KEY = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d";
 const OTHER = "7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e";
 
 /** A NIP-19 TLV stream from `[type, value]` pairs. */
-function tlv(entries: Array<[number, number[]]>): Uint8Array {
+function tlv(entries: Array<[number, number[] | Uint8Array]>): Uint8Array {
   const bytes: number[] = [];
   for (const [type, value] of entries) {
-    bytes.push(type, value.length, ...value);
+    const part = typeof value === "number" ? undefined : [...value];
+    bytes.push(type, (part ?? value).length, ...(part ?? value));
   }
   return new Uint8Array(bytes);
 }
@@ -219,6 +220,80 @@ describe("naddr", () => {
       kind: 30023,
       relays: [],
     });
+  });
+
+  it("refuses text that is not text, rather than replacing it", () => {
+    // NIP-19: a relay hint is "encoded as ascii", and an `naddr` identifier is
+    // the event's own `d` value, which is UTF-8. Bytes that are neither are not
+    // that text, and a non-fatal decode turned them into U+FFFD: the client then
+    // queried a coordinate with a replacement character in it, or asked a relay
+    // whose name is three diamonds. Silent and wrong beats refused only when the
+    // wrong answer happens to be useful, which here it never is.
+    const bad = new Uint8Array([0xff, 0xfe, 0x80]);
+
+    // The identifier is mandatory, so an `naddr` carrying it is malformed.
+    const naddr = bech32Encode(
+      "naddr",
+      tlv([
+        [0, bad],
+        [2, bytesOf(KEY)],
+        [3, kind(30023)],
+      ]),
+    );
+    expect(decodeNaddr(naddr)).toBeNull();
+
+    // A relay hint is not mandatory: skipped, the way any TLV this reader does
+    // not understand is, and the rest of the entity still resolves.
+    const withBadRelay = bech32Encode(
+      "naddr",
+      tlv([
+        [0, new TextEncoder().encode("my-article")],
+        [1, bad],
+        [1, new TextEncoder().encode("wss://one.example")],
+        [2, bytesOf(KEY)],
+        [3, kind(30023)],
+      ]),
+    );
+    expect(decodeNaddr(withBadRelay)).toEqual({
+      identifier: "my-article",
+      pubkey: KEY,
+      kind: 30023,
+      relays: ["wss://one.example"],
+    });
+
+    // Same for the other two, and for the whole payload of an `nrelay`.
+    const nevent = bech32Encode(
+      "nevent",
+      tlv([
+        [0, new Uint8Array(32).fill(3)],
+        [1, bad],
+      ]),
+    );
+    expect(decodeNevent(nevent)?.relays).toEqual([]);
+    const nprofile = bech32Encode(
+      "nprofile",
+      tlv([
+        [0, bytesOf(KEY)],
+        [1, bad],
+      ]),
+    );
+    expect(decodeNprofile(nprofile)?.relays).toEqual([]);
+    expect(decodeNrelay(bech32Encode("nrelay", bad))).toBeNull();
+
+    // And valid text still reads, including non-ASCII in a `d` tag, which UTF-8
+    // covers and ascii does not.
+    expect(
+      decodeNaddr(
+        bech32Encode(
+          "naddr",
+          tlv([
+            [0, new TextEncoder().encode("論文")],
+            [2, bytesOf(KEY)],
+            [3, kind(30023)],
+          ]),
+        ),
+      )?.identifier,
+    ).toBe("論文");
   });
 
   it("rejects a coordinate missing any part of it", () => {

@@ -77,6 +77,20 @@ describe("followsIn", () => {
     expect(followsIn(tags, ALICE)).toBe(true);
     expect(followsIn(tags, BOB)).toBe(false);
   });
+
+  it("agrees with the enumerator and the writer about a name that is not a key", () => {
+    // A `p` value that is not 32-byte lowercase hex names nobody: `contactTags`
+    // and `contactPubkeys` drop it and `withFollowed` refuses to write one. Read
+    // without the same gate it said *followed* here and *not in the list*
+    // everywhere else, so the button offered to follow someone again who was
+    // already followed.
+    const tags = contactTags(makeContactsEvent([["p", "alice"]]));
+    expect(tags).toEqual([]);
+    expect(followsIn([["p", "alice"]], "alice")).toBe(false);
+    expect(withFollowed([], "alice", true)).toEqual([]);
+    // And a real key is still found.
+    expect(followsIn([["p", ALICE]], ALICE)).toBe(true);
+  });
 });
 
 describe("withFollowed", () => {

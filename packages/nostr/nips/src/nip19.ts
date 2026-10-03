@@ -100,7 +100,10 @@ export function decodeNevent(nevent: string): Nevent | null {
       // The id is mandatory; a later one wins only if the first was absent.
       id ??= bytesToHex(value);
     } else if (type === 1) {
-      relays.push(new TextDecoder().decode(value));
+      // A hint that is not text is not a hint. Skipped rather than fatal, the way
+      // NIP-19 asks for any TLV this reader does not understand.
+      const relay = readText(value);
+      if (relay !== null) relays.push(relay);
     } else if (type === 2 && value.length === 32) {
       author = bytesToHex(value);
     } else if (type === 3 && value.length === 4) {
@@ -119,6 +122,24 @@ function readUint32(value: Uint8Array): number {
   return (
     ((value[0] << 24) | (value[1] << 16) | (value[2] << 8) | value[3]) >>> 0
   );
+}
+
+/**
+ * A TLV value as the text it carries, or null when it is not text.
+ *
+ * NIP-19 says a relay hint is "encoded as ascii" and an `naddr` identifier is
+ * the event's own `d` value, which is UTF-8. Bytes that are neither are not that
+ * text, and a non-fatal decode replaced them with U+FFFD — so the client went on
+ * to query a coordinate, or a relay, that the sharer never wrote, instead of
+ * treating the entity as malformed. Null says exactly that, and each caller
+ * decides what a missing part means for what it is decoding.
+ */
+function readText(value: Uint8Array): string | null {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(value);
+  } catch {
+    return null;
+  }
 }
 
 /** What a NIP-19 `nprofile` points at: a pubkey and where to find it. */
@@ -145,7 +166,8 @@ export function decodeNprofile(nprofile: string): Nprofile | null {
     if (type === 0 && value.length === 32) {
       pubkey ??= bytesToHex(value);
     } else if (type === 1) {
-      relays.push(new TextDecoder().decode(value));
+      const relay = readText(value);
+      if (relay !== null) relays.push(relay);
     }
   }
   // Without the key there is nobody to show, so the entity is void.
@@ -180,9 +202,15 @@ export function decodeNaddr(naddr: string): Naddr | null {
   const relays: string[] = [];
   for (const { type, value } of parseTlv(decoded.data)) {
     if (type === 0 && identifier === null) {
-      identifier = new TextDecoder().decode(value);
+      // Mandatory, so unlike a relay hint this one cannot be skipped: an address
+      // whose `d` is not text is not the address anyone wrote, and the client
+      // would otherwise query a coordinate with a replacement character in it.
+      const text = readText(value);
+      if (text === null) return null;
+      identifier = text;
     } else if (type === 1) {
-      relays.push(new TextDecoder().decode(value));
+      const relay = readText(value);
+      if (relay !== null) relays.push(relay);
     } else if (type === 2 && value.length === 32) {
       pubkey = bytesToHex(value);
     } else if (type === 3 && value.length === 4) {
@@ -204,8 +232,8 @@ export function decodeNaddr(naddr: string): Naddr | null {
 export function decodeNrelay(nrelay: string): string | null {
   const decoded = bech32Decode(nrelay.trim());
   if (decoded === null || decoded.hrp !== "nrelay") return null;
-  const url = new TextDecoder().decode(decoded.data);
-  return url === "" ? null : url;
+  const url = readText(decoded.data);
+  return url === null || url === "" ? null : url;
 }
 
 /**

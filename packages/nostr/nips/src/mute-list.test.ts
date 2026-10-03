@@ -68,6 +68,20 @@ describe("mutedIn", () => {
     expect(mutedIn([["p", ALICE]], BOB)).toBe(false);
     expect(mutedIn([], ALICE)).toBe(false);
   });
+
+  it("agrees with the enumerator and the writer about a name that is not a key", () => {
+    // NIP-01: the `p` value is 32-byte lowercase hex. `mutedPubkeys` drops
+    // anything else and `withMuted` refuses to write one — so this reader, which
+    // took whatever it was handed, was the odd one out: a list naming `alice`
+    // read as *muted* here and as *naming nobody* everywhere else, and the row
+    // offered to unmute a person no client was hiding.
+    const tags = [["p", "alice"]];
+    expect(mutedIn(tags, "alice")).toBe(false);
+    expect(mutedPubkeys(tags)).toEqual([]);
+    expect(withMuted([], "alice", true)).toEqual([]);
+    // And a real key is still found, so the gate is not the whole answer.
+    expect(mutedIn([["p", ALICE]], ALICE)).toBe(true);
+  });
 });
 
 describe("withMuted", () => {

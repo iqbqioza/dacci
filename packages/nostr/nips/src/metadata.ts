@@ -67,7 +67,7 @@ export function withMetadata(
         delete out[key];
         continue;
       }
-      out[key] = text;
+      setField(out, key, text);
       continue;
     }
     if (
@@ -78,7 +78,44 @@ export function withMetadata(
       delete out[key];
       continue;
     }
-    out[key] = value;
+    setField(out, key, value);
+  }
+  return out;
+}
+
+/**
+ * Writes a field that is not `__proto__`.
+ *
+ * A profile is free-form JSON, and `JSON.parse` does make `__proto__` an own
+ * property — so a document carrying one reaches here, readable, and every other
+ * field is passed through untouched. A plain assignment does not: on a plain
+ * object it reaches `Object.prototype`'s setter, which changes the object's
+ * prototype and leaves no field behind. The name was then silently dropped from
+ * the profile this app republished, in a function whose whole job is that every
+ * other field survives.
+ */
+function setField(
+  target: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): void {
+  if (key === "__proto__") {
+    Object.defineProperty(target, key, {
+      value,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+    return;
+  }
+  target[key] = value;
+}
+
+/** The fields of a record, by key, in the order given. */
+function sortFields(fields: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(fields).sort()) {
+    setField(out, key, fields[key]);
   }
   return out;
 }
@@ -181,10 +218,9 @@ export function buildMetadata(input: {
   metadata: Record<string, unknown>;
   createdAt: number;
 }): UnsignedEvent {
-  const sorted: Record<string, unknown> = {};
-  for (const key of Object.keys(input.metadata).sort()) {
-    sorted[key] = input.metadata[key];
-  }
+  // Sorted by key, so the event is the same for the same profile — which is what
+  // keeps the id stable for anyone comparing two of them.
+  const sorted = sortFields(input.metadata);
   return {
     pubkey: input.pubkey,
     created_at: input.createdAt,
