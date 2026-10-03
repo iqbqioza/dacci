@@ -49,6 +49,16 @@ describe("isRelayMessage", () => {
     expect(isRelayMessage(["AUTH"])).toBe(false);
   });
 
+  it("accepts a relay's extensions past the mandatory prefix", () => {
+    // Observed on the wire: nostrfy answers EOSE as `["EOSE", id, ["more"]]`.
+    // Rejecting that at the gate hung every query to it until its timeout —
+    // the socket was open, events even arrived, and the status row still said
+    // offline. Lengths are minimums; what `dispatch` ignores is not this
+    // guard's business.
+    expect(isRelayMessage(["EOSE", "sub", ["more"]])).toBe(true);
+    expect(isRelayMessage(["NOTICE", "hi", "extra"])).toBe(true);
+  });
+
   it("rejects a non-string id where the type promises one", () => {
     expect(isRelayMessage(["EVENT", 5])).toBe(false);
     expect(isRelayMessage(["OK", null, true, ""])).toBe(false);
