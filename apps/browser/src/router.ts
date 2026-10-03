@@ -1,3 +1,5 @@
+import { decodeEventReference, decodeProfileReference } from "dacci-nostr-nips";
+
 export type Menu = "home" | "notifications" | "network" | "settings";
 
 /**
@@ -46,18 +48,53 @@ function splitReplies(path: string): { base: string; replies: boolean } {
 }
 
 /**
+ * The event a `/event/` link names, as a hex id, or null when it names none.
+ *
+ * Hex is what this app writes, and a NIP-19 entity is what everybody else
+ * shares. Both are read, and both are held to the same two rules: 32-byte
+ * lowercase hex, or an entity whose checksum says it really is that id. The
+ * checksum is the whole of the check for an entity — a `note1…` that decodes is
+ * a real event id, and one that does not decode is not an id at all.
+ */
+function eventIdIn(raw: string): string | null {
+  const text = decodeURIComponent(raw).trim();
+  if (/^[0-9a-fA-F]{64}$/.test(text)) return text.toLowerCase();
+  return decodeEventReference(text);
+}
+
+/**
+ * The person a `/profile/` link names, as a hex pubkey, or null when it names
+ * nobody. An `naddr` is deliberately not read: it names a long-form article
+ * rather than a person, and no route here shows one.
+ */
+function pubkeyIn(raw: string): string | null {
+  const text = decodeURIComponent(raw).trim();
+  if (/^[0-9a-fA-F]{64}$/.test(text)) return text.toLowerCase();
+  return decodeProfileReference(text);
+}
+
+/**
  * Parse a location hash into a route. Unknown hashes fall back to home
  * so a broken link never blanks the app.
  *
  * `#/profile` is the reader's own profile and `#/profile/<pubkey>` anyone
  * else's, which is what the links in the feed use. A `/replies` suffix on
  * either a feed or a profile selects the Replies and notes tab.
+ *
+ * A NIP-19 entity is read as well as raw hex, because an entity is the form
+ * every nostr client shares: a profile link a reader was given is
+ * `npub1…` or `nprofile1…`, and a post link is `note1…` or `nevent1…`. Refusing
+ * those as broken answered "このリンクは壊れています" to a link that was
+ * perfectly good, and sent the reader to their own profile instead of the one
+ * the name belonged to. The relay hints an `nprofile` or `nevent` carries are
+ * not used: the reader's own relays are asked, as everywhere else here.
  */
 export function parseHash(hash: string): Route {
   const path = hash.startsWith("#") ? hash.slice(1) : hash;
-  const eventMatch = path.match(/^\/event\/([0-9a-fA-F]{64})\/?$/);
+  const eventMatch = path.match(/^\/event\/([^/]+)\/?$/);
   if (eventMatch) {
-    return { name: "event", eventId: eventMatch[1].toLowerCase() };
+    const id = eventIdIn(eventMatch[1]);
+    if (id !== null) return { name: "event", eventId: id };
   }
   // Only the feeds carry tabs, so the suffix is read before the routes that
   // would otherwise treat "replies" as a menu name or a pubkey.
@@ -70,11 +107,11 @@ export function parseHash(hash: string): Route {
     }
     // A broken profile link must say so: falling back to the home feed
     // would show the reader someone else's timeline without warning.
-    const usable = /^[0-9a-fA-F]{64}$/.test(raw);
+    const pubkey = pubkeyIn(raw);
     return {
       name: "profile",
-      pubkey: usable ? raw.toLowerCase() : null,
-      invalid: !usable,
+      pubkey,
+      invalid: pubkey === null,
       replies,
     };
   }
