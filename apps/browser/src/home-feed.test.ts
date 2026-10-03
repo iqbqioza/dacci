@@ -1,4 +1,5 @@
-import { COMMENT_KIND, type NostrEvent } from "dacci-nostr-nips";
+import { COMMENT_KIND, repostedAuthor, type NostrEvent } from "dacci-nostr-nips";
+import { NsecSigner } from "dacci-nostr-signer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { postsForTab } from "./feed-tabs.jsx";
 import {
@@ -52,6 +53,94 @@ describe("postsForTab", () => {
     const list = [top, reply];
     postsForTab(list, "notes");
     expect(list).toEqual([top, reply]);
+  });
+});
+
+describe("the mute, and what a repost carries", () => {
+  const MUTED = "9".repeat(64);
+  const bySomeone = (pubkey: string, tags: string[][], content = "x"): NostrEvent => ({
+    id: "e".repeat(64),
+    pubkey,
+    created_at: 1000,
+    kind: 1,
+    tags,
+    content,
+    sig: "s".repeat(128),
+  });
+
+  it("drops a muted author's own post", () => {
+    const isMuted = (pubkey: string): boolean => pubkey === MUTED;
+    const mine = bySomeone("a".repeat(64), []);
+    expect(homePostsFor([mine], "notes", isMuted)).toEqual([mine]);
+    expect(homePostsFor([bySomeone(MUTED, [])], "notes", isMuted)).toEqual([]);
+  });
+
+  it("drops a repost of somebody the reader muted", () => {
+    // The person who reposted is not the person who wrote it, and dropping only
+    // the first meant every account on the reader's relay list could undo the
+    // mute by reposting that person's notes.
+    const isMuted = (pubkey: string): boolean => pubkey === MUTED;
+    const by = "a".repeat(64);
+    // NIP-18 puts the author's `p` tag on the repost, so that is who it says the
+    // words are.
+    const withAuthorTag = { ...bySomeone(by, [["p", MUTED]]), kind: 6 };
+    expect(homePostsFor([withAuthorTag], "notes", isMuted)).toEqual([]);
+    // The generic kind is no different.
+    expect(
+      homePostsFor([{ ...withAuthorTag, kind: 16 }], "notes", isMuted),
+    ).toEqual([]);
+    // And a repost by someone else of somebody *not* muted stays.
+    const other = { ...bySomeone(by, [["p", ME]]), kind: 6 };
+    expect(homePostsFor([other], "notes", isMuted)).toEqual([other]);
+    // Both tabs, since a repost is in both.
+    expect(homePostsFor([withAuthorTag], "replies", isMuted)).toEqual([]);
+  });
+
+  it("drops a repost whose note it carries is a muted author's", async () => {
+    // The inline note names the author exactly, with no reliance on the `p`
+    // tag another client wrote. It has to be genuinely signed: an inline note
+    // whose id or signature does not check out is refused as a forgery, so a
+    // fixture with a made-up one would be testing the refusal.
+    const signer = new NsecSigner("11".repeat(32));
+    const inner = await signer.signEvent({
+      pubkey: await signer.getPublicKey(),
+      created_at: 1000,
+      kind: 1,
+      tags: [],
+      content: "words from a muted person",
+    });
+    const isMuted = (pubkey: string): boolean => pubkey === inner.pubkey;
+    const repost = {
+      ...bySomeone("a".repeat(64), [["p", "b".repeat(64)]], JSON.stringify(inner)),
+      kind: 6,
+    };
+    expect(homePostsFor([repost], "notes", isMuted)).toEqual([]);
+    // And the inline note is what said so: with a different `p` tag the same
+    // repost is still dropped, because the note itself names its author.
+    expect(repostedAuthor(repost)).toBe(inner.pubkey);
+  });
+
+  it("shows a repost that names nobody", () => {
+    // Nothing in it says whose words it carries, and a list is filtered with
+    // what it holds. Guessing here would hide posts over an author nobody said.
+    const isMuted = (pubkey: string): boolean => pubkey === MUTED;
+    const nameless = { ...bySomeone("a".repeat(64), []), kind: 6 };
+    expect(repostedAuthor(nameless)).toBeNull();
+    expect(homePostsFor([nameless], "notes", isMuted)).toEqual([nameless]);
+  });
+
+  it("is not a carried author for an ordinary post that mentions them", () => {
+    // A `p` tag on a kind 1 is a mention, not a repost — and reading it as one
+    // would drop every post that so much as named a muted person, which is not
+    // what a mute was ever asked to do.
+    const mention = bySomeone("a".repeat(64), [["p", MUTED]]);
+    expect(repostedAuthor(mention)).toBeNull();
+    const isMuted = (pubkey: string): boolean => pubkey === MUTED;
+    expect(homePostsFor([mention], "replies", isMuted)).toEqual([mention]);
+    // The same for a reply, which carries `p` tags for everyone it answers.
+    const replyToThem = bySomeone("a".repeat(64), [["e", TOP], ["p", MUTED]]);
+    expect(repostedAuthor(replyToThem)).toBeNull();
+    expect(homePostsFor([replyToThem], "replies", isMuted)).toEqual([replyToThem]);
   });
 });
 

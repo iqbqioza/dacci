@@ -263,6 +263,28 @@ export function isRepost(event: NostrEvent): boolean {
   return event.kind === REPOST_KIND || event.kind === GENERIC_REPOST_KIND;
 }
 
+/**
+ * The author of the event a repost passes on, as far as the repost itself says.
+ *
+ * Two sources, in the order NIP-18 writes them: the event inline in `content`,
+ * which is exact, and then the `p` tag NIP-18 puts for the author of what is
+ * reposted. That tag is read as the *first* one, because that is where the
+ * layout puts it — `e`, then `p`, and anything a quote repost adds for the
+ * people it mentions comes after.
+ *
+ * Null when a repost names neither, and that is a real case: a repost with an
+ * empty content and no `p` tag says nothing about whose words it is carrying.
+ * Reading it would mean fetching the note first, which is not something a
+ * caller filtering a list it already holds can do.
+ */
+export function repostedAuthor(event: NostrEvent): string | null {
+  if (!isRepost(event)) return null;
+  const inline = embeddedNote(event);
+  if (inline !== null) return inline.pubkey;
+  const tag = event.tags.find((t) => t[0] === "p" && isHex64(t[1]));
+  return tag === undefined ? null : tag[1];
+}
+
 /** NIP-18 quote repost: a repost that carries the quoter's own words. */
 export function buildQuoteRepost(input: {
   pubkey: string;

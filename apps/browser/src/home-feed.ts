@@ -1,5 +1,5 @@
 import type { NostrEvent } from "dacci-nostr-nips";
-import { compareEvents } from "dacci-nostr-nips";
+import { compareEvents, repostedAuthor } from "dacci-nostr-nips";
 import { createSignal } from "solid-js";
 import { rememberEvents } from "./event-cache.js";
 import { postsForTab, type FeedTab } from "./feed-tabs.js";
@@ -62,6 +62,15 @@ function feedAuthorsValue(): string[] | undefined {
  * feeds, so this is the home timeline and nothing else: a reader who opens a
  * profile or a post on purpose is not being shown something they did not ask to
  * avoid.
+ *
+ * A repost is judged by **both** its authors. The person who passed something on
+ * is not the person who wrote it, and a mute that dropped only the first was
+ * undone by every account on the reader's relay list reposting the notes of
+ * somebody they muted — which is the opposite of what a mute is for. The author
+ * it reposts is read from the repost itself: the note it carries inline, or the
+ * `p` tag NIP-18 puts for that author. A repost naming neither is shown, because
+ * nothing in it says whose words it carries, and a list is filtered with what it
+ * holds.
  */
 export function homePostsFor(
   events: NostrEvent[],
@@ -69,7 +78,11 @@ export function homePostsFor(
   /** Asked per author, because the list behind it can still be read. */
   isMuted: (pubkey: string) => boolean,
 ): NostrEvent[] {
-  return postsForTab(events, tab).filter((event) => !isMuted(event.pubkey));
+  return postsForTab(events, tab).filter((event) => {
+    if (isMuted(event.pubkey)) return false;
+    const carried = repostedAuthor(event);
+    return carried === null || !isMuted(carried);
+  });
 }
 
 function visible(): NostrEvent[] {

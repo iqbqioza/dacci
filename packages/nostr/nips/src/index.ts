@@ -102,6 +102,7 @@ export {
   mentionedPubkeys,
   quotedEventId,
   quoteTag,
+  repostedAuthor,
   REACTION_KIND,
   REACTION_PLUS,
   repostedEventId,
