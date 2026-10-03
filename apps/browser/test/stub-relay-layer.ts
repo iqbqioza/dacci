@@ -30,7 +30,9 @@ export function stubRelayLayer(
         authRequired: false,
       }),
       publish: async () => ({ accepted: false }),
+      close: () => undefined,
     }),
+    pruneConnections: () => undefined,
     ...overrides,
   }));
 }

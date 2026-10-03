@@ -58,6 +58,7 @@ vi.mock(new URL("../src/nostr.ts", import.meta.url).pathname, () => {
     eachConnection: (run: (conn: unknown) => void) => {
       run(connection("wss://stubbed.example"));
     },
+    pruneConnections: () => undefined,
   };
 });
 

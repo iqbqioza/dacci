@@ -63,3 +63,25 @@ describe("formatDate", () => {
     expect(formatDate(1_700_000_000).length).toBeGreaterThan(0);
   });
 });
+
+describe("pruneConnections", () => {
+  it("drops pooled connections the set no longer names, and keeps the rest", async () => {
+    // Removing a relay left its socket open: nothing ever closed it. The pool
+    // itself never dials — connections are made on first use — so this is
+    // network-safe: no socket exists until a query or subscription opens one.
+    const { getConnection, pruneConnections } = await import("./nostr.js");
+    const kept = getConnection("wss://kept.example");
+    const dropped = getConnection("wss://dropped.example");
+    expect(getConnection("wss://kept.example")).toBe(kept);
+
+    pruneConnections(["wss://kept.example"]);
+
+    // Kept relays keep their connection; the dropped one dials fresh next.
+    expect(getConnection("wss://kept.example")).toBe(kept);
+    expect(getConnection("wss://dropped.example")).not.toBe(dropped);
+    // And the dropped one was closed rather than orphaned: a closed pool entry
+    // reports it, so a lingering socket cannot be mistaken for a live one.
+    expect(dropped.status).toBe("closed");
+    pruneConnections(["wss://kept.example", "wss://dropped.example"]);
+  });
+});

@@ -59,7 +59,13 @@ vi.mock(new URL("../src/nostr.ts", import.meta.url).pathname, () => ({
       failed: true,
       authRequired: false,
     }),
+    close: () => undefined,
   }),
+  // Recorded on globalThis: the hoisted factory cannot close over test state.
+  pruneConnections: (urls: string[]) => {
+    const stash = globalThis as { __pruned?: string[][] };
+    stash.__pruned = [...(stash.__pruned ?? []), urls];
+  },
 }));
 
 describe("applyLoginRelaySet", () => {
@@ -342,6 +348,23 @@ describe("relay set editing", () => {
     restoreDefaults();
   });
 
+  it("hands the new set to the connection pool on every switch", () => {
+    // Removing a relay left its socket open: nothing ever closed it, so the
+    // dead relay held a connection until the tab did. The pool itself is
+    // exercised in `nostr.test.ts`; what this pins is that every set change
+    // actually tells it the new set.
+    (globalThis as { __pruned?: string[][] }).__pruned = [];
+    restoreDefaults();
+    addRelay("wss://gone.example", "both");
+    removeRelay("wss://gone.example");
+    const pruned =
+      (globalThis as { __pruned?: string[][] }).__pruned ?? [];
+    // The last switch no longer names it, so its socket is closed with it.
+    expect(pruned.length).toBeGreaterThan(0);
+    expect(pruned.at(-1)).not.toContain("wss://gone.example");
+    restoreDefaults();
+  });
+
   it("does not resurrect a relay removed while its probe is out", async () => {
     // Switching sets resets every status to "unknown" and probes the new set.
     // A probe started before a relay was removed used to land after the reset
@@ -365,7 +388,9 @@ describe("relay set editing", () => {
             if (url === "wss://doomed.example") await gate;
             return { events: [], eose: true, failed: false, authRequired: false };
           },
+          close: () => undefined,
         }),
+        pruneConnections: () => undefined,
       }));
       const fresh = await import("./relays.js");
       fresh.restoreDefaults();

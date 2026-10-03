@@ -160,6 +160,7 @@ describe("a follow count off somebody else's forged list", () => {
       useRelays: () => ({ readRelays: () => ["wss://a"] }),
     }));
     vi.doMock("./nostr.js", () => ({
+      pruneConnections: () => undefined,
       getConnection: () => ({
         url: "wss://a",
         query: async () => ({
@@ -194,6 +195,7 @@ describe("a follow count off somebody else's forged list", () => {
       useRelays: () => ({ readRelays: () => ["wss://a"] }),
     }));
     vi.doMock("./nostr.js", () => ({
+      pruneConnections: () => undefined,
       getConnection: () => ({
         url: "wss://a",
         query: async () => ({ failed: false, events: [] }),
@@ -218,6 +220,7 @@ describe("an upload server list the reader did not sign", () => {
       useRelays: () => ({ readRelays: () => ["wss://a"] }),
     }));
     vi.doMock("./nostr.js", () => ({
+      pruneConnections: () => undefined,
       getConnection: () => ({
         url: "wss://a",
         query: async () => ({
@@ -252,6 +255,7 @@ describe("a deletion request the reader did not sign", () => {
       useRelays: () => ({ readRelays: () => ["wss://a"] }),
     }));
     vi.doMock("./nostr.js", () => ({
+      pruneConnections: () => undefined,
       getConnection: () => ({
         url: "wss://a",
         query: async () => ({
@@ -286,6 +290,7 @@ describe("metadata a relay made up", () => {
       useRelays: () => ({ readRelays: () => ["wss://a"] }),
     }));
     vi.doMock("./nostr.js", () => ({
+      pruneConnections: () => undefined,
       getConnection: () => ({
         url: "wss://a",
         query: async () => {

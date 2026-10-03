@@ -13,7 +13,7 @@ import {
   type NostrEvent,
 } from "dacci-nostr-nips";
 import { createSignal } from "solid-js";
-import { getConnection } from "./nostr.js";
+import { getConnection, pruneConnections } from "./nostr.js";
 
 /** Connected while logged out. */
 export const DEFAULT_RELAYS = [
@@ -386,6 +386,11 @@ function switchTo(entries: RelayEntry[]): void {
   setRelayStatuses(
     Object.fromEntries(entries.map((entry) => [entry.url, "unknown"] as const)),
   );
+  // Sockets the set no longer names are closed now, not when the tab does.
+  // Paginators built on the old set fail their next round and rebuild through
+  // the pool, which dials fresh — instead of talking to a dead relay forever
+  // over a socket nobody looks after.
+  pruneConnections(entries.map((entry) => entry.url));
   writeStorage(RELAYS_STORAGE_KEY, JSON.stringify(entries));
   setRelayVersion((v) => v + 1);
   void refreshStatuses();

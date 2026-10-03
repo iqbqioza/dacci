@@ -19,6 +19,23 @@ export function eachConnection(run: (conn: RelayConnection) => void): void {
   for (const conn of connections.values()) run(conn);
 }
 
+/**
+ * Closes and drops pooled connections the set no longer names.
+ *
+ * Removing a relay left its socket open: nothing ever closed it, so the dead
+ * relay held a connection until the tab did. Closing answers whatever is
+ * still waiting on it rather than stranding it, and deleting it from the pool
+ * means the next use dials fresh instead of reusing a closed socket.
+ */
+export function pruneConnections(urls: string[]): void {
+  const keep = new Set(urls);
+  for (const [url, conn] of connections) {
+    if (keep.has(url)) continue;
+    conn.close();
+    connections.delete(url);
+  }
+}
+
 export type TimelineFilter = Omit<Filter, "until" | "limit">;
 
 export function createTimeline(
