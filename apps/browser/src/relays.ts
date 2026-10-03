@@ -63,6 +63,11 @@ export interface RelayInfo {
   retention?: Record<string, unknown>;
   relayCount?: number;
   listeners?: number;
+  /**
+   * NIP-11 `limitation.max_subscriptions`: how many subscriptions the relay
+   * keeps open per connection. Applied to the connection, not just shown.
+   */
+  maxSubscriptions?: number;
 }
 
 const MAX_STORED_RELAYS = 50;
@@ -439,6 +444,14 @@ export function setRelayMode(url: string, mode: RelayMode): void {
 }
 
 function mergeInfo(url: string, info: RelayInfo): void {
+  // A relay that states how many subscriptions it serves is believed about it.
+  // Over its limit nothing is said: the surplus queries come back as an empty
+  // `EOSE`, which reads to every layer above as a timeline with nothing in it —
+  // so the connection works to the number the relay published instead of to the
+  // floor it starts at.
+  if (info.maxSubscriptions !== undefined) {
+    getConnection(url).setMaxSubscriptions(info.maxSubscriptions);
+  }
   setRelayInfo((prev) => {
     const next = { ...prev, [url]: { ...prev[url], ...info } };
     // Bound the cache: relay lists are user supplied and can be long.

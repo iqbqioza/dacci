@@ -75,6 +75,13 @@ export interface RelayOptions {
    * stays closed until AUTH is answered. A REQ is never sent before that.
    */
   authGateMs?: number;
+  /**
+   * Subscriptions this connection may have open with the relay at once.
+   * Defaults to the floor the default relay set enforces; NIP-11's
+   * `limitation.max_subscriptions` overrides it through
+   * `setMaxSubscriptions()` once the document has been read.
+   */
+  maxSubscriptions?: number;
   onStatusChange?: (status: RelayConnState) => void;
 }
 
@@ -113,6 +120,28 @@ function newSubscriptionId(): string {
  * when a prompt is declined.
  */
 const MAX_CHALLENGES_ANSWERED = 5;
+
+/**
+ * Subscriptions one connection keeps open at a time unless the relay says
+ * otherwise, which is the number NIP-11 calls `limitation.max_subscriptions`.
+ *
+ * Measured against the relays in the default set: `wss://relay.nostrfy.org`
+ * answers four simultaneous REQs and gives every one past that an `EOSE` with
+ * nothing in it — no `CLOSED`, no machine-readable reason, just an empty page.
+ * An empty `EOSE` is a statement about a timeline ("there is nothing here"), so
+ * the paginator is entitled to read it as one and marks the relay exhausted:
+ * coverage comes back `complete`, the home feed renders as a reader who has
+ * never posted, and nothing offers a retry. Boot opens the home timeline, both
+ * live feeds, the notification page and the relay, follow, mute and deletion
+ * lookups at once — fifteen REQs on one socket — so on that relay the answer was
+ * routinely empty for the one query the reader was waiting on.
+ *
+ * Four is the floor across the default set, not a wish: it is the smallest cap
+ * any of them was measured to enforce. A relay that publishes a higher one in
+ * its NIP-11 document gets it through `setMaxSubscriptions`, so nothing is held
+ * back from relays that would have answered more of it at once.
+ */
+const DEFAULT_MAX_SUBSCRIPTIONS = 4;
 
 type SubOutcome = "eose" | "failed";
 
@@ -194,6 +223,19 @@ export class RelayConnection {
   /** Set once the relay rejected us for auth, to re-arm the gate. */
   private authRequiredOnConnection = false;
   private readonly answeredChallenges = new Set<string>();
+  /**
+   * How many REQs this connection may have open with the relay at once.
+   *
+   * The relay's own limit, from NIP-11 when it publishes one, and the number of
+   * one-shot queries this connection is willing to have in flight. Exceeding it
+   * is not a request the relay can refuse — it answers the surplus with an empty
+   * `EOSE`, which is indistinguishable from a timeline that has nothing in it.
+   */
+  private maxSubscriptions: number;
+  /** One-shot REQs sent and not yet finished with. */
+  private openRequests = 0;
+  /** Queries parked because the relay had no room for them yet. */
+  private laneWaiters: Array<(granted: boolean) => void> = [];
   private isOpen = false;
   private connStatus: RelayConnState = "closed";
   private explicitClose = false;
@@ -204,10 +246,47 @@ export class RelayConnection {
     readonly url: string,
     private readonly factory: SocketFactory = defaultFactory,
     private readonly options: RelayOptions = {},
-  ) {}
+  ) {
+    const limit = options.maxSubscriptions;
+    this.maxSubscriptions =
+      typeof limit === "number" && Number.isInteger(limit) && limit > 0
+        ? limit
+        : DEFAULT_MAX_SUBSCRIPTIONS;
+  }
 
   get status(): RelayConnState {
     return this.connStatus;
+  }
+
+  /**
+   * The number of subscriptions this connection may keep open at once, live
+   * feeds included. Public because it is what the relay is asked to hold, and a
+   * reader looking at a relay's own limits needs to see the number the app is
+   * actually working to.
+   */
+  get subscriptionLimit(): number {
+    return this.maxSubscriptions;
+  }
+
+  /**
+   * Raises or lowers the subscription limit from NIP-11's
+   * `limitation.max_subscriptions`, which is read over HTTP and so arrives
+   * after the connection exists. A figure that is not a positive whole number
+   * is ignored rather than applied: a relay answering with `null`, a float or a
+   * string would otherwise hold one query open forever.
+   */
+  setMaxSubscriptions(limit: unknown): void {
+    if (
+      typeof limit !== "number" ||
+      !Number.isInteger(limit) ||
+      limit < 1
+    ) {
+      return;
+    }
+    if (limit === this.maxSubscriptions) return;
+    this.maxSubscriptions = limit;
+    // A higher ceiling only means the parked queries can move now.
+    this.pumpLane();
   }
 
   /** True once a NIP-42 signer has been attached to this connection. */
@@ -245,6 +324,10 @@ export class RelayConnection {
   private handleDisconnect(): void {
     this.isOpen = false;
     this.setStatus("closed");
+    // Every subscription in flight is answered by the drain below, and each one
+    // frees its own slot on the way out. Not releasing them here is what lets a
+    // drop refill the lane by itself rather than needing this method to know
+    // which query was on which socket.
     this.failPending("disconnected");
     if (this.explicitClose || this.options.autoReconnect === false) return;
     this.scheduleReconnect();
@@ -390,6 +473,73 @@ export class RelayConnection {
   }
 
   /**
+   * How many one-shot REQs may be open at once.
+   *
+   * A live subscription is a REQ the relay keeps open until it is closed, so
+   * each one holds a slot of the relay's limit for as long as it lasts and is
+   * counted here rather than queued: a query cannot wait for a live feed that is
+   * only going to let go on cancel. The floor of one is what keeps that from
+   * becoming a deadlock — a reader with more live feeds than the relay has room
+   * for still gets its one-shots answered, which is one more than the relay
+   * agreed to serve and no worse than asking for all of them.
+   */
+  private laneLimit(): number {
+    return Math.max(1, this.maxSubscriptions - this.liveSubs.size);
+  }
+
+  /**
+   * Takes one of the relay's subscription slots, waiting for one if it is all
+   * taken. Resolves false when the budget runs out first, and false from
+   * `close()`, so a caller reports the query as unanswered instead of holding a
+   * spinner until a deadline nobody is watching any more.
+   */
+  private acquireLane(budgetMs: number): Promise<boolean> {
+    if (this.openRequests < this.laneLimit()) {
+      this.openRequests += 1;
+      return Promise.resolve(true);
+    }
+    if (budgetMs <= 0) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      let settled = false;
+      const waiter = (granted: boolean): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (granted) this.openRequests += 1;
+        resolve(granted);
+      };
+      const timer = setTimeout(() => {
+        this.laneWaiters = this.laneWaiters.filter((w) => w !== waiter);
+        waiter(false);
+      }, budgetMs);
+      (timer as unknown as { unref?: () => void }).unref?.();
+      this.laneWaiters.push(waiter);
+    });
+  }
+
+  private releaseLane(): void {
+    if (this.openRequests > 0) this.openRequests -= 1;
+    this.pumpLane();
+  }
+
+  /** Moves queued queries into the room the relay has, in the order they parked. */
+  private pumpLane(): void {
+    while (this.laneWaiters.length > 0 && this.openRequests < this.laneLimit()) {
+      const next = this.laneWaiters.shift();
+      next?.(true);
+    }
+  }
+
+  /**
+   * Refuses every parked query at once. Only `close()` does this: a drop leaves
+   * the connection to redial, and the queries waiting for a slot are waiting for
+   * the relay rather than for the socket, so it will still want them sent.
+   */
+  private refuseLanes(): void {
+    this.laneWaiters.splice(0).forEach((waiter) => waiter(false));
+  }
+
+  /**
    * Called after a fresh login: the session can sign challenges, so the
    * gate no longer has to hold REQs back.
    */
@@ -505,6 +655,8 @@ export class RelayConnection {
         // Relay refused the live stream (often auth); surface and drop it.
         if (isAuthRequiredMessage(msg[2])) live.onAuthRequired?.();
         this.liveSubs.delete(msg[1]);
+        // Same as an unsubscribe: the relay has that slot back.
+        this.pumpLane();
       }
       this.finishSub(msg[1], "failed");
     } else if (msg[0] === "OK" && typeof msg[1] === "string") {
@@ -639,19 +791,34 @@ export class RelayConnection {
     if (this.explicitClose) {
       return { events: [], eose: false, failed: true, authRequired: false };
     }
+    // And now the relay's room for one more subscription. A relay with a limit
+    // does not say so: it answers the surplus with an empty EOSE, and to every
+    // layer above this one that reads as a timeline with nothing in it. Queued
+    // here, the query is sent when a slot frees instead of being emptied.
+    // One window of its own, like the gate's: a query that cannot be sent is
+    // reported unanswered rather than left waiting for a slot nobody will free.
+    const lane = await this.acquireLane(timeoutMs);
+    if (!lane) {
+      return { events: [], eose: false, failed: true, authRequired: false };
+    }
     // The socket may have been replaced while waiting; use the live one.
     const socket = this.ensureSocket();
     const subId = newSubscriptionId();
     let entryRef: PendingSub | undefined;
-    const outcome = await new Promise<SubOutcome>((resolve) => {
-      const timer = setTimeout(() => {
-        this.pendingSubs.delete(subId);
-        resolve("failed");
-      }, timeoutMs);
-      entryRef = { events: [], authRequired: false, timer, resolve, filter };
-      this.pendingSubs.set(subId, entryRef);
-      this.safeSend(socket, JSON.stringify(["REQ", subId, filter]));
-    });
+    let outcome: SubOutcome;
+    try {
+      outcome = await new Promise<SubOutcome>((resolve) => {
+        const timer = setTimeout(() => {
+          this.pendingSubs.delete(subId);
+          resolve("failed");
+        }, timeoutMs);
+        entryRef = { events: [], authRequired: false, timer, resolve, filter };
+        this.pendingSubs.set(subId, entryRef);
+        this.safeSend(socket, JSON.stringify(["REQ", subId, filter]));
+      });
+    } finally {
+      this.releaseLane();
+    }
     // The dispatcher mutates entryRef in place, so partial results survive
     // timeouts and drops even though the map entry is gone.
     const finished = entryRef ?? { events: [], authRequired: false };
@@ -691,6 +858,9 @@ export class RelayConnection {
       id,
       unsubscribe: () => {
         this.liveSubs.delete(id);
+        // A closed live feed is a slot the relay has back, so a query parked for
+        // room is sent now instead of waiting for another query to finish.
+        this.pumpLane();
         const current = this.socket;
         if (current !== null) {
           this.safeSend(current, JSON.stringify(["CLOSE", id]));
@@ -763,6 +933,11 @@ export class RelayConnection {
     // gate window lapsed. Releasing them here lets the `explicitClose` checks
     // after the gate refuse at once instead.
     this.authGateWaiters.splice(0).forEach((run) => run());
+    // And the ones parked for room at the relay, which are on no list at all:
+    // their slot would only free as the subscriptions in flight finished, and
+    // there are none left to finish.
+    this.refuseLanes();
+    this.openRequests = 0;
     this.socket?.close();
     this.socket = null;
     this.isOpen = false;

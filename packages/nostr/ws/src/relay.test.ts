@@ -1067,3 +1067,200 @@ describe("a CLOSED message whose reason is not a reason", () => {
     }
   });
 });
+
+/**
+ * How many REQs a connection keeps open at once.
+ *
+ * A relay with a subscription limit does not refuse the surplus: it answers the
+ * queries it cannot hold with an `EOSE` that carries no events, which to every
+ * layer above the transport is a statement about a timeline — "there is nothing
+ * here" — rather than about the connection. `wss://relay.nostrfy.org`, a relay
+ * in the default set, serves four at a time and empties the rest, so a boot that
+ * asks for fifteen queries on one socket got an empty home feed, coverage
+ * `complete` and no retry: a reader told they had never posted.
+ */
+describe("RelayConnection subscription limit", () => {
+  /** The REQ frames the socket was actually sent, in order. */
+  function reqs(socket: Socket): string[] {
+    return vi
+      .mocked(socket.send)
+      .mock.calls.map((call) => call[0])
+      .filter((raw) => JSON.parse(raw)[0] === "REQ")
+      .map((raw) => JSON.parse(raw)[1] as string);
+  }
+
+  /** Lets the queries get past the socket, the gate and the lane. */
+  async function settle(): Promise<void> {
+    await new Promise((r) => setTimeout(r, 0));
+  }
+
+  it("sends no more queries at once than the relay serves", async () => {
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+    });
+    expect(conn.subscriptionLimit).toBe(4);
+
+    const pending = Array.from({ length: 7 }, () => conn.query({ kinds: [1] }));
+    const answered = new Set<string>();
+    await settle();
+    // Four went out; the other three are waiting for room.
+    expect(reqs(socket)).toHaveLength(4);
+
+    // Each answer frees one slot, in the order the queries parked.
+    for (let round = 0; round < 3; round++) {
+      const subId = reqs(socket)[round];
+      answered.add(subId);
+      socket.peer(["EOSE", subId]);
+      await settle();
+      await Promise.resolve();
+      expect(reqs(socket)).toHaveLength(4 + round + 1);
+    }
+    // The fourth of the first four was never answered above, so it is answered
+    // here with the three that were parked.
+    for (const subId of reqs(socket)) {
+      if (!answered.has(subId)) socket.peer(["EOSE", subId]);
+    }
+    const results = await Promise.all(pending);
+    expect(results.every((r) => r.eose && !r.failed)).toBe(true);
+    conn.close();
+  });
+
+  it("keeps live subscriptions inside the same limit", async () => {
+    // A live REQ stays open until it is closed, so each one holds a slot of the
+    // relay's limit for as long as it lasts. Three live feeds plus three queries
+    // is six subscriptions for a relay that serves four: the fifth and sixth
+    // would be answered with an empty `EOSE`. They wait instead.
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+    });
+    const feeds = [
+      conn.subscribe({ kinds: [1] }, () => {}),
+      conn.subscribe({ kinds: [1] }, () => {}),
+      conn.subscribe({ kinds: [1] }, () => {}),
+    ];
+    await settle();
+    const pending = [
+      conn.query({ kinds: [1] }, 5000),
+      conn.query({ kinds: [1] }, 5000),
+      conn.query({ kinds: [1] }, 5000),
+    ];
+    await settle();
+    // Three live REQs and one query: the limit, and not one over.
+    expect(reqs(socket)).toHaveLength(4);
+
+    // A query that finishes hands its slot to the next parked query.
+    socket.peer(["EOSE", reqs(socket)[3]]);
+    await settle();
+    await Promise.resolve();
+    expect(reqs(socket)).toHaveLength(5);
+    socket.peer(["EOSE", reqs(socket)[4]]);
+    await settle();
+    await Promise.resolve();
+    // The third query took the slot the second one left: three live feeds and
+    // one query, which is still the limit.
+    expect(reqs(socket)).toHaveLength(6);
+
+    // A fourth query has nowhere to go.
+    const waiting = conn.query({ kinds: [1] }, 5000);
+    await settle();
+    expect(reqs(socket)).toHaveLength(6);
+
+    // Closing a live feed gives its slot back, and the count that decides the
+    // room is read again — so the parked query goes out without a query having
+    // to finish first.
+    feeds[0].unsubscribe();
+    await settle();
+    expect(reqs(socket)).toHaveLength(7);
+
+    // The first three frames are the live feeds, which are still open.
+    for (const subId of reqs(socket).slice(3)) socket.peer(["EOSE", subId]);
+    const results = await Promise.all([...pending, waiting]);
+    expect(results.every((r) => r.eose && !r.failed)).toBe(true);
+    conn.close();
+  });
+
+  it("reports a query it never got to send as unanswered", async () => {
+    // The difference matters: an empty `EOSE` means "nothing here", and every
+    // caller above reads it as an answer. A query that could not be sent has to
+    // come back as no answer at all, so the relay is parked and asked again
+    // rather than written off as empty.
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+      maxSubscriptions: 1,
+    });
+    const sent = conn.query({ kinds: [1] }, 5000);
+    await settle();
+    expect(reqs(socket)).toHaveLength(1);
+
+    const started = Date.now();
+    const queued = await conn.query({ kinds: [1] }, 60);
+    expect(queued.failed).toBe(true);
+    expect(queued.eose).toBe(false);
+    expect(reqs(socket)).toHaveLength(1);
+    expect(Date.now() - started).toBeLessThan(1000);
+
+    socket.peer(["EOSE", reqs(socket)[0]]);
+    expect((await sent).eose).toBe(true);
+    conn.close();
+  });
+
+  it("lets a raised limit release the parked queries at once", async () => {
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+      maxSubscriptions: 1,
+    });
+    const pending = [conn.query({ kinds: [1] }), conn.query({ kinds: [1] })];
+    await settle();
+    expect(reqs(socket)).toHaveLength(1);
+
+    // What NIP-11's `limitation.max_subscriptions` does when the document is
+    // read over HTTP, long after the connection started with the floor.
+    conn.setMaxSubscriptions(8);
+    await settle();
+    expect(reqs(socket)).toHaveLength(2);
+    expect(conn.subscriptionLimit).toBe(8);
+
+    for (const subId of reqs(socket)) socket.peer(["EOSE", subId]);
+    expect((await Promise.all(pending)).every((r) => r.eose)).toBe(true);
+    conn.close();
+  });
+
+  it("ignores a limit the relay did not state as one", async () => {
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+    });
+    // A relay that answers with `null`, a float, a negative number or prose must
+    // not be able to freeze the connection: the first two would either hold a
+    // query for ever or hand out slots that do not exist.
+    for (const bad of [null, 0, -1, 2.5, "4", "four", {}, NaN]) {
+      conn.setMaxSubscriptions(bad);
+      expect(conn.subscriptionLimit).toBe(4);
+    }
+    conn.close();
+  });
+
+  it("refuses a parked query when the connection is closed", async () => {
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+      maxSubscriptions: 1,
+    });
+    const inFlight = conn.query({ kinds: [1] }, 10000);
+    await settle();
+    const queued = conn.query({ kinds: [1] }, 10000);
+    await settle();
+
+    const started = Date.now();
+    conn.close();
+    const result = await queued;
+    expect(result.failed).toBe(true);
+    // Straight away, rather than waiting out a ten-second budget for a slot.
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect((await inFlight).failed).toBe(true);
+  });
+});

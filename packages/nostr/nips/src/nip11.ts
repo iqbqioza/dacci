@@ -15,6 +15,17 @@ export interface RelayInformation {
   retention?: Record<string, unknown>;
   relayCount?: number;
   listeners?: number;
+  /**
+   * `limitation.max_subscriptions`: how many subscriptions this relay will keep
+   * open on one connection at a time.
+   *
+   * Read out of `limitation` and typed, because a client that asks for more than
+   * this does not get told: a relay over its limit answers the surplus queries
+   * with an empty `EOSE`, which reads exactly like a timeline with nothing in
+   * it. Nothing but a positive whole number counts, and a missing figure leaves
+   * the client on its own default.
+   */
+  maxSubscriptions?: number;
   /** NIPs the relay declares, as written in the document. */
   supportedNips: string[];
 }
@@ -71,6 +82,10 @@ export function parseRelayInfoDocument(raw: unknown): RelayInformation | null {
     ...present("retention", obj("retention")),
     ...present("relayCount", num("relay_count")),
     ...present("listeners", num("listeners")),
+    ...present(
+      "maxSubscriptions",
+      subscriptionLimit(obj("limitation")?.["max_subscriptions"]),
+    ),
     // Relays write these as integers or as strings, sometimes mixed.
     supportedNips: Array.isArray(doc.supported_nips)
       ? doc.supported_nips
@@ -84,6 +99,25 @@ export function parseRelayInfoDocument(raw: unknown): RelayInformation | null {
           .filter((nip) => nip !== "")
       : [],
   };
+}
+
+/**
+ * `limitation.max_subscriptions` as a number of open subscriptions, or
+ * undefined when the document does not state one.
+ *
+ * Both spellings a relay is known to write are accepted, for the same reason
+ * `relay_count` is read from a string too: the figure sits next to fields the
+ * parser already tolerates in either form, and one that is only read as a
+ * number leaves the client asking for more than the relay serves — the one
+ * mistake here that costs queries, quietly.
+ */
+function subscriptionLimit(value: unknown): number | undefined {
+  if (typeof value === "number") {
+    return Number.isInteger(value) && value > 0 ? value : undefined;
+  }
+  if (typeof value !== "string") return undefined;
+  const text = value.trim();
+  return /^\d+$/.test(text) && Number(text) > 0 ? Number(text) : undefined;
 }
 
 function present<K extends string, V>(

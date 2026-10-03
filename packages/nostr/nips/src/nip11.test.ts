@@ -106,6 +106,63 @@ describe("parseRelayInfoDocument", () => {
     expect(parseRelayInfoDocument({ listeners: NaN })?.listeners).toBeUndefined();
   });
 
+  it("reads how many subscriptions a relay will keep open", () => {
+    // Both spellings, like the counts above, because relays write the numeric
+    // fields of a document in either form. This one is read rather than shown: a
+    // client that does not know the limit asks for more than the relay serves,
+    // and the relay answers the surplus with an empty `EOSE` instead of a
+    // refusal — which reads as a timeline with nothing in it.
+    expect(
+      parseRelayInfoDocument({ limitation: { max_subscriptions: 20 } })
+        ?.maxSubscriptions,
+    ).toBe(20);
+    expect(
+      parseRelayInfoDocument({ limitation: { max_subscriptions: "20" } })
+        ?.maxSubscriptions,
+    ).toBe(20);
+    expect(
+      parseRelayInfoDocument({ limitation: { max_subscriptions: " 4 " } })
+        ?.maxSubscriptions,
+    ).toBe(4);
+
+    // Absent when the relay did not state one, so the client keeps its own.
+    expect(parseRelayInfoDocument({ name: "r" })?.maxSubscriptions).toBeUndefined();
+    expect(
+      parseRelayInfoDocument({ limitation: { auth_required: true } })
+        ?.maxSubscriptions,
+    ).toBeUndefined();
+    expect(parseRelayInfoDocument({})?.maxSubscriptions).toBeUndefined();
+  });
+
+  it("takes no subscription limit a relay did not write as a whole count", () => {
+    // Zero and a negative number are the figures that break a client outright:
+    // a limit of zero leaves every query waiting for a slot that never opens,
+    // and a fraction has no meaning to wait out. Everything else here is a
+    // document written by something that does not speak NIP-11.
+    for (const bad of [
+      0,
+      -1,
+      -20,
+      2.5,
+      "0",
+      "-4",
+      "2.5",
+      "twenty",
+      "20 subscriptions",
+      "",
+      null,
+      true,
+      [],
+      {},
+    ]) {
+      expect(
+        parseRelayInfoDocument({ limitation: { max_subscriptions: bad } })
+          ?.maxSubscriptions,
+        JSON.stringify(bad),
+      ).toBeUndefined();
+    }
+  });
+
   it("rejects bodies that are not relay documents", () => {
     expect(parseRelayInfoDocument(null)).toBeNull();
     expect(parseRelayInfoDocument("<html>")).toBeNull();
