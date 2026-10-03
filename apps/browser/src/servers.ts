@@ -441,22 +441,34 @@ async function fetchServerPreference(pubkey: string): Promise<FetchedList> {
   })) as NostrEvent[];
   const events = signedCandidates(answer, pubkey);
   // A replaceable event: relays lag behind each other, so only the newest
-  // answer per kind describes the list the reader has now. Both kinds are
-  // then unioned rather than resolved in favour of the newer kind: neither
-  // BUD-03 (kind 10063) nor NIP-96 (kind 10096) defines cross-kind
-  // precedence, and dropping the older kind's servers would strand a reader
-  // whose other client still publishes it. A removal therefore takes effect
-  // on the next publish from this device, not on the read.
+  // answer per kind describes the list the reader has now. The two kinds are
+  // then one logical list published under two numbers — NIP-96's 10096,
+  // superseded by BUD-03's 10063 — so the newest event wins regardless of
+  // kind. Unioning them instead resurrected servers the reader had deleted:
+  // the old kind kept naming them, the union put them back on reload, and the
+  // next publish wrote them into the new kind for good. Ties prefer the
+  // current kind, which is where the next publish goes.
   const out: UploadServer[] = [];
   let at = 0;
   // A relay may answer with events of other kinds than were asked for, so
   // the list is matched on its own kind rather than on the filter alone.
-  for (const event of newestPerKind(
+  const perKind = newestPerKind(
     events.filter((e) => SERVER_LIST_KINDS.includes(kindOf(e))),
-  )) {
-    const created = (event as { created_at?: unknown }).created_at;
-    if (typeof created === "number" && created > at) at = created;
-    const tags = (event as { tags?: unknown }).tags;
+  );
+  const newest = perKind
+    .map((event) => ({
+      event,
+      at:
+        typeof (event as { created_at?: unknown }).created_at === "number"
+          ? ((event as { created_at: number }).created_at as number)
+          : -1,
+      current:
+        (event as { kind?: unknown }).kind === CURRENT_SERVER_LIST_KIND,
+    }))
+    .sort((a, b) => b.at - a.at || Number(b.current) - Number(a.current))[0];
+  if (newest !== undefined && newest.at >= 0) {
+    at = newest.at;
+    const tags = (newest.event as { tags?: unknown }).tags;
     if (Array.isArray(tags)) {
       for (const tag of tags) {
         if (

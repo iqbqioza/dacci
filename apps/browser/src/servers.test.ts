@@ -227,7 +227,11 @@ describe("loadServers", () => {
     expect(own(store)).toEqual(["https://old.example"]);
   });
 
-  it("serves both kinds when the account published each", async () => {
+  it("takes the newest list regardless of kind, so a deletion stays deleted", async () => {
+    // The two kinds are one logical list published under two numbers. Unioning
+    // them resurrected servers the reader had deleted: the old kind kept
+    // naming them, the union put them back on reload, and the next publish
+    // wrote them into the new kind for good.
     const pubkey = READER;
     vi.resetModules();
     vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
@@ -238,11 +242,57 @@ describe("loadServers", () => {
     ]);
     const store = await import("./servers.js");
     await store.loadServers();
-    // A reader who moved from the old kind to the new one keeps the servers
-    // they had, since the old event is not superseded.
-    expect(own(store).sort()).toEqual([
-      "https://current.example",
-      "https://older.example",
+    // The 10096 event is newer, so it wins even though its kind is legacy.
+    expect(own(store)).toEqual(["https://older.example"]);
+  });
+
+  it("prefers the current kind when both lists share a timestamp", async () => {
+    // Deterministic rather than relay-order dependent, and the next publish
+    // goes to the current kind.
+    const pubkey = READER;
+    vi.resetModules();
+    vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
+    vi.doMock("./compose.js", () => ({ publishEvent: async () => null }));
+    answerWith([
+      listEvent(["https://legacy.example"], { kind: 10096, at: 1000 }),
+      listEvent(["https://current.example"], { kind: 10063, at: 1000 }),
+    ]);
+    const store = await import("./servers.js");
+    await store.loadServers();
+    expect(own(store)).toEqual(["https://current.example"]);
+  });
+
+  it("does not resurrect a server removed from the new kind by the old one", async () => {
+    // The full H1 round trip: the reader deletes a server, the new kind no
+    // longer names it, but a legacy list elsewhere still does. Reading must
+    // not put it back — and the next publish must not write it back either.
+    const pubkey = READER;
+    const sent: Array<Record<string, unknown>> = [];
+    vi.resetModules();
+    vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
+    vi.doMock("./compose.js", () => ({
+      publishEvent: async (template: Record<string, unknown>) => {
+        sent.push(template);
+        return { ...template, id: "f".repeat(64), sig: "e".repeat(128) };
+      },
+    }));
+    const now = Math.floor(Date.now() / 1000);
+    answerWith([
+      listEvent(["https://a.example"], { kind: 10063, at: now }),
+      listEvent(["https://a.example", "https://b.example"], {
+        kind: 10096,
+        at: now - 5000,
+      }),
+    ]);
+    const store = await import("./servers.js");
+    await store.loadServers();
+    expect(own(store)).toEqual(["https://a.example"]);
+    // And the next edit publishes without the removed server.
+    await store.addServerAndPublish("https://c.example");
+    const tags = sent.at(-1)?.tags as string[][];
+    expect(tags).toEqual([
+      ["server", "https://a.example"],
+      ["server", "https://c.example"],
     ]);
   });
 
