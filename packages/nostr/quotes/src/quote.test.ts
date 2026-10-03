@@ -1,23 +1,35 @@
-import type { NostrEvent } from "dacci-nostr-nips";
+import { computeEventId, type NostrEvent } from "dacci-nostr-nips";
 import { describe, expect, it, vi } from "vitest";
 import { EmbedStore } from "./quote.js";
 
-const A = "1".repeat(64);
-const B = "2".repeat(64);
-const C = "3".repeat(64);
+const PUB = "1".repeat(64);
 
-function note(id: string, pubkey: string, content = "x"): NostrEvent {
-  // The id is fixed rather than derived, because the store keys on the id a
-  // post asks for and these tests look notes up by that id.
-  return {
-    id,
-    pubkey,
-    created_at: 100,
-    kind: 1,
-    tags: [],
-    content,
-    sig: "s".repeat(128),
-  };
+function note(pubkey: string, content: string): NostrEvent {
+  // The id is derived, because the store checks that an answer's id is the
+  // hash of its own fields: a relay returning the requested id with rewritten
+  // content must not match the lookup. Tests ask for notes by their real ids.
+  const base = { pubkey, created_at: 100, kind: 1, tags: [], content };
+  return { ...base, id: computeEventId(base), sig: "s".repeat(128) };
+}
+
+const NOTE_A = note(PUB, "a");
+const NOTE_B = note(PUB, "b");
+const NOTE_C = note(PUB, "c");
+// The ids the tests ask for are the notes' own.
+const A = NOTE_A.id;
+const B = NOTE_B.id;
+const C = NOTE_C.id;
+
+const BY_ID = new Map([NOTE_A, NOTE_B, NOTE_C].map((n) => [n.id, n]));
+
+/** What a relay holding these notes answers. */
+function answer(ids: string[]): NostrEvent[] {
+  const out: NostrEvent[] = [];
+  for (const id of ids) {
+    const found = BY_ID.get(id);
+    if (found !== undefined) out.push(found);
+  }
+  return out;
 }
 
 const tick = (ms = 0): Promise<void> =>
@@ -25,19 +37,19 @@ const tick = (ms = 0): Promise<void> =>
 
 describe("EmbedStore", () => {
   it("batches a burst of ids into one query", async () => {
-    const query = vi.fn(async (ids: string[]) => ids.map((id) => note(id, A)));
+    const query = vi.fn(async (ids: string[]) => answer(ids));
     const store = new EmbedStore(query, { flushDelayMs: 1, batchSize: 50 });
     store.request([A, B, C, A, A]);
     await tick(20);
     // One REQ for the whole burst, not one per card.
     expect(query).toHaveBeenCalledTimes(1);
     expect([...query.mock.calls[0][0]].sort()).toEqual([A, B, C]);
-    expect(store.peek(A)?.content).toBe("x");
+    expect(store.peek(A)?.content).toBe("a");
     store.clear();
   });
 
   it("never asks twice for an id it already has", async () => {
-    const query = vi.fn(async (ids: string[]) => ids.map((id) => note(id, A)));
+    const query = vi.fn(async (ids: string[]) => answer(ids));
     const store = new EmbedStore(query, { flushDelayMs: 1 });
     store.request([A]);
     await tick(20);
@@ -50,12 +62,12 @@ describe("EmbedStore", () => {
   it("seeds a known note so no query is made for it", async () => {
     const query = vi.fn(async () => []);
     const store = new EmbedStore(query, { flushDelayMs: 1 });
-    const known = note(A, A, "already here");
+    const known = note(PUB, "already here");
     store.put(known);
-    store.request([A]);
+    store.request([known.id]);
     await tick(20);
     expect(query).not.toHaveBeenCalled();
-    expect(store.peek(A)).toEqual(known);
+    expect(store.peek(known.id)).toEqual(known);
     store.clear();
   });
 
@@ -63,11 +75,11 @@ describe("EmbedStore", () => {
     const query = vi.fn(async () => []);
     const onChange = vi.fn();
     const store = new EmbedStore(query, { flushDelayMs: 1, onChange });
-    const known = note(A, A);
+    const known = note(PUB, "already here");
     store.put(known);
     // A view waiting on this id renders only once the change is announced.
     expect(onChange).toHaveBeenCalledTimes(1);
-    expect(store.peek(A)).toEqual(known);
+    expect(store.peek(known.id)).toEqual(known);
     // Seeding the same note again is not a change worth announcing.
     store.put(known);
     expect(onChange).toHaveBeenCalledTimes(1);
@@ -101,7 +113,7 @@ describe("EmbedStore", () => {
     let attempt = 0;
     const query = vi.fn(async (ids: string[]) => {
       attempt += 1;
-      return attempt === 1 ? [] : ids.map((id) => note(id, A));
+      return attempt === 1 ? [] : answer(ids);
     });
     const store = new EmbedStore(query, {
       flushDelayMs: 1,
@@ -110,7 +122,7 @@ describe("EmbedStore", () => {
     });
     store.request([A]);
     await tick(80);
-    expect(store.peek(A)?.content).toBe("x");
+    expect(store.peek(A)?.content).toBe("a");
     store.clear();
   });
 
@@ -124,13 +136,25 @@ describe("EmbedStore", () => {
   });
 
   it("discards a reply that is not a valid event", async () => {
-    const query = vi.fn(async (ids: string[]) =>
-      ids.map((id) => ({ ...note(id, A), sig: "short" })),
-    );
+    const query = vi.fn(async () => [{ ...NOTE_A, sig: "short" }]);
     const store = new EmbedStore(query, { flushDelayMs: 1, maxAttempts: 0 });
     store.request([A]);
     await tick(20);
     expect(store.peek(A)).toBeNull();
+    store.clear();
+  });
+
+  it("discards a reply whose id is not the hash of its fields", async () => {
+    // A relay returning the requested id with rewritten content matches the
+    // lookup by id, so the check that the id IS the hash of the fields is the
+    // attribution itself. Without it the card renders attacker words as
+    // someone else's note.
+    const forged = { ...NOTE_A, content: "attacker words" };
+    const query = vi.fn(async () => [forged]);
+    const store = new EmbedStore(query, { flushDelayMs: 1, maxAttempts: 0 });
+    store.request([NOTE_A.id]);
+    await tick(20);
+    expect(store.peek(NOTE_A.id)).toBeNull();
     store.clear();
   });
 
@@ -146,7 +170,7 @@ describe("EmbedStore", () => {
   });
 
   it("drops everything on clear", async () => {
-    const query = vi.fn(async (ids: string[]) => ids.map((id) => note(id, A)));
+    const query = vi.fn(async (ids: string[]) => answer(ids));
     const store = new EmbedStore(query, { flushDelayMs: 1 });
     store.request([A]);
     await tick(20);
@@ -167,7 +191,7 @@ describe("EmbedStore", () => {
     });
     const query = vi.fn(async (ids: string[]) => {
       await gate;
-      return ids.map((id) => note(id, A));
+      return answer(ids);
     });
     const store = new EmbedStore(query, { flushDelayMs: 1, batchSize: 1 });
     store.request([A, B]);
@@ -193,11 +217,11 @@ describe("a note that arrives while its request is out", () => {
     // at two cards above.
     const query = vi.fn(async () => []);
     const store = new EmbedStore(query, { flushDelayMs: 1 });
-    store.request([A]);
-    const known = note(A, A, "on screen already");
+    const known = note(PUB, "on screen already");
+    store.request([known.id]);
     store.put(known);
     await tick(20);
-    expect(store.peek(A)).toEqual(known);
+    expect(store.peek(known.id)).toEqual(known);
     store.clear();
   });
 
@@ -208,7 +232,7 @@ describe("a note that arrives while its request is out", () => {
     let call = 0;
     const query = vi.fn(async (ids: string[]) => {
       call += 1;
-      return call === 1 ? [] : ids.map((id) => note(id, A));
+      return call === 1 ? [] : answer(ids);
     });
     const store = new EmbedStore(query, { flushDelayMs: 1, baseRetryMs: 1 });
     store.request([A]);

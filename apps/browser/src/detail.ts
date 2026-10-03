@@ -37,6 +37,12 @@ export function createDetail(query: DetailQuery): DetailState & {
     if (id === "") return;
     const cached = lookupEvent(id);
     if (cached !== null) {
+      // Guarded like the network path below: the docstring promises a late
+      // resolution never replaces the post being looked at, and the cache hit
+      // used to skip the check because it resolves synchronously. A reused
+      // store resolving for a stale id would otherwise overwrite the current
+      // post with no network involved at all.
+      if (!isCurrent()) return;
       setEvent(cached);
       setLoading(false);
       setFailed(false);

@@ -159,6 +159,21 @@ export function resetProfileFeed(): void {
   if (current !== null) void loadMoreProfile();
 }
 
+/**
+ * How many cards pressing the bar would newly show on the current tab.
+ *
+ * Same promise as the home timeline's bar: the count is what the flush would
+ * insert, run through the tab view, rather than the raw buffer the flush
+ * dedups and the view filters.
+ */
+export function profileArrivalCount(): number {
+  const plan = planFlush(useProfileLive().buffered(), all());
+  if (plan.added.length === 0) return 0;
+  const before = new Set(visible().map((event) => event.id));
+  return postsForTab(plan.events, tab()).filter((event) => !before.has(event.id))
+    .length;
+}
+
 /** New posts by this subject, pinned above the list without moving it. */
 export function flushProfileArrivals(): void {
   const plan = planFlush(useProfileLive().buffered(), all());

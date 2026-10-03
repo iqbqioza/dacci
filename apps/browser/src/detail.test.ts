@@ -91,6 +91,23 @@ describe("note detail", () => {
     expect(detail.loading()).toBe(true);
   });
 
+  it("drops a cached answer for a post the reader already left", async () => {
+    // The network path checks `isCurrent` because a slow relay must not
+    // replace the post being looked at. The cache hit skipped the check because
+    // it resolves synchronously — so a reused store resolving for a stale id
+    // overwrote the current post with no network involved at all.
+    clearEventCache();
+    const query = vi.fn(async () => null);
+    const detail = createDetail(query);
+    const stale = note(ID, "stale");
+    rememberEvents([stale]);
+
+    await detail.resolve(ID, () => false);
+    expect(detail.event()).toBeNull();
+    expect(query).not.toHaveBeenCalled();
+    clearEventCache();
+  });
+
   it("ignores an empty id rather than querying for it", async () => {
     clearEventCache();
     const query = vi.fn(async () => null);

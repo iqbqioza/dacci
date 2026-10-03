@@ -168,6 +168,23 @@ export function resetHomeFeed(): void {
 }
 
 /**
+ * How many cards pressing the bar would newly show on the current tab.
+ *
+ * The bar used to count the raw buffer while the flush dedups it and the view
+ * filters it by tab, mute and deletion, so the count evaporated on press.
+ * Running the same pipeline — flush, then the tab view — keeps the promise
+ * the bar makes.
+ */
+export function homeArrivalCount(): number {
+  const plan = planFlush(useFeedLive().buffered(), all());
+  if (plan.added.length === 0) return 0;
+  const before = new Set(visible().map((event) => event.id));
+  return homePostsFor(plan.events, tab(), isMutedAuthor).filter(
+    (event) => !before.has(event.id),
+  ).length;
+}
+
+/**
  * Pressing the bar inserts the new posts above the current first post and
  * pins the viewport, so the reader keeps looking at the same post instead
  * of being dropped on the newest one.

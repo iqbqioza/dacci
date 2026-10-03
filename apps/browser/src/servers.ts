@@ -1,5 +1,6 @@
 import type { Filter } from "dacci-nostr-nips";
 import type { NostrEvent } from "dacci-nostr-nips";
+import { compareEvents } from "dacci-nostr-nips";
 import { isSignedBy } from "./authored.js";
 import { createSignal } from "solid-js";
 import { useAuth } from "./auth.js";
@@ -479,13 +480,9 @@ function signedCandidates(events: NostrEvent[], pubkey: string): NostrEvent[] {
   }
   const out: NostrEvent[] = [];
   for (const list of byKind.values()) {
-    list.sort((a, b) =>
-      b.created_at !== a.created_at
-        ? b.created_at - a.created_at
-        : a.id < b.id
-          ? -1
-          : 1,
-    );
+    // NIP-01 order, shared with every other newest-pick: the inline
+    // comparator returned `1` for fully equal events, which no sort may rely on.
+    list.sort(compareEvents);
     for (const event of list.slice(0, CANDIDATES_PER_KIND)) {
       if (isSignedBy(event, pubkey)) {
         out.push(event);

@@ -2,6 +2,7 @@ import { authenticatedAnswer } from "./authored.js";
 import type { Filter, NostrEvent } from "dacci-nostr-nips";
 import {
   buildMuteList,
+  compareEvents,
   MUTE_LIST_KIND,
   muteTags,
   mutedIn,
@@ -120,7 +121,9 @@ async function loadMyMutes(key: string): Promise<void> {
   // Kind 10000 is replaceable, so the newest list is the current one. A reader
   // who has never muted anyone has no kind 10000 at all, and that is an empty
   // list rather than an unknown one.
-  events.sort((a, b) => b.created_at - a.created_at);
+  // NIP-01 order, shared with every other newest-pick: without a tie-break
+  // the surviving list on equal timestamps depended on relay answer order.
+  events.sort(compareEvents);
   const newest = events[0];
   setTags(newest === undefined ? [] : muteTags(newest));
   setLoaded(true);

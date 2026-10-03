@@ -14,7 +14,9 @@ import {
   buildReaction,
   buildReply,
   buildRepost,
+  deletedAddresses,
   deletedEventIds,
+  eventAddress,
   mentionedPubkeys,
   quotedEventId,
   quoteTag,
@@ -561,6 +563,66 @@ describe("deletedEventIds", () => {
     expect([...deletedEventIds(events)]).toEqual([reactionEvent.id]);
     // The reaction was deleted, so no action is remembered for it.
     expect(summarizeMyActivity(events).size).toBe(0);
+  });
+});
+
+describe("deletedAddresses", () => {
+  const coord = `30023:${AUTHOR}:my-article`;
+
+  it("names the coordinates an `a` tag deletion references", () => {
+    // NIP-09 deletions carry "one or more `e` **or `a`** tags". Reading only
+    // the `e` tags collected this deletion and then matched it against nothing,
+    // so deleting a long-form article never took effect.
+    const events = [
+      signed(30023, AUTHOR, [["d", "my-article"]], 1000),
+      signed(5, AUTHOR, [["a", coord]], 2000),
+    ];
+    expect([...deletedAddresses(events)]).toEqual([coord]);
+    // And the id set stays out of it: a coordinate is not an event id, and
+    // mixing the two would poison every lookup the set is read through.
+    expect(deletedEventIds(events).size).toBe(0);
+  });
+
+  it("ignores what is not a deletion and what is not an address", () => {
+    expect(
+      deletedAddresses([
+        signed(5, AUTHOR, [["a", ""]], 2000),
+        signed(5, AUTHOR, [["e", "1".repeat(64)]], 2000),
+        note("1".repeat(64), AUTHOR),
+      ]).size,
+    ).toBe(0);
+  });
+});
+
+describe("eventAddress", () => {
+  it("computes the coordinate an `a` tag names", () => {
+    const article = signed(30023, AUTHOR, [["d", "my-article"]], 1000);
+    expect(eventAddress(article)).toBe(`30023:${AUTHOR}:my-article`);
+    // Written the same way `addressTag` writes it, so the two always agree.
+    expect(
+      deletedAddresses([signed(5, AUTHOR, [["a", eventAddress(article) as string]], 2000)]),
+    ).toEqual(new Set([`30023:${AUTHOR}:my-article`]));
+  });
+
+  it("has no coordinate for events that are not addressable", () => {
+    expect(eventAddress(note("1".repeat(64), AUTHOR))).toBeNull();
+  });
+});
+
+describe("summarizeMyActivity", () => {
+  it("prefers the lowest id when timestamps tie, as NIP-01 asks", () => {
+    // "In case of replaceable events with the same timestamp, the event with
+    // the lowest id (first in lexical order) should be retained." The sort here
+    // preferred the *highest* id, so two relays answering the same action in a
+    // different order kept different winners — and the comparator never
+    // returned `0`, which is not an ordering at all.
+    const targetId = "1".repeat(64);
+    const low = signed(7, ME, [["e", targetId]], 1000);
+    const high = { ...signed(7, ME, [["e", targetId]], 1000), id: "f".repeat(64) };
+    // Arrival order must not matter: the higher id first, then the lower.
+    const map = summarizeMyActivity([high, low]);
+    expect(map.get(targetId)?.react).toBe(low.id);
+    expect(summarizeMyActivity([low, high]).get(targetId)?.react).toBe(low.id);
   });
 });
 

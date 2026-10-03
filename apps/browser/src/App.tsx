@@ -51,7 +51,7 @@ import { resetDeleted, syncDeleted, isDeleted } from "./deleted.js";
 import { requestMyMutes, resetMyMutes } from "./muted.js";
 import { startLiveFeeds, watchProfileSubject } from "./live.js";
 import { adoptMyActivity, syncMyActivity } from "./my-actions.js";
-import { resetNotifications, useNotifications } from "./notifications-feed.js";
+import { ensureNotifications, resetNotifications, useNotifications } from "./notifications-feed.js";
 import { resetProfileFeed, openProfile } from "./profile-feed.js";
 import { resetProfiles } from "./profile.js";
 import { ProfileEditor } from "./components/ProfileEditor.jsx";
@@ -256,6 +256,13 @@ export function App() {
       // Action highlights are personal, and the relays are the source of
       // truth for what this key has already done.
       const self = pubkey();
+      // Re-establish whose notifications these are, in the same breath as the
+      // reset above. The view re-asserts it too, but effect order between here
+      // and there is not defined — and the reset was observed winning last on
+      // boot, which left the page permanently empty: no list, no bar, until
+      // the reader navigated away and back. Owning both halves here makes the
+      // outcome independent of that order.
+      if (self !== null) ensureNotifications(self);
       adoptMyActivity(self);
       // The deleted set belongs to whoever is reading now, so a new reader
       // starts from an empty one instead of inheriting the last one's.

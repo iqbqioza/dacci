@@ -9,8 +9,14 @@ import { createEmbeds } from "./embeds.js";
 /** A real key, so a fixture can carry a signature that actually verifies. */
 const signer = new NsecSigner("11".repeat(32));
 const AUTHOR = await signer.getPublicKey();
-const NOTE_ID = "b".repeat(64);
-const OTHER_ID = "c".repeat(64);
+/**
+ * Targets that are never resolved, so their ids are never checked. Anything a
+ * relay answers — or a feed already holds — carries a derived id instead,
+ * because the embed store checks that an answer's id is the hash of its own
+ * fields before it matches the lookup.
+ */
+const MISSING = "b".repeat(64);
+const ELSEWHERE = "c".repeat(64);
 
 const link = (id: string): string => `nostr:${encodeNote(id)}`;
 
@@ -32,16 +38,9 @@ async function inlineNote(content: string): Promise<NostrEvent> {
   });
 }
 
-function note(id: string, content: string): NostrEvent {
-  return {
-    id,
-    pubkey: AUTHOR,
-    created_at: 100,
-    kind: 1,
-    tags: [],
-    content,
-    sig: "s".repeat(128),
-  };
+function note(content: string): NostrEvent {
+  const base = { pubkey: AUTHOR, created_at: 100, kind: 1, tags: [], content };
+  return { ...base, id: computeEventId(base), sig: "s".repeat(128) };
 }
 
 /** A quote repost: the quoter's words, pointing at the note with q and e. */
@@ -72,7 +71,7 @@ afterEach(() => clearEventCache());
 describe("embed wiring", () => {
   it("reports no embed for a post that quotes nothing", () => {
     const embeds = createEmbeds(async () => [], FAST);
-    expect(embeds.useEmbed(note(NOTE_ID, "plain"))).toEqual({ event: null });
+    expect(embeds.useEmbed(note("plain"))).toEqual({ event: null });
   });
 
   it("shows nothing for a note a NIP-09 request has taken away", async () => {
@@ -80,9 +79,10 @@ describe("embed wiring", () => {
     // list: the note travels inside a repost's own content, and a plain link to
     // a `nostr:note1…` has its text fetched. Otherwise the author deletes their
     // post and it goes on being drawn inside everything that referenced it.
-    markDeleted([NOTE_ID]);
+    const gone = note("secret");
+    markDeleted([gone.id]);
     try {
-      const quoted = quoteRepost(NOTE_ID);
+      const quoted = quoteRepost(gone.id);
       // The repost carries the note inline, so no query is needed to draw it.
       const secret = await inlineNote("secret");
       const withBody = { ...quoted, content: JSON.stringify(secret) };
@@ -92,11 +92,11 @@ describe("embed wiring", () => {
       expect(embeds.useEmbed(quoted).event).toBeNull();
       expect(embeds.useEmbed(withBody).event).toBeNull();
       // And a note that merely links to it is not fetched either.
-      const linker = note(OTHER_ID, `look ${link(NOTE_ID)}`);
+      const linker = note(`look ${link(gone.id)}`);
       const asked: string[][] = [];
       const watching = createEmbeds(async (ids) => {
         asked.push(ids);
-        return [note(NOTE_ID, "secret")];
+        return [gone];
       }, FAST);
       watching.requestEmbeds([linker]);
       await tick(20);
@@ -108,9 +108,10 @@ describe("embed wiring", () => {
   });
 
   it("shows the note again once it is not deleted", async () => {
-    const embeds = createEmbeds(async () => [note(NOTE_ID, "live")], FAST);
-    markDeleted([NOTE_ID]);
-    const linker = note(OTHER_ID, `look ${link(NOTE_ID)}`);
+    const live = note("live");
+    const embeds = createEmbeds(async () => [live], FAST);
+    markDeleted([live.id]);
+    const linker = note(`look ${link(live.id)}`);
     embeds.requestEmbeds([linker]);
     await tick(20);
     expect(embeds.useEmbed(linker).event).toBeNull();
@@ -120,7 +121,7 @@ describe("embed wiring", () => {
     resetDeleted();
     embeds.requestEmbeds([linker]);
     await tick(20);
-    expect(embeds.useEmbed(linker).event?.id).toBe(NOTE_ID);
+    expect(embeds.useEmbed(linker).event?.id).toBe(live.id);
   });
 
   it("shows the note inline when the repost carries it as JSON", async () => {
@@ -150,25 +151,25 @@ describe("embed wiring", () => {
   it("reuses a note the feed already holds instead of querying", async () => {
     const query = vi.fn(async () => []);
     const embeds = createEmbeds(query, FAST);
-    const inner = note(NOTE_ID, "already loaded");
+    const inner = note("already loaded");
     rememberEvents([inner]);
-    embeds.requestEmbeds([quoteRepost(NOTE_ID)]);
+    embeds.requestEmbeds([quoteRepost(inner.id)]);
     await tick(20);
     expect(query).not.toHaveBeenCalled();
-    expect(embeds.useEmbed(quoteRepost(NOTE_ID)).event).toEqual(inner);
+    expect(embeds.useEmbed(quoteRepost(inner.id)).event).toEqual(inner);
   });
 
   it("resolves an unknown note over the network and then shows it", async () => {
-    const inner = note(NOTE_ID, "fetched from a relay");
+    const inner = note("fetched from a relay");
     const query = vi.fn(async () => [inner]);
     const embeds = createEmbeds(query, FAST);
-    const repost = quoteRepost(NOTE_ID);
+    const repost = quoteRepost(inner.id);
 
     embeds.requestEmbeds([repost]);
     // Before the reply lands the card shows a placeholder, not nothing.
     expect(embeds.useEmbedLoading(() => repost)()).toBe(true);
     await tick(30);
-    expect(query).toHaveBeenCalledWith([NOTE_ID]);
+    expect(query).toHaveBeenCalledWith([inner.id]);
     expect(embeds.useEmbed(repost).event).toEqual(inner);
     expect(embeds.useEmbedLoading(() => repost)()).toBe(false);
   });
@@ -176,21 +177,23 @@ describe("embed wiring", () => {
   it("batches a burst of reposts into one query", async () => {
     const query = vi.fn(async (_ids: string[]) => []);
     const embeds = createEmbeds(query, FAST);
+    const first = note("first");
+    const second = note("second");
     embeds.requestEmbeds([
-      quoteRepost(NOTE_ID),
-      { ...quoteRepost(OTHER_ID), id: "f".repeat(64) },
+      quoteRepost(first.id),
+      { ...quoteRepost(second.id), id: "f".repeat(64) },
     ]);
     await tick(20);
     expect(query).toHaveBeenCalledTimes(1);
     const asked = query.mock.calls[0]?.[0] ?? [];
-    expect([...asked].sort()).toEqual([NOTE_ID, OTHER_ID].sort());
+    expect([...asked].sort()).toEqual([first.id, second.id].sort());
   });
 
   it("stops asking once a note is resolved", async () => {
-    const inner = note(NOTE_ID, "resolved once");
+    const inner = note("resolved once");
     const query = vi.fn(async (_ids: string[]) => [inner]);
     const embeds = createEmbeds(query, FAST);
-    const repost = quoteRepost(NOTE_ID);
+    const repost = quoteRepost(inner.id);
     embeds.requestEmbeds([repost]);
     await tick(30);
     embeds.requestEmbeds([repost]);
@@ -201,7 +204,7 @@ describe("embed wiring", () => {
   it("stops reporting loading once no relay has the note", async () => {
     const query = vi.fn(async () => []);
     const embeds = createEmbeds(query, FAST);
-    const repost = quoteRepost(NOTE_ID);
+    const repost = quoteRepost(MISSING);
     embeds.requestEmbeds([repost]);
     await tick(30);
     // A note nobody has renders nothing rather than spinning forever.
@@ -209,10 +212,26 @@ describe("embed wiring", () => {
     expect(embeds.useEmbedLoading(() => repost)()).toBe(false);
   });
 
+  it("shows nothing for a relay answer that rewrote the note", async () => {
+    // The relay answered the requested id with different content. The id is
+    // the hash of the fields, so this is not the note that was asked for but
+    // another post wearing its id — and the card must not draw it as the
+    // quoted note.
+    const inner = note("the quoted note");
+    const forged = { ...inner, content: "attacker words" };
+    const query = vi.fn(async () => [forged]);
+    const embeds = createEmbeds(query, FAST);
+    const repost = quoteRepost(inner.id);
+    embeds.requestEmbeds([repost]);
+    await tick(30);
+    expect(query).toHaveBeenCalledWith([inner.id]);
+    expect(embeds.useEmbed(repost).event).toBeNull();
+  });
+
   it("shows nothing for a repost once the cache is reset", async () => {
-    const inner = note(NOTE_ID, "before reset");
+    const inner = note("before reset");
     const embeds = createEmbeds(async () => [inner], FAST);
-    const repost = quoteRepost(NOTE_ID);
+    const repost = quoteRepost(inner.id);
     embeds.requestEmbeds([repost]);
     await tick(30);
     expect(embeds.useEmbed(repost).event).toEqual(inner);
@@ -221,11 +240,11 @@ describe("embed wiring", () => {
   });
 
   it("embeds the repost target of a plain repost with no q tag", async () => {
-    const inner = note(NOTE_ID, "reposted without q");
+    const inner = note("reposted without q");
     const embeds = createEmbeds(async () => [inner], FAST);
     const repost: NostrEvent = {
-      ...quoteRepost(NOTE_ID, ""),
-      tags: [["e", NOTE_ID], ["p", AUTHOR]],
+      ...quoteRepost(inner.id, ""),
+      tags: [["e", inner.id], ["p", AUTHOR]],
     };
     embeds.requestEmbeds([repost]);
     await tick(30);
@@ -235,23 +254,23 @@ describe("embed wiring", () => {
 
 describe("quoting by link", () => {
   it("embeds a note the post links to without any NIP-18 tag", async () => {
-    const inner = note(NOTE_ID, "linked, not tagged");
+    const inner = note("linked, not tagged");
     const query = vi.fn(async () => [inner]);
     const embeds = createEmbeds(query, FAST);
-    const post = note("f".repeat(64), `read this ${link(NOTE_ID)}`);
+    const post = note(`read this ${link(inner.id)}`);
 
     embeds.requestEmbeds([post]);
     await tick(30);
-    expect(query).toHaveBeenCalledWith([NOTE_ID]);
+    expect(query).toHaveBeenCalledWith([inner.id]);
     expect(embeds.useEmbed(post).event).toEqual(inner);
   });
 
   it("reuses a linked note the feed already holds instead of querying", async () => {
     const query = vi.fn(async () => []);
     const embeds = createEmbeds(query, FAST);
-    const inner = note(NOTE_ID, "already in the cache");
+    const inner = note("already in the cache");
     rememberEvents([inner]);
-    const post = note("f".repeat(64), link(NOTE_ID));
+    const post = note(link(inner.id));
 
     embeds.requestEmbeds([post]);
     await tick(20);
@@ -260,11 +279,11 @@ describe("quoting by link", () => {
   });
 
   it("keeps the q tag as the embed when a post both links and tags", async () => {
-    const inner = note(NOTE_ID, "the tagged note");
+    const inner = note("the tagged note");
     const embeds = createEmbeds(async () => [inner], FAST);
     const post: NostrEvent = {
-      ...note("f".repeat(64), `see also ${link(OTHER_ID)}`),
-      tags: [["q", NOTE_ID]],
+      ...note(`see also ${link(ELSEWHERE)}`),
+      tags: [["q", inner.id]],
     };
 
     embeds.requestEmbeds([post]);
@@ -274,7 +293,7 @@ describe("quoting by link", () => {
 
   it("shows no placeholder for a link no relay can resolve", async () => {
     const embeds = createEmbeds(async () => [], FAST);
-    const post = note("f".repeat(64), link(NOTE_ID));
+    const post = note(link(MISSING));
 
     embeds.requestEmbeds([post]);
     await tick(30);
@@ -323,8 +342,8 @@ describe("the placeholder following the card it is on", () => {
     // post was asked about rather than merely that something was.
     const query = vi.fn(async () => []);
     const embeds = createEmbeds(query, FAST);
-    const quiet = quoteRepost(NOTE_ID);
-    const fetching = quoteRepost(OTHER_ID);
+    const quiet = quoteRepost(MISSING);
+    const fetching = quoteRepost(ELSEWHERE);
     // Only the second card's note was ever asked for.
     embeds.requestEmbeds([fetching]);
 

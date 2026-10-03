@@ -1,6 +1,11 @@
 import { authenticatedAnswer } from "./authored.js";
 import type { Filter, NostrEvent } from "dacci-nostr-nips";
-import { DELETION_KIND, deletedEventIds } from "dacci-nostr-nips";
+import {
+  DELETION_KIND,
+  deletedAddresses,
+  deletedEventIds,
+  eventAddress,
+} from "dacci-nostr-nips";
 import { createSignal } from "solid-js";
 import { getConnection } from "./nostr.js";
 import { useRelays } from "./relays.js";
@@ -20,6 +25,17 @@ import { useRelays } from "./relays.js";
  * them on every login.
  */
 const [deleted, setDeleted] = createSignal<ReadonlySet<string>>(new Set());
+/**
+ * The coordinates a NIP-09 deletion request has taken away.
+ *
+ * NIP-09 deletions name addressable events — long-form articles — with `a`
+ * tags carrying `kind:pubkey:d` rather than `e` tags, so the id set above
+ * never matches them. The two sets are kept side by side and consulted
+ * together, because a deletion is one request even when it names both kinds.
+ */
+const [deletedCoords, setDeletedCoords] = createSignal<ReadonlySet<string>>(
+  new Set(),
+);
 /**
  * Whose deletions these are, and a token for the read in flight.
  *
@@ -68,13 +84,45 @@ export function markDeleted(ids: Iterable<string>, signedAs?: string | null): vo
 }
 
 /**
+ * Takes coordinates away, which is what an `a` tag in a published deletion
+ * request does. Same ownership rule as `markDeleted`: the two sets describe
+ * one request, so one must not accept a write the other refuses.
+ */
+export function markDeletedAddresses(
+  coords: Iterable<string>,
+  signedAs?: string | null,
+): void {
+  if (signedAs !== undefined && owner !== null && signedAs !== owner) return;
+  setDeletedCoords((prev) => {
+    const next = new Set(prev);
+    let added = false;
+    for (const coord of coords) {
+      if (next.has(coord)) continue;
+      next.add(coord);
+      added = true;
+    }
+    return added ? next : prev;
+  });
+}
+/**
  * The events a list should show: the loaded ones minus the deleted. A view
  * that forgets this shows a post the reader deleted in another tab.
+ *
+ * Both reference shapes are consulted: an event is gone when its id was named
+ * by an `e` tag or its coordinate by an `a` tag. No feed renders addressable
+ * events today, so the second half has no production caller yet — but the
+ * filter is generic over events, and leaving half of NIP-09 out of the one
+ * choke point every list reads through would be the next such report.
  */
 export function withoutDeleted(events: NostrEvent[]): NostrEvent[] {
   const gone = deleted();
-  if (gone.size === 0) return events;
-  return events.filter((event) => !gone.has(event.id));
+  const goneCoords = deletedCoords();
+  if (gone.size === 0 && goneCoords.size === 0) return events;
+  return events.filter((event) => {
+    if (gone.has(event.id)) return false;
+    const address = eventAddress(event);
+    return address === null || !goneCoords.has(address);
+  });
 }
 
 /** Whether a post is the reader's own, which is what a deletion is for. */
@@ -149,6 +197,7 @@ export async function syncDeleted(pubkey: string): Promise<void> {
   // deletions to the next reader's feeds.
   if (generation !== readGeneration) return;
   markDeleted(deletedEventIds(events));
+  markDeletedAddresses(deletedAddresses(events));
 }
 
 /**
@@ -160,4 +209,5 @@ export function resetDeleted(): void {
   owner = null;
   readGeneration += 1;
   setDeleted(new Set<string>());
+  setDeletedCoords(new Set<string>());
 }

@@ -184,6 +184,13 @@ export class RelayConnection {
    */
   private authGateOpen = false;
   private authGateWaiters: Array<() => void> = [];
+  /**
+   * Which connection the gate belongs to. A timer armed for one socket must
+   * not open the gate for the next: after a drop `ensureSocket` closes the
+   * gate again for the fresh challenge, and a stale timer firing then would
+   * send REQ ahead of AUTH on an auth-required relay.
+   */
+  private authGateGeneration = 0;
   /** Set once the relay rejected us for auth, to re-arm the gate. */
   private authRequiredOnConnection = false;
   private readonly answeredChallenges = new Set<string>();
@@ -266,6 +273,7 @@ export class RelayConnection {
     this.socket = socket;
     // A fresh connection gets a fresh challenge, so the gate closes again.
     this.authGateOpen = false;
+    this.authGateGeneration += 1;
     this.authRequiredOnConnection = false;
     // And so the prompt budget starts over. The count is there to stop a relay
     // from asking for a signature once per challenge it invents; carried across
@@ -349,10 +357,23 @@ export class RelayConnection {
       return Promise.resolve();
     }
     return new Promise((resolve) => {
+      const generation = this.authGateGeneration;
       const timer = setTimeout(() => {
         this.authGateWaiters = this.authGateWaiters.filter((w) => w !== done);
-        this.openAuthGate();
-        resolve();
+        if (generation === this.authGateGeneration) {
+          this.openAuthGate();
+          resolve();
+          return;
+        }
+        // The connection turned over while parked: a drop and reconnect
+        // re-armed a fresh, closed gate for the new socket's own challenge.
+        // Resolving here would send this waiter out ahead of that challenge,
+        // and merely staying silent would strand it — no timer is armed for
+        // it in the new generation. So it parks again on the gate as it is
+        // now, with a fresh window, the way a query that arrived after the
+        // reconnect would. When the churn stops the new gate opens or times
+        // out on its own and releases it; `close()` releases it sooner.
+        void this.waitAuthGate(timeoutMs).then(resolve);
       }, budget);
       const done = () => {
         clearTimeout(timer);
@@ -736,6 +757,12 @@ export class RelayConnection {
     // And the ones waiting for the socket to open at all, which `failPending` does
     // not see: they are not on a sub or a publish, they are on the connection.
     this.failWaiters.splice(0).forEach((run) => run());
+    // And the ones parked on the NIP-42 gate. Draining `pendingSubs` answers the
+    // work that reached the gate, but a caller sitting in `waitAuthGate` is on
+    // neither list — closing to abandon work then left the spinner until the
+    // gate window lapsed. Releasing them here lets the `explicitClose` checks
+    // after the gate refuse at once instead.
+    this.authGateWaiters.splice(0).forEach((run) => run());
     this.socket?.close();
     this.socket = null;
     this.isOpen = false;

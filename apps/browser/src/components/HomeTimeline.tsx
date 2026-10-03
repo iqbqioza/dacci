@@ -3,13 +3,13 @@ import { createEffect, For, Show, untrack } from "solid-js";
 import { FeedTabs, type FeedTab } from "../feed-tabs.jsx";
 import {
   flushNewArrivals,
+  homeArrivalCount,
   loadMoreHome,
   noteBarVisibility,
   selectHomeTab,
   useHomeFeed,
 } from "../home-feed.js";
 import { retryWhilePending } from "../feed-retry.js";
-import { useFeedLive } from "../live.js";
 import { feedHash, navigate } from "../router.js";
 import { EventCard } from "./EventCard.jsx";
 
@@ -19,7 +19,6 @@ export function HomeTimeline(props: {
   onSelect: (event: NostrEvent) => void;
 }) {
   const feed = useHomeFeed();
-  const { buffered } = useFeedLive();
 
   // The URL is the single source of truth for the tab, so a shared link
   // lands on the tab it names and the back button walks the tab history.
@@ -42,7 +41,10 @@ export function HomeTimeline(props: {
   // in an active timeline. Only the measurement and the scroll move belong
   // untracked; they are the effect's own work, not its trigger.
   createEffect(() => {
-    const arriving = buffered().length > 0;
+    // What the bar would insert, not what the buffer holds: the flush dedups
+    // and the view filters by tab, mute and deletion, so the raw length is a
+    // promise the press cannot keep.
+    const arriving = homeArrivalCount() > 0;
     untrack(() => noteBarVisibility(arriving));
   });
 
@@ -60,13 +62,13 @@ export function HomeTimeline(props: {
         class="sticky top-0 z-20 bg-(--surface)"
       >
         <FeedTabs tab={feed.tab()} onSelect={onTab} />
-        <Show when={buffered().length > 0}>
+        <Show when={homeArrivalCount() > 0}>
           <button
             ref={feed.setBarRef}
             class="block w-full border-b border-(--line) px-4 py-3 text-left hover:bg-(--accent-soft)"
             onClick={flushNewArrivals}
           >
-            新着 {buffered().length} 件
+            新着 {homeArrivalCount()} 件
           </button>
         </Show>
       </div>

@@ -1,4 +1,10 @@
-import { emojisIn, isValidEventStructure, type Emoji, type NostrEvent } from "dacci-nostr-nips";
+import {
+  emojisIn,
+  hasValidId,
+  isValidEventStructure,
+  type Emoji,
+  type NostrEvent,
+} from "dacci-nostr-nips";
 
 /** NIP-01 kind 0 metadata, parsed from the JSON content. */
 export interface Profile {
@@ -244,8 +250,13 @@ export class ProfileStore {
   private async resolveBatch(authors: string[]): Promise<void> {
     let events: NostrEvent[] | null = null;
     try {
-      events = (await this.query(authors)).filter((event) =>
-        isValidEventStructure(event),
+      events = (await this.query(authors)).filter(
+        (event) =>
+          // Same attribution rule as the quote store: the id must be the hash
+          // of the fields, or a relay can put attacker words under anyone's
+          // name and avatar. Signature verification stays on the paths that
+          // act on the profile, for the same cost reason as elsewhere.
+          isValidEventStructure(event) && hasValidId(event),
       );
     } catch {
       // The batch was not answered. Everything in it stays unknown, so the

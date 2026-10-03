@@ -158,19 +158,41 @@ export function loadMoreNotifications(): void {
   void loadPage(false);
 }
 
+/**
+ * The buffered notifications the bar may claim, through the same gate the
+ * flush applies. A reader's own post carries a `p` tag naming them whenever
+ * they reply to themselves, repost themselves or answer themselves, and the
+ * relay indexes that like any other: without this their own post arrives as a
+ * notification about themselves.
+ */
+function arrivingNotifications(): NostrEvent[] {
+  const self = loadedFor;
+  return self === null
+    ? []
+    : useNotificationLive()
+        .buffered()
+        .filter((event) => isNotification(event, self));
+}
+
+/**
+ * How many cards pressing the bar would newly show.
+ *
+ * The bar used to count the raw buffer while the flush filtered it, so the
+ * count evaporated on press: the reader pressed "新着 2 件" and one card
+ * appeared, or none. Counting what the flush would insert — through the same
+ * filter, dedup and deletion — keeps the promise the bar makes.
+ */
+export function notificationArrivalCount(): number {
+  const plan = planFlush(arrivingNotifications(), events());
+  if (plan.added.length === 0) return 0;
+  const before = new Set(withoutDeleted(events()).map((event) => event.id));
+  return withoutDeleted(plan.events).filter((event) => !before.has(event.id))
+    .length;
+}
+
 /** Inserts buffered live notifications above the current first one. */
 export function flushNotificationArrivals(): void {
-  const self = loadedFor;
-  // The same guard the paginated path applies. A reader's own post carries a
-  // `p` tag naming them whenever they reply to themselves, repost themselves or
-  // answer themselves, and the relay indexes that like any other: without this
-  // their own post arrives as a notification about themselves.
-  const arriving =
-    self === null
-      ? []
-      : useNotificationLive()
-          .buffered()
-          .filter((event) => isNotification(event, self));
+  const arriving = arrivingNotifications();
   const plan = planFlush(arriving, events());
   preservingViewport(
     bars.listElement(),

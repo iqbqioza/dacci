@@ -12,10 +12,10 @@ import {
   flushNotificationArrivals,
   loadMoreNotifications,
   noteBarVisibility,
+  notificationArrivalCount,
   useNotifications,
 } from "../notifications-feed.js";
 import { retryWhilePending } from "../feed-retry.js";
-import { useNotificationLive } from "../live.js";
 import { useRelays } from "../relays.js";
 import { useSensitiveMode, type SensitiveMode } from "../sensitive.js";
 import { openProfileEditor } from "../profile-edit.js";
@@ -41,16 +41,17 @@ function newestFirst(a: NostrEvent, b: NostrEvent): number {
  * arrangement the home timeline already uses for its tab row.
  */
 export function NotificationArrivals() {
-  const { buffered } = useNotificationLive();
   const feed = useNotifications();
   return (
-    <Show when={buffered().length > 0}>
+    // What the flush would insert, through the same notification gate: the raw
+    // buffer holds the reader's own posts too, which the flush drops.
+    <Show when={notificationArrivalCount() > 0}>
       <button
         ref={feed.setBarRef}
         class="block w-full border-b border-(--line) bg-(--surface) px-4 py-3 text-left hover:bg-(--accent-soft)"
         onClick={flushNotificationArrivals}
       >
-        新着 {buffered().length} 件
+        新着 {notificationArrivalCount()} 件
       </button>
     </Show>
   );
@@ -62,7 +63,6 @@ export function NotificationsView(props: {
   const { pubkey } = useAuth();
   const relays = useRelays();
   const feed = useNotifications();
-  const { buffered } = useNotificationLive();
 
   // Live subscriptions run app-wide; this only seeds history the first time.
   onMount(() => {
@@ -87,7 +87,7 @@ export function NotificationsView(props: {
   // and runs once for the life of the page — which is what left every arriving
   // notification pushing the reader's post off the screen.
   createEffect(() => {
-    const arriving = pubkey() !== null && buffered().length > 0;
+    const arriving = pubkey() !== null && notificationArrivalCount() > 0;
     untrack(() => noteBarVisibility(arriving));
   });
 

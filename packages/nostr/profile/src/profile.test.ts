@@ -112,6 +112,29 @@ describe("ProfileStore", () => {
     store.clear();
   });
 
+  it("refuses a profile whose id is not the hash of its fields", async () => {
+    // A relay returning anyone's pubkey with rewritten metadata matches the
+    // author lookup, so the check that the id IS the hash is the attribution:
+    // without it the name and avatar under a real person's key are the
+    // attacker's choice.
+    const genuine = metaEvent(A, JSON.stringify({ name: "alice" }));
+    const forged = {
+      ...genuine,
+      content: JSON.stringify({
+        name: "mallory",
+        picture: "https://attacker.example/x.png",
+      }),
+    };
+    const query = vi.fn(async () => [forged]);
+    const store = new ProfileStore(query, { flushDelayMs: 1, maxAttempts: 0 });
+    store.request([A]);
+    await tick(20);
+    // Fetched, and refused: the relay answered, but nothing it said is adopted.
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(store.peek(A)).toBeNull();
+    store.clear();
+  });
+
   it("does not re-query a user whose batch is still in flight", async () => {
     let release = (): void => {};
     const gate = new Promise<void>((resolve) => {

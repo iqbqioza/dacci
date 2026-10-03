@@ -88,6 +88,40 @@ describe("deleted posts", () => {
     ]);
   });
 
+  it("hides an article a NIP-09 request names by coordinate", async () => {
+    // NIP-09 deletions of addressable events carry `a` tags, not `e` tags.
+    // Reading only the `e` tags collected this request and matched it against
+    // nothing, so the article stayed on screen after its author deleted it.
+    const coord = `30023:${ME}:my-article`;
+    const store = await withStore(async () => ({
+      failed: false,
+      events: [
+        signAs("me", {
+          created_at: 1000,
+          kind: 5,
+          tags: [["a", coord]],
+          content: "",
+        }),
+      ],
+    }));
+    await store.syncDeleted(ME);
+    const article = {
+      id: "c".repeat(64),
+      pubkey: ME,
+      created_at: 1,
+      kind: 30023,
+      tags: [["d", "my-article"]],
+      content: "x",
+      sig: "s".repeat(128),
+    };
+    const other = { ...article, id: "d".repeat(64), tags: [["d", "other"]] };
+    expect(store.withoutDeleted([article, other])).toEqual([other]);
+    // And the coordinates reset with the ids: the next reader must not inherit
+    // either half of the previous reader's deletions.
+    store.resetDeleted();
+    expect(store.withoutDeleted([article, other])).toEqual([article, other]);
+  });
+
   it("starts empty for the next reader", async () => {
     const store = await withStore(async () => ({
       failed: false,

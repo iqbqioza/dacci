@@ -287,6 +287,72 @@ describe("RelayConnection.query", () => {
     expect(seen).toEqual([1]);
   });
 
+  it("releases callers parked on the auth gate when it is closed", async () => {
+    // Closing is how a caller abandons work, and a caller sitting in
+    // `waitAuthGate` is on neither the sub list nor the publish list — so
+    // draining those two missed it, and the spinner stayed until the gate
+    // window lapsed. Releasing the waiters here lets the `explicitClose`
+    // checks after the gate refuse at once instead.
+    const socket = makeSocket();
+    const conn = new RelayConnection("wss://example", () => socket, {
+      authGateProbeMs: 0,
+    });
+    const query = conn.query({ kinds: [1] }, 60000);
+    // The challenge arrives before the socket opens, so the gate holds with
+    // the caller's own 60-second window rather than the probe's.
+    socket.peer(["AUTH", "challenge-1"]);
+    await new Promise((r) => setTimeout(r, 0));
+    conn.close();
+    const stillWaiting = "still waiting" as const;
+    const settled = await Promise.race([
+      query,
+      new Promise<typeof stillWaiting>((r) => setTimeout(() => r(stillWaiting), 1500)),
+    ]);
+    // Raced against a wait far shorter than the gate window, so a failure says
+    // the caller was never released rather than which waiter it was.
+    expect(settled).not.toBe(stillWaiting);
+    if (settled === stillWaiting) return;
+    expect(settled.failed).toBe(true);
+  });
+
+  it("does not spend a dropped socket's gate window on the next connection", async () => {
+    // The gate timer belongs to the connection that armed it. A drop and
+    // reconnect re-arms a fresh, closed gate for the new socket's own
+    // challenge, and the old timer firing then used to open it — so a query
+    // parked across the drop sent its REQ ahead of AUTH on an auth-required
+    // relay, and every other waiter skipped the challenge too.
+    const sockets = [makeSocket(), makeSocket()];
+    let dialled = 0;
+    const conn = new RelayConnection(
+      "wss://example",
+      () => sockets[dialled++ % sockets.length],
+      { authGateMs: 300, baseReconnectMs: 10 },
+    );
+    const query = conn.query({ kinds: [1] }, 60000);
+    sockets[0].peer(["AUTH", "challenge-1"]);
+    await new Promise((r) => setTimeout(r, 60));
+    // The socket drops mid-gate; the reconnect puts a new one in its place.
+    sockets[0].onclose?.();
+    await new Promise((r) => setTimeout(r, 60));
+    // The old window lapses while the new connection is current. Nothing may
+    // go out on it: the new gate is closed and its challenge unanswered.
+    await new Promise((r) => setTimeout(r, 350));
+    const sentOnNext = vi
+      .mocked(sockets[1].send)
+      .mock.calls.map((call) => JSON.parse(call[0])[0]);
+    expect(sentOnNext).not.toContain("REQ");
+    // And the parked query is still parked, not stranded: closing releases it.
+    conn.close();
+    const stillWaiting = "still waiting" as const;
+    const settled = await Promise.race([
+      query,
+      new Promise<typeof stillWaiting>((r) => setTimeout(() => r(stillWaiting), 1500)),
+    ]);
+    expect(settled).not.toBe(stillWaiting);
+    if (settled === stillWaiting) return;
+    expect(settled.failed).toBe(true);
+  });
+
   it("answers a NIP-42 challenge and completes on EOSE", async () => {
     const socket = makeSocket();
     const authEvent = relayEvent({ pubkey: "b".repeat(64), created_at: 1000, kind: 22242, tags: [["relay", "wss://example"]], content: "" });

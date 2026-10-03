@@ -10,6 +10,7 @@ import { RichText } from "./RichText.jsx";
 import { FeedTabs, type FeedTab } from "../feed-tabs.jsx";
 import {
   flushProfileArrivals,
+  profileArrivalCount,
   loadMoreProfile,
   noteBarVisibility,
   openProfile,
@@ -136,7 +137,7 @@ export function ProfilePage(props: {
 }) {
   const { pubkey: self } = useAuth();
   const feed = useProfileFeed();
-  const { buffered, subject } = useProfileLive();
+  const { subject } = useProfileLive();
   const subject0 = (): string | null =>
     props.invalid === true ? null : (props.pubkey ?? self() ?? null);
 
@@ -177,7 +178,7 @@ export function ProfilePage(props: {
     // The row is only ever shown for the profile on screen, so the two have to
     // agree: a buffered post from somebody else must not make this profile's list
     // jump.
-    const arriving = subject() === feed.subject() && buffered().length > 0;
+    const arriving = subject() === feed.subject() && profileArrivalCount() > 0;
     untrack(() => noteBarVisibility(arriving));
   });
 
@@ -205,13 +206,13 @@ export function ProfilePage(props: {
           </div>
           <div ref={feed.setHeaderRef} class="sticky top-0 z-30 bg-(--surface)">
             <FeedTabs tab={feed.tab()} onSelect={onTab} />
-            <Show when={subject() === author() && buffered().length > 0}>
+            <Show when={subject() === author() && profileArrivalCount() > 0}>
               <button
                 ref={feed.setBarRef}
                 class="block w-full border-b border-(--line) px-4 py-3 text-left hover:bg-(--accent-soft)"
                 onClick={flushProfileArrivals}
               >
-                新着 {buffered().length} 件
+                新着 {profileArrivalCount()} 件
               </button>
             </Show>
           </div>

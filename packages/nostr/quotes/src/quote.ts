@@ -1,4 +1,5 @@
 import {
+  hasValidId,
   isHex64,
   isValidEventStructure,
   type NostrEvent,
@@ -141,8 +142,14 @@ export class EmbedStore {
   private async resolveBatch(ids: string[]): Promise<void> {
     let events: NostrEvent[] = [];
     try {
-      events = (await this.query(ids)).filter((event) =>
-        isValidEventStructure(event),
+      events = (await this.query(ids)).filter(
+        (event) =>
+          // Structure first, then identity: a relay returning the requested id
+          // with rewritten content matches the lookup below, so the check that
+          // the id is the hash of the fields is the attribution itself. The id
+          // check is one sha256 (~5µs); the signature is not verified here, as
+          // on the relay path, for the same cost reason.
+          isValidEventStructure(event) && hasValidId(event),
       );
     } catch {
       events = [];

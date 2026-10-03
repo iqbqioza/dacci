@@ -1,5 +1,6 @@
 import type { UnsignedEvent } from "./auth.js";
 import {
+  compareEvents,
   hasValidId,
   hasValidSignature,
   isHex64,
@@ -401,6 +402,42 @@ function targets(event: NostrEvent): string[] {
 }
 
 /**
+ * The coordinate of an addressable event (`kind:pubkey:d`), or null.
+ *
+ * NIP-09 deletions name addressable events with `a` tags rather than `e`
+ * tags, so matching a deletion against an event id alone never fires for
+ * them. The coordinate is computed the same way `addressTag` writes it, so the
+ * two always agree.
+ */
+export function eventAddress(event: NostrEvent): string | null {
+  if (event.kind !== 30023 && event.kind !== 30024) return null;
+  const d = event.tags.find((tag) => tag[0] === "d")?.[1];
+  if (d === undefined) return null;
+  return `${event.kind}:${event.pubkey}:${d}`;
+}
+
+/**
+ * The coordinates a reader's own NIP-09 deletions name.
+ *
+ * NIP-09: deletion events carry "one or more `e` **or `a`** tags". Reading
+ * only the `e` tags meant a deletion of an addressable event — a long-form
+ * article, which NIP-09 deletes by coordinate — was collected and then matched
+ * against nothing, so it never took effect.
+ */
+export function deletedAddresses(events: NostrEvent[]): Set<string> {
+  const deleted = new Set<string>();
+  for (const event of events) {
+    if (event.kind !== DELETION_KIND) continue;
+    for (const tag of event.tags) {
+      if (tag[0] === "a" && typeof tag[1] === "string" && tag[1] !== "") {
+        deleted.add(tag[1]);
+      }
+    }
+  }
+  return deleted;
+}
+
+/**
  * The event ids a reader's own NIP-09 deletions name.
  *
  * A deletion request does not remove anything on its own: relays that honour
@@ -436,14 +473,12 @@ export function summarizeMyActivity(events: NostrEvent[]): MyActivityMap {
     return current;
   };
 
-  // Newest first, so the last write for a post wins.
-  const ordered = [...events].sort((a, b) =>
-    a.created_at !== b.created_at
-      ? b.created_at - a.created_at
-      : a.id < b.id
-        ? 1
-        : -1,
-  );
+  // Newest first, so the last write for a post wins. NIP-01 breaks timestamp
+  // ties toward the lowest id, and the comparator here did the opposite — it
+  // preferred the *highest* id — while also never returning `0`, which is not
+  // an ordering. Both made the surviving action nondeterministic in exactly
+  // the case relays produce on purpose.
+  const ordered = [...events].sort(compareEvents);
 
   for (const event of ordered) {
     if (deleted.has(event.id)) continue;

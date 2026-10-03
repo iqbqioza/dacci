@@ -1,5 +1,6 @@
 import { signedBy } from "./authored.js";
 import {
+  compareEvents,
   CONTACTS_KIND,
   isHex64,
   normalizeRelayUrl,
@@ -504,13 +505,13 @@ export function clearFeed(): void {
   removeStorage(FEED_STORAGE_KEY);
 }
 
-function newestFirst(a: NostrEvent, b: NostrEvent): number {
-  return a.created_at !== b.created_at
-    ? b.created_at - a.created_at
-    : a.id < b.id
-      ? -1
-      : 1;
-}
+/**
+ * Newest first, with NIP-01's tie-break: on equal timestamps the lowest id
+ * comes first. `compareEvents` is a total order — the hand-written comparator
+ * here returned `1` for two fully equal events, which is not an ordering at
+ * all, and `Array.sort` on a non-order is free to arrange anything.
+ */
+const newestFirst = compareEvents;
 
 /**
  * Logged-in feed: fetch the NIP-02 follow list (kind 3) and filter the
