@@ -94,6 +94,13 @@ describe("withFollowed", () => {
     expect(withFollowed(tags, ALICE, false)).toEqual([["p", BOB]]);
   });
 
+  it("refuses to follow what is not a pubkey, and still unfollows it", () => {
+    const tags = contactTags(makeContactsEvent([["p", ALICE]]));
+    expect(withFollowed(tags, "not-hex", true)).toBe(tags);
+    const dirty: string[][] = [["p", ALICE], ["p", "not-hex"]];
+    expect(withFollowed(dirty, "not-hex", false)).toEqual([["p", ALICE]]);
+  });
+
   it("keeps the relay hint of the person who is already followed", () => {
     const tags = contactTags(
       makeContactsEvent([["p", ALICE, "wss://relay.example", "alice"]]),

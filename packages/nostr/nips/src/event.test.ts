@@ -4,6 +4,7 @@ import {
   computeEventId,
   hasValidId,
   isValidEventStructure,
+  pubkeyFor,
   type NostrEvent,
 } from "../src/event.js";
 
@@ -64,5 +65,26 @@ describe("compareEvents", () => {
     expect(sorted[sorted.length - 1]).toBe(older);
     const [first, second] = [a, b].sort(compareEvents);
     expect(first.id < second.id).toBe(true);
+  });
+});
+
+describe("pubkeyFor", () => {
+  it("derives the pubkey a secret signs under", () => {
+    // Agrees with NsecSigner, which gates the same way.
+    expect(pubkeyFor("11".repeat(32))).toHaveLength(64);
+  });
+
+  it("refuses anything but 32-byte lowercase hex, like NsecSigner", () => {
+    for (const bad of [
+      "",
+      "zz".repeat(32),
+      "11".repeat(31),
+      "AA".repeat(32),
+      "11".repeat(32) + "11",
+    ]) {
+      expect(() => pubkeyFor(bad)).toThrow(
+        "secret key must be 32-byte lowercase hex",
+      );
+    }
   });
 });

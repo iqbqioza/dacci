@@ -24,6 +24,11 @@ export interface EmbedStoreOptions {
   baseRetryMs?: number;
   maxRetryMs?: number;
   maxAttempts?: number;
+  /**
+   * How long one batch may take before it counts as failed. Past every
+   * production timeout on purpose: this is the backstop, not the budget.
+   */
+  batchTimeoutMs?: number;
   /** Called whenever the cache changes, so views can re-render. */
   onChange?: () => void;
 }
@@ -38,6 +43,25 @@ type Entry =
  * that quotes the same note 50 times costs one query, and a note no relay
  * has does not block the posts around it.
  */
+
+/**
+ * A batch that never comes back must not park the store. Every production
+ * query settles on its own — relay timeouts at each layer — but the store
+ * cannot prove that about the function it was handed, and one stuck promise
+ * held `inFlight` forever: every later author queued and never resolved for
+ * the rest of the session. Past the deadline the batch fails like any other
+ * failure, which the retry below already knows how to handle.
+ */
+function withBatchTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("batch timed out")), ms);
+  });
+  return Promise.race([work, timeout]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
+
 export class EmbedStore {
   private readonly entries = new Map<string, Entry>();
   private readonly queued = new Set<string>();
@@ -50,6 +74,7 @@ export class EmbedStore {
   private readonly baseRetryMs: number;
   private readonly maxRetryMs: number;
   private readonly maxAttempts: number;
+  private readonly batchTimeoutMs: number;
   private readonly onChange: (() => void) | undefined;
 
   constructor(
@@ -61,6 +86,7 @@ export class EmbedStore {
     this.baseRetryMs = options.baseRetryMs ?? 3000;
     this.maxRetryMs = options.maxRetryMs ?? 60000;
     this.maxAttempts = options.maxAttempts ?? 3;
+    this.batchTimeoutMs = options.batchTimeoutMs ?? 15000;
     this.onChange = options.onChange;
   }
 
@@ -142,7 +168,7 @@ export class EmbedStore {
   private async resolveBatch(ids: string[]): Promise<void> {
     let events: NostrEvent[] = [];
     try {
-      events = (await this.query(ids)).filter(
+      events = (await withBatchTimeout(this.query(ids), this.batchTimeoutMs)).filter(
         (event) =>
           // Structure first, then identity: a relay returning the requested id
           // with rewritten content matches the lookup below, so the check that

@@ -103,6 +103,19 @@ describe("withMuted", () => {
     ]);
   });
 
+  it("refuses to mute what is not a pubkey, and still unmutes it", () => {
+    // NIP-01 `p` values are 32-byte lowercase hex. Appending anything else
+    // publishes a mute no other client honors while this one shows it as
+    // done, so the write is refused and the list comes back untouched.
+    const tags = [["p", ALICE]];
+    expect(withMuted(tags, "not-hex", true)).toBe(tags);
+    expect(withMuted(tags, "ABC", true)).toBe(tags);
+    // Removing is exempt: a malformed entry already in the list is garbage no
+    // client honors, and refusing to drop it would keep it there for good.
+    const dirty: string[][] = [["p", ALICE], ["p", "not-hex"]];
+    expect(withMuted(dirty, "not-hex", false)).toEqual([["p", ALICE]]);
+  });
+
   it("drops every entry for someone unmuted, because twice still mutes", () => {
     const tags = [["p", ALICE], ["p", BOB], ["p", ALICE]];
     expect(withMuted(tags, ALICE, false)).toEqual([["p", BOB]]);

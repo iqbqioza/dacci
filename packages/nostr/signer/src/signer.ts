@@ -2,6 +2,8 @@ import { schnorr } from "@noble/curves/secp256k1";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
 import {
   decodeNsec as decodeNsecEntity,
+  hasValidId,
+  hasValidSignature,
   isHex64,
   signAuthEvent,
   signEvent,
@@ -87,7 +89,24 @@ export class Nip07Signer implements Signer {
   async signEvent(template: UnsignedEvent): Promise<NostrEvent> {
     const provider = getProvider();
     if (provider === null) throw new Error("NIP-07 extension not found");
-    return provider.signEvent(template);
+    const signed = await provider.signEvent(template);
+    // What comes back is published under the reader's name, so it is checked
+    // to be the template that was asked for — same fields, valid id, valid
+    // signature. A buggy or hostile extension handing back another event
+    // would otherwise go out as the reader's own words, and nothing
+    // downstream could tell: the id would be valid for *those* fields.
+    if (
+      signed.pubkey !== template.pubkey ||
+      signed.kind !== template.kind ||
+      signed.created_at !== template.created_at ||
+      signed.content !== template.content ||
+      JSON.stringify(signed.tags) !== JSON.stringify(template.tags) ||
+      !hasValidId(signed) ||
+      !hasValidSignature(signed)
+    ) {
+      throw new Error("extension returned an event that does not match");
+    }
+    return signed;
   }
 
   async signAuth(challenge: string, relayUrl: string): Promise<NostrEvent> {

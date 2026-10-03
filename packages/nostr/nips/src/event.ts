@@ -110,8 +110,16 @@ export function hasValidSignature(event: NostrEvent): boolean {
  * The other half of `hasValidSignature`: given the key, the pubkey the events
  * will carry. Kept here so a caller that holds a key never has to reach for
  * `@noble/curves` itself to name the author it is signing as.
+ *
+ * Gated like `NsecSigner`: anything but 32-byte lowercase hex is refused up
+ * front with the same words, rather than throwing whatever the curve code
+ * throws — or, for an uppercase key, succeeding with a pubkey the rest of the
+ * pipeline treats as foreign.
  */
 export function pubkeyFor(secretKeyHex: string): string {
+  if (!/^[0-9a-f]{64}$/.test(secretKeyHex)) {
+    throw new Error("secret key must be 32-byte lowercase hex");
+  }
   return bytesToHex(schnorr.getPublicKey(hexToBytes(secretKeyHex)));
 }
 

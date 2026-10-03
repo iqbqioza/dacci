@@ -57,6 +57,10 @@ export function withFollowed(
   pubkey: string,
   followed: boolean,
 ): string[][] {
+  // Same refusal as the mute list: a non-hex `p` value publishes a follow no
+  // other client honors while this one shows it as done. Removal is exempt,
+  // as there: dropping garbage is hygiene.
+  if (followed && !isHex64(pubkey)) return tags;
   const already = followsIn(tags, pubkey);
   // Someone already in the list keeps their place in it and their relay hint.
   if (followed && already) return tags;

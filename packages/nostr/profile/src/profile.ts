@@ -52,6 +52,11 @@ export interface ProfileStoreOptions {
   baseRetryMs?: number;
   maxRetryMs?: number;
   maxAttempts?: number;
+  /**
+   * How long one batch may take before it counts as failed. Past every
+   * production timeout on purpose: this is the backstop, not the budget.
+   */
+  batchTimeoutMs?: number;
   /** Called whenever the cache changes, so views can re-render. */
   onChange?: () => void;
 }
@@ -120,6 +125,25 @@ export function profileLabel(profile: Profile | null): string | null {
  * never ask twice for a user that is already loaded or in flight, and push
  * failures onto a retry queue that is retried in batches with backoff.
  */
+
+/**
+ * A batch that never comes back must not park the store. Every production
+ * query settles on its own — relay timeouts at each layer — but the store
+ * cannot prove that about the function it was handed, and one stuck promise
+ * held `inFlight` forever: every later author queued and never resolved for
+ * the rest of the session. Past the deadline the batch fails like any other
+ * failure, which the retry below already knows how to handle.
+ */
+function withBatchTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("batch timed out")), ms);
+  });
+  return Promise.race([work, timeout]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
+
 export class ProfileStore {
   private readonly entries = new Map<string, Entry>();
   private readonly queued = new Set<string>();
@@ -132,6 +156,7 @@ export class ProfileStore {
   private readonly baseRetryMs: number;
   private readonly maxRetryMs: number;
   private readonly maxAttempts: number;
+  private readonly batchTimeoutMs: number;
   private readonly onChange: (() => void) | undefined;
 
   constructor(
@@ -143,6 +168,7 @@ export class ProfileStore {
     this.baseRetryMs = options.baseRetryMs ?? 3000;
     this.maxRetryMs = options.maxRetryMs ?? 60000;
     this.maxAttempts = options.maxAttempts ?? 5;
+    this.batchTimeoutMs = options.batchTimeoutMs ?? 15000;
     this.onChange = options.onChange;
   }
 
@@ -250,7 +276,7 @@ export class ProfileStore {
   private async resolveBatch(authors: string[]): Promise<void> {
     let events: NostrEvent[] | null = null;
     try {
-      events = (await this.query(authors)).filter(
+      events = (await withBatchTimeout(this.query(authors), this.batchTimeoutMs)).filter(
         (event) =>
           // Same attribution rule as the quote store: the id must be the hash
           // of the fields, or a relay can put attacker words under anyone's
@@ -265,9 +291,14 @@ export class ProfileStore {
     }
 
     if (events !== null) {
-      // Replaceable event: the newest metadata per pubkey wins.
+      // Replaceable event: the newest metadata per pubkey wins. Only kind 0
+      // competes: a relay answering extra kinds for the author — a newer kind
+      // 1 beside the real kind 0 — used to win the recency race, and the
+      // profile that was right there went down the `failOnce` retry path
+      // instead of loading.
       const newest = new Map<string, NostrEvent>();
       for (const event of events) {
+        if (event.kind !== 0) continue;
         const current = newest.get(event.pubkey);
         if (
           current === undefined ||

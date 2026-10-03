@@ -158,6 +158,33 @@ describe("EmbedStore", () => {
     store.clear();
   });
 
+  it("gives up on a query that never settles, and stays usable", async () => {
+    // A batch with no deadline held `inFlight` until the query answered, so
+    // one stuck promise parked every later id for the rest of the session.
+    // Past the deadline the batch fails like any other failure.
+    let calls = 0;
+    const query = vi.fn(async (ids: string[]) => {
+      calls += 1;
+      if (calls === 1) await new Promise(() => undefined);
+      return answer(ids);
+    });
+    const store = new EmbedStore(query, {
+      flushDelayMs: 1,
+      batchTimeoutMs: 30,
+      maxAttempts: 2,
+      baseRetryMs: 10,
+      maxRetryMs: 20,
+    });
+    store.request([NOTE_A.id]);
+    await tick(120);
+    // The stuck batch failed on the deadline, the retry went out on its own,
+    // and the note loaded. Without the deadline the first query would still
+    // be out and nothing after it would ever resolve.
+    expect(query.mock.calls.length).toBeGreaterThan(1);
+    expect(store.peek(NOTE_A.id)?.content).toBe("a");
+    store.clear();
+  });
+
   it("survives a query that throws", async () => {
     const query = vi.fn(async () => {
       throw new Error("relay down");

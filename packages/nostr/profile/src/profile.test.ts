@@ -340,6 +340,30 @@ describe("an answer that is not a profile", () => {
     expect(parseProfile(metaEvent(A, "not json at all"))).toBeNull();
   });
 
+  it("gives up on a query that never settles, and stays usable", async () => {
+    // Same backstop as the quote store: one stuck batch held `inFlight`
+    // forever, and every later author queued behind it for the session.
+    let calls = 0;
+    const query = vi.fn(async (authors: string[]) => {
+      calls += 1;
+      if (calls === 1) await new Promise<NostrEvent[]>(() => undefined);
+      return [metaEvent(A, JSON.stringify({ name: "a" }))];
+    });
+    const store = new ProfileStore(query, {
+      flushDelayMs: 1,
+      batchTimeoutMs: 30,
+      maxAttempts: 5,
+      baseRetryMs: 1,
+      maxRetryMs: 2,
+    });
+    store.request([A]);
+    await tick(80);
+    // Not parked: the retry went out and the profile loaded.
+    expect(query.mock.calls.length).toBeGreaterThan(1);
+    expect(store.peek(A)?.name).toBe("a");
+    store.clear();
+  });
+
   it("does not resolve an author whose profile it merely failed to read", async () => {
     // The dangerous half. "Answered with something unparseable" and "this author
     // has no profile" are different facts, and the store kept only one of them.
@@ -354,6 +378,35 @@ describe("an answer that is not a profile", () => {
     await tick(40);
     expect(store.peek(A)).toBeNull();
     expect(store.resolved(A)).toBe(false);
+    store.clear();
+  });
+
+  it("does not let a newer other-kind event beat the author's kind 0", async () => {
+    // A relay answering extra kinds for the author — a newer kind 1 beside
+    // the real kind 0 — used to win the recency race, and the profile that
+    // was right there went down the retry path instead of loading.
+    const kind0 = metaEvent(A, JSON.stringify({ name: "alice" }), 100);
+    // Valid in every way except it is not a profile: the kind filter, not the
+    // id check, is what must refuse it.
+    const noiseBase = {
+      pubkey: A,
+      created_at: 200,
+      kind: 1,
+      tags: [],
+      content: "hi",
+    };
+    const noise = {
+      ...noiseBase,
+      id: computeEventId(noiseBase),
+      sig: "s".repeat(128),
+    };
+    const store = new ProfileStore(async () => [noise, kind0], {
+      flushDelayMs: 1,
+    });
+    store.request([A]);
+    await tick(20);
+    expect(store.peek(A)?.name).toBe("alice");
+    expect(store.resolved(A)).toBe(true);
     store.clear();
   });
 

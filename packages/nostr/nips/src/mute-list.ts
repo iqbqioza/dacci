@@ -53,6 +53,14 @@ export function withMuted(
   pubkey: string,
   muted: boolean,
 ): string[][] {
+  // NIP-01 `p` values are 32-byte lowercase hex, and relays ignore entries
+  // that are not. Writing one anyway publishes a list that looks muted here —
+  // `mutedIn` reads whatever is written — and is silently ineffective
+  // everywhere else, so the reader and every other client disagree about who
+  // is muted. Refused instead, which keeps local and global state the same.
+  // Removing needs no such gate: dropping a malformed entry is hygiene, and
+  // refusing to would leave garbage no client honors in the list for good.
+  if (muted && !isHex64(pubkey)) return tags;
   if (muted && mutedIn(tags, pubkey)) return tags;
   const rest = tags.filter((tag) => !(tag[0] === "p" && tag[1] === pubkey));
   return muted ? [...rest, ["p", pubkey]] : rest;
