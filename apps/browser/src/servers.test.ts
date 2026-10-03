@@ -727,6 +727,56 @@ describe("publishServers", () => {
     ]);
   });
 
+  it("does not start a duplicate round when accounts switch mid-read", async () => {
+    // A's round is out; B signs in and starts its own. A's round settling
+    // afterwards used to clear B's in-flight guard along with its own, so the
+    // next call started a duplicate round while B's was still going — two
+    // relay rounds for one list.
+    let who: string = READER;
+    vi.resetModules();
+    vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => who }) }));
+    vi.doMock("./compose.js", () => ({ publishEvent: async () => null }));
+    let releaseA!: () => void;
+    let releaseB!: () => void;
+    const gateA = new Promise<void>((resolve) => {
+      releaseA = resolve;
+    });
+    const gateB = new Promise<void>((resolve) => {
+      releaseB = resolve;
+    });
+    let queries = 0;
+    vi.doMock("./nostr.js", () => ({
+      getConnection: () => ({
+        url: "wss://read.example",
+        query: async () => {
+          queries += 1;
+          const n = queries;
+          // Latched per query: re-reading the counter after an await sees
+          // whatever started while this one was gated.
+          if (n === 1) await gateA;
+          if (n === 2) await gateB;
+          return { failed: false, events: [] };
+        },
+      }),
+    }));
+    vi.doMock("./relays.js", () => ({
+      useRelays: () => ({ readRelays: () => ["wss://read.example"] }),
+    }));
+    const store = await import("./servers.js");
+    const readingA = store.loadServers();
+    await new Promise((r) => setTimeout(r, 10));
+    who = OTHER;
+    const readingB = store.loadServers();
+    await new Promise((r) => setTimeout(r, 10));
+    releaseA();
+    await readingA;
+    // B's round is still out: this joins it rather than starting a third.
+    const readingC = store.loadServers();
+    releaseB();
+    await Promise.all([readingB, readingC]);
+    expect(queries).toBe(2);
+  });
+
   it("publishes nothing when the reader is not signed in", async () => {
     const store = await freshStore();
     store.addServer("https://files.example");

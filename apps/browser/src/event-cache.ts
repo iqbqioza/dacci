@@ -107,6 +107,11 @@ export async function fetchEventById(
   // the whole deadline after an answer that arrived in twenty milliseconds.
   if (deadline !== undefined) clearTimeout(deadline);
 
+  // A `null` here is deliberately ambiguous: every relay answered empty, or the
+  // deadline passed first. Telling those apart would need the deadline to wait
+  // for the stragglers, which is what the deadline exists not to do — and the
+  // page cannot act on the difference anyway. What it can do is keep a late
+  // answer, which the `answers` continuation below does.
   if (winner !== null) {
     rememberEvents([winner]);
     return winner;

@@ -15,15 +15,37 @@ export type RelayMessage =
   | ["NOTICE", string]
   | ["AUTH", string];
 
+/**
+ * Whether a parsed JSON value is a relay message. Checks shape as well as
+ * the type word: a bare `["EVENT"]` used to satisfy this guard while promising
+ * an event at index 2, so every direct consumer indexed `undefined`.
+ *
+ * The optional tails stay optional: NIP-01 leaves the `CLOSED` reason and the
+ * `OK` message off whenever there is nothing to say, and relays do omit them.
+ */
 export function isRelayMessage(value: unknown): value is RelayMessage {
   if (!Array.isArray(value) || value.length === 0) return false;
   const [type] = value as [string];
-  return (
-    type === "EVENT" ||
-    type === "OK" ||
-    type === "EOSE" ||
-    type === "CLOSED" ||
-    type === "NOTICE" ||
-    type === "AUTH"
-  );
+  switch (type) {
+    case "EVENT":
+      return value.length === 3 && typeof value[1] === "string";
+    case "OK":
+      return (
+        (value.length === 3 || value.length === 4) &&
+        typeof value[1] === "string"
+      );
+    case "EOSE":
+      return value.length === 2 && typeof value[1] === "string";
+    case "CLOSED":
+      return (
+        (value.length === 2 || value.length === 3) &&
+        typeof value[1] === "string"
+      );
+    case "NOTICE":
+      return value.length === 2;
+    case "AUTH":
+      return value.length === 2;
+    default:
+      return false;
+  }
 }
