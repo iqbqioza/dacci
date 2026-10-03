@@ -56,11 +56,18 @@ export function createTimeline(
   );
 }
 
-/** Kinds a home feed shows: text notes and NIP-22 comments. */
-export const HOME_KINDS = [1, 1111];
+/**
+ * Kinds a home feed shows: text notes, NIP-22 comments and NIP-18 reposts.
+ *
+ * Both repost kinds, because a repost is what an account publishes when it
+ * passes something on, and a timeline that asks for only kind 6 drops the
+ * generic reposts (kind 16) that NIP-18 asks for whenever what is reposted is
+ * not a note — a long-form article, a relay list, a reaction.
+ */
+export const HOME_KINDS = [1, 6, 16, 1111];
 
 /**
- * Kinds a profile shows: text notes and NIP-22 comments.
+ * Kinds a profile shows: text notes, NIP-22 comments and NIP-18 reposts.
  *
  * Shared with the profile's live stream on purpose. The two read the same
  * timeline, and a kind the paginator asks for but the stream does not is one
@@ -68,7 +75,7 @@ export const HOME_KINDS = [1, 1111];
  * a comment published after it was built has exactly one route in, and filtering
  * it out here left the "Replies and notes" tab short of it until a full reset.
  */
-export const PROFILE_KINDS = [1, 1111];
+export const PROFILE_KINDS = [1, 6, 16, 1111];
 
 /**
  * Home feed: own posts when signed in, otherwise the global firehose. Notes
@@ -98,7 +105,7 @@ export function createHomeTimeline(
  * Limitation: a repost that omits the `p` tag is not addressable and cannot
  * be discovered by any filter, so it is out of reach by protocol design.
  */
-export const NOTIFICATION_KINDS = [1, 6, 7, 1111];
+export const NOTIFICATION_KINDS = [1, 6, 7, 16, 1111];
 
 /**
  * Client-side guard: relays only answer what they indexed, so the merged

@@ -7,7 +7,7 @@ import {
   type RootRef,
   buildRepost,
   REACTION_KIND,
-  REPOST_KIND,
+  repostKindFor,
 } from "dacci-nostr-nips";
 import { createSignal } from "solid-js";
 import { getSigner, useAuth } from "./auth.jsx";
@@ -401,7 +401,11 @@ export async function toggleRepost(event: NostrEvent): Promise<boolean> {
               buildDeletion({
                 pubkey,
                 eventIds: [existing],
-                kinds: [REPOST_KIND],
+                // The kind the repost was published as, not a fixed one: NIP-18
+                // asks for kind 6 for a note and kind 16 for anything else, and a
+                // NIP-09 request that named the wrong `k` left the repost stored
+                // on every relay that takes the kind into account.
+                kinds: [repostKindFor(event.kind)],
                 createdAt: now(),
               }),
             );

@@ -17,6 +17,7 @@ import {
   deletedAddresses,
   deletedEventIds,
   eventAddress,
+  isRepost,
   mentionedPubkeys,
   quotedEventId,
   quoteTag,
@@ -102,6 +103,99 @@ function tagValue(
     (t) => t[0] === name && (marker === undefined || t[3] === marker),
   );
 }
+
+/**
+ * A published event from a template, so the readers that take a whole
+ * `NostrEvent` can be given one. Only the id and signature are filled in: they
+ * read tags and the kind, and a template is what a builder returns.
+ */
+function published(template: {
+  pubkey: string;
+  created_at: number;
+  kind: number;
+  tags: string[][];
+  content: string;
+}): NostrEvent {
+  const id = computeEventId(template);
+  return { ...template, id, sig: "s".repeat(128) };
+}
+
+describe("the two repost kinds", () => {
+  it("writes a note's repost as kind 6 and anything else as kind 16", () => {
+    // NIP-18: "Since kind 6 reposts are reserved for kind 1 contents, we use
+    // kind 16 as a 'generic repost', that can include any kind of event inside
+    // other than kind 1." Reposting a relay list or a long-form article as kind
+    // 6 told every other client it was a repost of a note, and nothing read it.
+    expect(buildRepost({ pubkey: ME, target, createdAt: AT }).kind).toBe(6);
+    for (const kind of [1111, 30023, 10002, 7]) {
+      const article = { ...target, kind, tags: kind === 30023 ? [["d", "x"]] : [] };
+      const event = buildRepost({ pubkey: ME, target: article, createdAt: AT });
+      expect(event.kind, `target kind ${kind}`).toBe(16);
+      // "kind 16 reposts SHOULD contain a `"k"` tag with the stringified kind
+      // number of the reposted event as its value."
+      expect(tagValue(event, "k")?.[1], `target kind ${kind}`).toBe(String(kind));
+      // And the rest of the layout is unchanged: `e` with a relay, `p` for the
+      // author, and the coordinate for an addressable target.
+      expect(tagValue(event, "e")?.[1]).toBe(article.id);
+      expect(tagValue(event, "p")?.[1]).toBe(AUTHOR);
+    }
+    // A note's repost carries no `k`: kind 6 is the kind, and a `k` on it would
+    // say the same thing twice with two numbers that can disagree.
+    expect(tagValue(buildRepost({ pubkey: ME, target, createdAt: AT }), "k")).toBeUndefined();
+  });
+
+  it("reads both kinds as the repost they are", () => {
+    // The reader has to be wider than the writer, because other clients write
+    // both: a timeline asking only for kind 6 drops every generic repost in it.
+    const article = { ...target, kind: 30023, tags: [["d", "x"]] };
+    const generic = published(
+      buildRepost({ pubkey: ME, target: article, createdAt: AT }),
+    );
+    for (const event of [
+      published(buildRepost({ pubkey: ME, target, createdAt: AT })),
+      generic,
+    ]) {
+      expect(isRepost(event)).toBe(true);
+      expect(repostedEventId(event)).toBe(article.id);
+      expect(embeddedEventId(event)).toBe(article.id);
+    }
+    // And a quote repost of either kind is read through its `q` tag first.
+    const quoted = published(
+      buildQuoteRepost({
+        pubkey: ME,
+        target,
+        text: "worth it",
+        createdAt: AT,
+      }),
+    );
+    expect(isRepost(quoted)).toBe(true);
+    expect(embeddedEventId(quoted)).toBe(target.id);
+    // An ordinary post is neither.
+    expect(isRepost(target)).toBe(false);
+    expect(isRepost({ ...target, kind: 1111 })).toBe(false);
+  });
+
+  it("counts a generic repost among the reader's own actions", () => {
+    // Otherwise a repost this client published with kind 16 came back from
+    // another tab with its highlight gone, and the row offered to do it again.
+    const article = { ...target, kind: 10002 };
+    const generic = signed(16, ME, [["e", target.id]], AT);
+    const map = summarizeMyActivity([generic]);
+    expect(map.get(target.id)?.repost).toBe(generic.id);
+    expect(article.kind).toBe(10002);
+  });
+
+  it("carries the reposted event when the caller has it", () => {
+    // NIP-18: the content is the stringified JSON of the reposted event, which
+    // is what lets a client draw the repost without asking any relay for it.
+    const json = JSON.stringify(target);
+    expect(
+      buildRepost({ pubkey: ME, target, createdAt: AT, content: json }).content,
+    ).toBe(json);
+    // And an empty content is still what a plain repost writes.
+    expect(buildRepost({ pubkey: ME, target, createdAt: AT }).content).toBe("");
+  });
+});
 
 describe("buildReply", () => {
   it("gives a reply to the root a single root tag", () => {

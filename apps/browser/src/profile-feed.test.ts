@@ -2,9 +2,11 @@ import { COMMENT_KIND, computeEventId, type NostrEvent } from "dacci-nostr-nips"
 import { describe, expect, it } from "vitest";
 import {
   classifyFeedPost,
+  isQuoteRepost,
   isReply,
   postsForTab,
   showsCommentLabel,
+  showsRepostLabel,
 } from "./feed-tabs.jsx";
 import {
   selectProfileTab,
@@ -49,6 +51,27 @@ describe("isReply", () => {
     expect(isReply(note(TOP, ME, [["t", PARENT], ["r", "wss://x"]]))).toBe(
       false,
     );
+  });
+
+  it("does not call a repost a reply", () => {
+    // NIP-18 asks a repost for the `e` and `p` tags the reply test reads, so
+    // every repost was a reply: labelled コメント, filed under "Replies and
+    // notes", and sitting on a page of conversation it is not part of. A repost
+    // answers nobody; it passes something on.
+    for (const kind of [6, 16]) {
+      const repost = note(TOP, ME, [["e", PARENT, "wss://x"], ["p", AUTHOR]], 1000, kind);
+      expect(isReply(repost), `kind ${kind}`).toBe(false);
+      expect(classifyFeedPost(repost), `kind ${kind}`).toBe("repost");
+      expect(showsRepostLabel(repost), `kind ${kind}`).toBe(true);
+      expect(showsCommentLabel(repost), `kind ${kind}`).toBe(false);
+    }
+    // A quote repost is one of them, and says so: it carries its own words.
+    const quote = note(TOP, ME, [["q", PARENT, "wss://x", AUTHOR], ["e", PARENT]], 1000, 6);
+    expect(isQuoteRepost(quote)).toBe(true);
+    expect(showsRepostLabel(quote)).toBe(true);
+    expect(isReply(quote)).toBe(false);
+    // A plain repost is not a quote repost.
+    expect(isQuoteRepost(note(TOP, ME, [["e", PARENT]], 1000, 6))).toBe(false);
   });
 });
 
@@ -114,6 +137,29 @@ describe("showsCommentLabel", () => {
 
   it("leaves a standalone note unlabelled", () => {
     expect(showsCommentLabel(top)).toBe(false);
+  });
+});
+
+describe("postsForTab, with reposts", () => {
+  const top = note(TOP, ME);
+  const reply = note(REPLY, ME, [["e", PARENT, "", "root", AUTHOR]]);
+  const repost = note(TOP, ME, [["e", PARENT, "wss://x"], ["p", AUTHOR]], 1000, 6);
+  const generic = note(REPLY, ME, [["e", PARENT, "wss://x"], ["p", AUTHOR], ["k", "10002"]], 1000, 16);
+
+  it("shows a repost in both tabs, the way Twitter shows a boost", () => {
+    // Neither tab was right on its own: Notes threw a repost away as not a
+    // note, and Replies and notes kept it labelled as a conversation it is not
+    // part of. It is not the author's own words and it answers nobody, so it
+    // belongs in both rather than in one.
+    for (const event of [repost, generic]) {
+      expect(postsForTab([top, event], "notes")).toEqual([top, event]);
+      expect(postsForTab([top, event], "replies")).toEqual([top, event]);
+    }
+  });
+
+  it("still keeps a reply in the replies tab only", () => {
+    expect(postsForTab([top, reply], "notes")).toEqual([top]);
+    expect(postsForTab([top, reply], "replies")).toEqual([top, reply]);
   });
 });
 

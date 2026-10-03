@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { isValidEventStructure } from "dacci-nostr-nips";
-import { formatDate, formatTime, shortId, UNKNOWN_TIME } from "./nostr.js";
+import {
+  formatDate,
+  formatTime,
+  HOME_KINDS,
+  NOTIFICATION_KINDS,
+  PROFILE_KINDS,
+  shortId,
+  UNKNOWN_TIME,
+} from "./nostr.js";
 
 describe("shortId", () => {
   it("abbreviates long ids", () => {
@@ -61,6 +69,29 @@ describe("formatDate", () => {
   it("uses the same guard", () => {
     expect(formatDate(9_999_999_999_999)).toBe(UNKNOWN_TIME);
     expect(formatDate(1_700_000_000).length).toBeGreaterThan(0);
+  });
+});
+
+describe("the kinds a feed asks for", () => {
+  it("asks for both repost kinds on every feed that shows a timeline", () => {
+    // NIP-18 has two: kind 6 for a note and kind 16 for anything else. A
+    // timeline asking only for kind 6 shows what an account reposts and drops
+    // what it passed on that was not a note — which is most of what a Nostr
+    // account actually reposts. These are the lists the three timelines are
+    // built from, so this is the filter the relays are asked.
+    for (const kinds of [HOME_KINDS, PROFILE_KINDS, NOTIFICATION_KINDS]) {
+      expect(kinds, JSON.stringify(kinds)).toContain(6);
+      expect(kinds, JSON.stringify(kinds)).toContain(16);
+    }
+    // And the posts a feed splits by tab are still asked for.
+    for (const kinds of [HOME_KINDS, PROFILE_KINDS]) {
+      expect(kinds).toContain(1);
+      expect(kinds).toContain(1111);
+    }
+    // Reactions stay a notification and not a timeline entry.
+    expect(NOTIFICATION_KINDS).toContain(7);
+    expect(HOME_KINDS).not.toContain(7);
+    expect(PROFILE_KINDS).not.toContain(7);
   });
 });
 

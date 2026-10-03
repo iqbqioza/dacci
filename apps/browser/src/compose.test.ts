@@ -5,12 +5,12 @@ const ME = "1".repeat(64);
 const OTHER = "2".repeat(64);
 const POST = "a".repeat(64);
 
-function post(pubkey: string): NostrEvent {
+function post(pubkey: string, kind = 1): NostrEvent {
   return {
     id: POST,
     pubkey,
     created_at: 1700000000,
-    kind: 1,
+    kind,
     tags: [],
     content: "x",
     sig: "s".repeat(128),
@@ -181,6 +181,31 @@ describe("reposting and reacting", () => {
     expect(await compose.toggleReaction(target)).toBe(true);
     // Once, then a NIP-09 taking it back.
     expect(published.map((e) => (e as { kind: number }).kind)).toEqual([7, 5]);
+  });
+
+  it("writes a note's repost as kind 6 and anything else as kind 16", async () => {
+    // NIP-18 reserves kind 6 for kind 1 contents and asks for kind 16 for
+    // everything else, and the NIP-09 that takes it back has to name the kind it
+    // published — a request naming 6 for a kind 16 repost leaves it stored.
+    const compose = await import("./compose.js");
+    const actions = await import("./my-actions.js");
+    actions.adoptMyActivity(ME);
+    const note = post(OTHER, 1);
+    expect(await compose.toggleRepost(note)).toBe(true);
+    expect((published[0] as { kind: number }).kind).toBe(6);
+    // Undo: a NIP-09 naming kind 6 for the kind 6 above.
+    expect(await compose.toggleRepost(note)).toBe(true);
+    const undo = published[1] as { kind: number; tags: string[][] };
+    expect(undo.kind).toBe(5);
+    expect(undo.tags.find((tag) => tag[0] === "k")?.[1]).toBe("6");
+
+    published = [];
+    const comment = post(OTHER, 1111);
+    expect(await compose.toggleRepost(comment)).toBe(true);
+    expect((published[0] as { kind: number }).kind).toBe(16);
+    expect(await compose.toggleRepost(comment)).toBe(true);
+    const undoGeneric = published[1] as { kind: number; tags: string[][] };
+    expect(undoGeneric.tags.find((tag) => tag[0] === "k")?.[1]).toBe("16");
   });
 });
 

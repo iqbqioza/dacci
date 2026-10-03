@@ -2,7 +2,8 @@ import type { NostrEvent } from "dacci-nostr-nips";
 import { encodeNpub } from "dacci-nostr-nips";
 import { Show, createEffect, createMemo } from "solid-js";
 import { requestEmbeds } from "../embeds.js";
-import { showsCommentLabel } from "../feed-tabs.jsx";
+import { isQuoteRepost, showsCommentLabel, showsRepostLabel } from "../feed-tabs.jsx";
+import { carriesInlineEvent } from "../embeds.js";
 import { formatTime } from "../nostr.js";
 import { navigate, profileHash } from "../router.js";
 import { ActionBar } from "./ActionBar.jsx";
@@ -109,11 +110,19 @@ export function EventCard(props: {
             </p>
           </div>
           <div class="flex shrink-0 items-center gap-1">
-            {/* A post that answers another one is labelled コメント, so a
-                conversation is told apart from a standalone note. */}
+            {/* A post that answers another one is labelled コメント, and a
+                repost リポスト, so a conversation is told apart from a
+                standalone note and from something the account merely passed on.
+                Without the second label a repost read as an empty note, since
+                that is exactly what its own content is. */}
             <Show when={showsCommentLabel(props.event)}>
               <span class="rounded-md bg-(--fill-soft) px-1.5 py-0.5 text-xs text-(--ink-quiet)">
                 コメント
+              </span>
+            </Show>
+            <Show when={showsRepostLabel(props.event)}>
+              <span class="rounded-md bg-(--fill-soft) px-1.5 py-0.5 text-xs text-(--ink-quiet)">
+                {isQuoteRepost(props.event) ? "引用リポスト" : "リポスト"}
               </span>
             </Show>
             <span class="text-xs whitespace-nowrap text-(--ink-muted)">
@@ -129,9 +138,16 @@ export function EventCard(props: {
             covered until the reader acts on it, embeds included: a quoted
             note is someone else's post and carries its own warning. */}
         <SensitiveBody event={props.event}>
-          <p class="whitespace-pre-wrap break-words text-(--ink)">
-            <NoteBody event={props.event} />
-          </p>
+          {/* A repost whose content *is* the reposted event has no text of its
+              own to print: NIP-18 puts the note there as JSON, and drawing it
+              would print a wall of escaped braces above the note itself. The
+              embed below is the whole of it. A quote repost keeps its own words
+              in the content, and those are drawn. */}
+          <Show when={!carriesInlineEvent(props.event)}>
+            <p class="whitespace-pre-wrap break-words text-(--ink)">
+              <NoteBody event={props.event} />
+            </p>
+          </Show>
           <EmbeddedCard event={props.event} onSelect={props.onSelect} />
           <EmbeddedPlaceholder event={props.event} />
         </SensitiveBody>

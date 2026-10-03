@@ -21,6 +21,17 @@ import { mentionedProfiles } from "./profile-reference.js";
 
 export const REPLY_KIND = 1;
 export const REPOST_KIND = 6;
+/**
+ * NIP-18 generic repost: *"Since kind 6 reposts are reserved for kind 1
+ * contents, we use kind 16 as a 'generic repost', that can include any kind of
+ * event inside other than kind 1."* It carries a `k` tag with the stringified
+ * kind of what it reposts.
+ *
+ * Both kinds are reposts and both are read here, because a reader following an
+ * account sees them in the same timeline and a timeline that only asked for one
+ * of the two silently dropped half of what the account published.
+ */
+export const GENERIC_REPOST_KIND = 16;
 export const REACTION_KIND = 7;
 export const DELETION_KIND = 5;
 /** NIP-22 comment. */
@@ -207,15 +218,49 @@ export function buildRepost(input: {
    * thing in its place.
    */
   relay?: string;
+  /** The reposted event as NIP-18 wants it in `content`. */
+  content?: string;
 }): UnsignedEvent {
   const { pubkey, target, createdAt } = input;
+  const kind = repostKindFor(target.kind);
   const tags: string[][] = [
     ["e", target.id, input.relay ?? ""],
     ["p", target.pubkey],
   ];
+  // NIP-18: a generic repost "SHOULD contain a `"k"` tag with the stringified
+  // kind number of the reposted event as its value" — the same tag a reaction
+  // carries, and for the same reason: NIP-01 has relays index single-letter
+  // tags, so this is what a filter on "reposts of what" can be built on.
+  if (kind === GENERIC_REPOST_KIND) tags.push(["k", String(target.kind)]);
   const a = addressTag(target);
   if (a !== null) tags.push(a);
-  return { pubkey, created_at: createdAt, kind: REPOST_KIND, tags, content: "" };
+  return {
+    pubkey,
+    created_at: createdAt,
+    kind,
+    tags,
+    content: input.content ?? "",
+  };
+}
+
+/**
+ * The kind a repost of this target has to be written as.
+ *
+ * NIP-18 reserves kind 6 for kind 1 contents and asks for kind 16 for anything
+ * else, so reposting a long-form article or a relay list as a kind 6 told every
+ * other client it was a repost of a note. Reading is wider than writing: both
+ * kinds are understood, because other clients write both.
+ */
+export function repostKindFor(targetKind: number): number {
+  return targetKind === 1 ? REPOST_KIND : GENERIC_REPOST_KIND;
+}
+
+/**
+ * Whether this event is a repost of anything: kind 6, or the kind 16 generic
+ * repost NIP-18 asks for.
+ */
+export function isRepost(event: NostrEvent): boolean {
+  return event.kind === REPOST_KIND || event.kind === GENERIC_REPOST_KIND;
 }
 
 /** NIP-18 quote repost: a repost that carries the quoter's own words. */
@@ -307,7 +352,7 @@ export function quotedEventId(event: NostrEvent): string | null {
  * fetched by id.
  */
 export function repostedEventId(event: NostrEvent): string | null {
-  if (event.kind !== REPOST_KIND) return null;
+  if (!isRepost(event)) return null;
   const tag = event.tags.find((t) => t[0] === "e" && isHex64(t[1]));
   return tag === undefined ? null : tag[1];
 }
@@ -318,9 +363,10 @@ export function repostedEventId(event: NostrEvent): string | null {
  * `q` as well, so this covers quote notes as well as kind 6.
  */
 export function embeddedEventId(event: NostrEvent): string | null {
-  if (event.kind === REPOST_KIND) {
-    // A kind 6 quotes with `q` and also carries the reposted id in `e`;
-    // both name the same note, so either answer is correct.
+  if (isRepost(event)) {
+    // A repost quotes with `q` and also carries the reposted id in `e`;
+    // both name the same note, so either answer is correct. `q` is asked first
+    // because a quote repost is the case where `e` may name something else.
     return quotedEventId(event) ?? repostedEventId(event);
   }
   return quotedEventId(event);
@@ -541,7 +587,7 @@ export function summarizeMyActivity(events: NostrEvent[]): MyActivityMap {
       }
       continue;
     }
-    if (event.kind === REPOST_KIND) {
+    if (isRepost(event)) {
       const quoted = event.tags.some((tag) => tag[0] === "q");
       for (const target of targets(event)) {
         const current = entry(target);

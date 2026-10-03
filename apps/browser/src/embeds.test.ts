@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { NsecSigner } from "dacci-nostr-signer";
 import { clearEventCache, rememberEvents } from "./event-cache.js";
 import { markDeleted, resetDeleted } from "./deleted.js";
-import { createEmbeds } from "./embeds.js";
+import { carriesInlineEvent, createEmbeds } from "./embeds.js";
 
 /** A real key, so a fixture can carry a signature that actually verifies. */
 const signer = new NsecSigner("11".repeat(32));
@@ -326,8 +326,60 @@ describe("the inline note memo", () => {
     expect(tampered.id).toBe(honest.id);
     expect(embeds.useEmbed(tampered).event).toBeNull();
   });
+});
 
+describe("carriesInlineEvent", () => {
+  it("tells a card whether its content is prose or the reposted event", async () => {
+    // This is the test for whether a repost has any text to draw at all: NIP-18
+    // puts the note it reposts in the content as JSON, and printing that above
+    // the note itself would put a wall of escaped braces in the reader's way. An
+    // empty content is the same case — a repost with nothing in it — so the
+    // rule cannot be "does the content parse as JSON".
+    const inner = await inlineNote("the reposted note");
+    const base = quoteRepost(inner.id);
 
+    // Both repost kinds, inline and empty.
+    for (const kind of [6, 16]) {
+      const withNote: NostrEvent = {
+        ...base,
+        kind,
+        content: JSON.stringify(inner),
+        id: "",
+      };
+      const fields = { ...withNote, id: computeEventId(withNote) };
+      const honest: NostrEvent = { ...fields, id: computeEventId(fields) };
+      expect(carriesInlineEvent(honest), `kind ${kind} inline`).toBe(true);
+
+      const empty: NostrEvent = { ...base, kind, content: "", id: "" };
+      const emptyFields = { ...empty, id: computeEventId(empty) };
+      const emptyEvent: NostrEvent = { ...emptyFields, id: computeEventId(emptyFields) };
+      expect(carriesInlineEvent(emptyEvent), `kind ${kind} empty`).toBe(false);
+    }
+
+    // A quote repost's own words are prose, and they are the point of quoting.
+    const quote: NostrEvent = {
+      ...base,
+      content: "worth reading",
+      id: "",
+    };
+    const quoteFields = { ...quote, id: computeEventId(quote) };
+    expect(carriesInlineEvent({ ...quoteFields, id: computeEventId(quoteFields) })).toBe(
+      false,
+    );
+
+    // And an ordinary post is always prose.
+    const plain: NostrEvent = {
+      ...base,
+      kind: 1,
+      tags: [],
+      content: JSON.stringify(inner),
+      id: "",
+    };
+    const plainFields = { ...plain, id: computeEventId(plain) };
+    expect(carriesInlineEvent({ ...plainFields, id: computeEventId(plainFields) })).toBe(
+      false,
+    );
+  });
 });
 
 describe("the placeholder following the card it is on", () => {

@@ -3,6 +3,7 @@ import {
   embeddedEventIdWithText,
   embeddedNote,
   hasValidId,
+  isRepost,
 } from "dacci-nostr-nips";
 import { EmbedStore } from "dacci-nostr-quotes";
 import { createSignal } from "solid-js";
@@ -164,6 +165,26 @@ export function createEmbeds(
       setVersion((v) => v + 1);
     },
   };
+}
+
+/**
+ * Whether this post's content is the reposted event itself rather than prose.
+ *
+ * NIP-18 lets a repost carry the note it reposts as JSON in its content, and
+ * that object is verified once and remembered. So this is also the test for
+ * whether there is any *text* to draw: a repost whose content holds the note has
+ * nothing of its own to say, and printing the JSON above the note it carries
+ * would put a wall of escaped braces in the reader's way.
+ *
+ * Reposts only, deliberately. A post of any other kind whose content happens to
+ * parse as a signed event is still a post with words in it, and hiding its body
+ * because its text looked like JSON would lose the text.
+ *
+ * Read through the same memo the embed store uses, so the question is answered
+ * once per post rather than once per render.
+ */
+export function carriesInlineEvent(event: NostrEvent): boolean {
+  return isRepost(event) && inlineNoteOf(event) !== null;
 }
 
 /** The app's single embed cache, shared by every feed card. */
