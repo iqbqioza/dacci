@@ -1,5 +1,5 @@
 import type { NostrEvent } from "./event.js";
-import type { ContentSegment } from "./media.js";
+import { insideUrl, type ContentSegment } from "./media.js";
 import { decodeProfileReference } from "./nip19.js";
 
 /** A person a post names, and the text to show for them. */
@@ -83,8 +83,20 @@ export function profileReferences(
     if (prefixed || bare) {
       // Either spelling resolves to the one thing a mention needs: the pubkey.
       const pubkey = decodeProfileReference(match[1]);
-      if (pubkey !== null) {
-        out.push({ pubkey, start: match.index, end: match.index + match[0].length });
+      // Unless it is part of an address. A `nostr:` uri inside a url is the
+      // author's link to somewhere, not a person they are writing about, and
+      // drawing it out left the reader with a url missing its own middle — and
+      // on a profile's own bio, where a bare entity is otherwise a mention, a
+      // profile link became a chip pointing at the reader.
+      if (
+        pubkey !== null &&
+        !insideUrl(content, match.index, match.index + match[0].length)
+      ) {
+        out.push({
+          pubkey,
+          start: match.index,
+          end: match.index + match[0].length,
+        });
       }
     }
     if (match.index === pattern.lastIndex) pattern.lastIndex += 1;

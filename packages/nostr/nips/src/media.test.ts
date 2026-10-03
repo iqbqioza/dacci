@@ -3,6 +3,7 @@ import {
   contentSegments,
   emojisIn,
   imagesIn,
+  insideUrl,
   urlSpans,
   type ContentSegment,
   type NostrEvent,
@@ -162,6 +163,19 @@ describe("contentSegments", () => {
   });
 });
 
+describe("insideUrl", () => {
+  it("says whether a span is part of one of the text's addresses", () => {
+    const text = "see https://x.example/paper and then go";
+    const inside = text.indexOf("x.example");
+    expect(insideUrl(text, inside, inside + 9)).toBe(true);
+    expect(insideUrl(text, 0, 3)).toBe(false);
+    // The sentence's full stop is not part of the address, so a span that starts
+    // there is not inside it.
+    expect(insideUrl("https://x.example/paper.", 25, 26)).toBe(false);
+    expect(insideUrl("nothing here", 0, 7)).toBe(false);
+  });
+});
+
 describe("urlSpans", () => {
   it("finds an address and where it sits in the text", () => {
     expect(urlSpans("read https://x.example/paper now")).toEqual([
@@ -180,6 +194,34 @@ describe("urlSpans", () => {
     expect(urlSpans("https://x.example/paper、です")[0].url).toBe(
       "https://x.example/paper",
     );
+  });
+
+  it("keeps a closer the address itself opened a pair for", () => {
+    // `Foo_(bar)` is one article and `f(x)` is one function's documentation, and
+    // cutting the `)` links to a page that does not exist. The punctuation of the
+    // sentence is still left out, which is the other half of the same rule: a
+    // `)` with nothing in the address for it to close is the author's.
+    expect(urlSpans("https://en.wikipedia.org/wiki/Foo_(bar)")[0].url).toBe(
+      "https://en.wikipedia.org/wiki/Foo_(bar)",
+    );
+    expect(urlSpans("[x](https://en.wikipedia.org/wiki/Foo_(bar))")[0].url).toBe(
+      "https://en.wikipedia.org/wiki/Foo_(bar)",
+    );
+    // Still the author's punctuation, both kinds.
+    expect(urlSpans("(see https://en.wikipedia.org/wiki/Foo_(bar))")[0].url).toBe(
+      "https://en.wikipedia.org/wiki/Foo_(bar)",
+    );
+    expect(urlSpans("https://x.example/docs/f(1)")[0].url).toBe(
+      "https://x.example/docs/f(1)",
+    );
+    // And a full stop after one is the author's too.
+    expect(urlSpans("see https://en.wikipedia.org/wiki/Foo_(bar).")[0].url).toBe(
+      "https://en.wikipedia.org/wiki/Foo_(bar)",
+    );
+    // Two pairs, both closed: the last closer belongs to the address as well.
+    expect(urlSpans("https://x.example/a_(b)")[0].url).toBe("https://x.example/a_(b)");
+    // The address's own `(` is what decided it, not the length of the run.
+    expect(urlSpans("https://x.example/paper)")[0].url).toBe("https://x.example/paper");
   });
 
   it("finds every address, in the order they were written", () => {

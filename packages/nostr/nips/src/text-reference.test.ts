@@ -58,6 +58,31 @@ describe("textReferences", () => {
     const text = `${encodeNote(QUOTED)}xyz`;
     expect(textReferences(text)).toEqual([]);
   });
+
+  it("leaves an entity that is part of a web address alone", () => {
+    // `https://primal.net/e/note1…` is the permalink clients paste when they
+    // share a post, and `https://njump.dev/note1…` the one they redirect through.
+    // Reading the entity out of the address left the reader with a link to
+    // `https://primal.net/e/` — a page that does not exist — and promoted the
+    // post to an embedded quotation, because the embed falls back to a link in
+    // the text. The address reader is the same one the post body is drawn with,
+    // so the two have to agree about where an address is.
+    const note1 = encodeNote(QUOTED) as string;
+    for (const url of [
+      `https://primal.net/e/${note1}`,
+      `https://njump.dev/${note1}`,
+      `https://x.example/?q=${note1}`,
+      `https://x.example/${link(QUOTED)}`,
+    ]) {
+      expect(textReferences(`read ${url} now`), url).toEqual([]);
+    }
+    // A standalone reference beside one is still found.
+    expect(
+      textReferences(`read https://x.example/paper and ${link(QUOTED)}`).map(
+        (r) => r.id,
+      ),
+    ).toEqual([QUOTED]);
+  });
 });
 
 describe("embeddedEventIdWithText", () => {
@@ -129,5 +154,16 @@ describe("displayContent", () => {
 
   it("returns the content unchanged for a post with no links", () => {
     expect(displayContent(note("no references here"))).toBe("no references here");
+  });
+
+  it("keeps a permalink whose path holds the entity", () => {
+    // The whole chain: no `q` tag to embed, so the link in the text is all there
+    // is — and the reader saw `read https://primal.net/e/ now`, with the post
+    // about nothing. It also became the embedded note, so the card showed a
+    // quotation of itself.
+    const note1 = encodeNote(QUOTED) as string;
+    const content = `read https://primal.net/e/${note1} now`;
+    expect(displayContent(note(content))).toBe(content);
+    expect(embeddedEventIdWithText(note(content))).toBeNull();
   });
 });

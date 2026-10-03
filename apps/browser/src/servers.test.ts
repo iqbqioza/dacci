@@ -658,6 +658,182 @@ describe("loadServers", () => {
     expect(sentTags.at(-1)).toEqual([["server", "https://a.example"]]);
   });
 
+  it("publishes a removal the round did not merge, since nothing merged", async () => {
+    // The same race with the other hand on the scale: a removal leaves the list
+    // exactly as the reader already trimmed it, so the merge had nothing to do
+    // and returned early — before the only place that published an edit the
+    // closed gate had held back. The row stayed gone on screen while the
+    // account went on naming the server, and the next unrelated edit published
+    // it into the account's list after all.
+    const pubkey = READER;
+    const sent: Array<Record<string, unknown>> = [];
+    vi.resetModules();
+    vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
+    vi.doMock("./compose.js", () => ({
+      publishEvent: async (template: Record<string, unknown>) => {
+        sent.push(template);
+        return { ...template, id: "f".repeat(64), sig: "e".repeat(128) };
+      },
+    }));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    vi.doMock("./nostr.js", () => ({
+      getConnection: () => ({
+        url: "wss://read.example",
+        query: async () => {
+          calls += 1;
+          if (calls === 1) await gate;
+          return {
+            failed: false,
+            events: [listEvent(["https://a.example", "https://b.example"], { at: 2000 })],
+          };
+        },
+      }),
+    }));
+    vi.doMock("./relays.js", () => ({
+      useRelays: () => ({ readRelays: () => ["wss://read.example"] }),
+    }));
+    const store = await import("./servers.js");
+    store.addServer("https://a.example");
+    store.addServer("https://b.example");
+    const reading = store.loadServers();
+    await new Promise((r) => setTimeout(r, 10));
+    // Refused by the closed gate, so nothing went out yet.
+    expect(await store.removeServerAndPublish("https://b.example")).toBe(false);
+    release();
+    await reading;
+    await new Promise((r) => setTimeout(r, 10));
+    // The gate is open now, and the account is told.
+    expect(sent).toHaveLength(1);
+    expect(sent[0].tags).toEqual([["server", "https://a.example"]]);
+  });
+
+  it("publishes an edit held by the gate even when the answer is too old", async () => {
+    // The third path the held edit has to survive: this browser published
+    // something, so a relay still answering with an older list is dropped — and
+    // the reader's own edit, made while that round was out, went out with it.
+    const pubkey = READER;
+    const sent: Array<Record<string, unknown>> = [];
+    vi.resetModules();
+    vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
+    vi.doMock("./compose.js", () => ({
+      publishEvent: async (template: Record<string, unknown>) => {
+        sent.push(template);
+        return { ...template, id: "f".repeat(64), sig: "e".repeat(128) };
+      },
+    }));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    vi.doMock("./nostr.js", () => ({
+      getConnection: () => ({
+        url: "wss://read.example",
+        query: async () => {
+          calls += 1;
+          // Only the second round is held; the first has to answer for the gate
+          // to open at all.
+          if (calls === 2) await gate;
+          // Older than what this browser has already written, so dropped.
+          return {
+            failed: false,
+            events: [listEvent(["https://a.example"], { at: 1 })],
+          };
+        },
+      }),
+    }));
+    vi.doMock("./relays.js", () => ({
+      useRelays: () => ({ readRelays: () => ["wss://read.example"] }),
+    }));
+    const store = await import("./servers.js");
+    // The first read opens the gate, and an edit publishes for real — so this
+    // browser holds a stamp the next answer will be measured against.
+    await store.loadServers();
+    expect(own(store)).toEqual(["https://a.example"]);
+    await store.addServerAndPublish("https://c.example");
+    expect(sent).toHaveLength(1);
+    sent.length = 0;
+
+    const reading = store.loadServers();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(await store.addServerAndPublish("https://b.example")).toBe("ok");
+    release();
+    await reading;
+    await new Promise((r) => setTimeout(r, 10));
+    expect(own(store).sort()).toEqual(
+      ["https://a.example", "https://b.example", "https://c.example"].sort(),
+    );
+    expect(sent).toHaveLength(1);
+    expect(
+      (sent[0].tags as string[][]).map((tag) => tag[1]).sort(),
+    ).toEqual(
+      ["https://a.example", "https://b.example", "https://c.example"].sort(),
+    );
+  });
+
+  it("says which half of a save it refused", async () => {
+    // Two refusals that used to read the same: the gate not being open yet, and
+    // there being nothing left to publish. They are different problems, and a
+    // reader told only "save the list first" for a deletion has no idea the
+    // account still names the server they deleted.
+    const pubkey = READER;
+    const sent: Array<Record<string, unknown>> = [];
+    vi.resetModules();
+    vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
+    vi.doMock("./compose.js", () => ({
+      publishEvent: async (template: Record<string, unknown>) => {
+        sent.push(template);
+        return { ...template, id: "f".repeat(64), sig: "e".repeat(128) };
+      },
+    }));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.doMock("./nostr.js", () => ({
+      getConnection: () => ({
+        url: "wss://read.example",
+        query: async () => {
+          await gate;
+          return { failed: false, events: [listEvent(["https://only.example"], { at: 2000 })] };
+        },
+      }),
+    }));
+    vi.doMock("./relays.js", () => ({
+      useRelays: () => ({ readRelays: () => ["wss://read.example"] }),
+    }));
+    const { noticeMessage } = await import("./notice.js");
+    const store = await import("./servers.js");
+    const reading = store.loadServers();
+    await new Promise((r) => setTimeout(r, 10));
+
+    // An edit with the gate shut: refused, and the reader is told the account
+    // has not seen it.
+    expect(await store.addServerAndPublish("https://local.example")).toBe("ok");
+    expect(noticeMessage()).toContain("まだ反映されていません");
+    expect(sent).toEqual([]);
+    release();
+    await reading;
+    await new Promise((r) => setTimeout(r, 10));
+
+    // The list the read brought in is still there, so this removal publishes.
+    sent.length = 0;
+    expect(await store.removeServerAndPublish("https://local.example")).toBe(true);
+    expect(sent).toHaveLength(1);
+
+    // And the last server gone with the gate open: BUD-03 needs at least one
+    // `server` tag, so there is nothing to publish — and the reader is told that
+    // instead of a message about saving.
+    sent.length = 0;
+    expect(await store.removeServerAndPublish("https://only.example")).toBe(false);
+    expect(noticeMessage()).toContain("1 つも無い");
+    expect(sent).toEqual([]);
+  });
+
   it("does not publish one account's read on behalf of the next", async () => {
     // The gate has to belong to the account, not to the app. Signing out reads
     // no list but has nothing to publish, and treating that as "read" left the

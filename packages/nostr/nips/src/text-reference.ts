@@ -1,5 +1,6 @@
 import type { NostrEvent } from "./event.js";
 import { embeddedEventId } from "./activity.js";
+import { insideUrl } from "./media.js";
 import { decodeEventReference } from "./nip19.js";
 
 /**
@@ -37,7 +38,14 @@ export function textReferences(content: string): TextReference[] {
     const id = decodeEventReference(match[0]);
     // Overlapping matches are impossible with exec, but a zero-length match
     // would loop forever, so the cursor always advances past the text.
-    if (id !== null) {
+    //
+    // Not a reference when it is part of an address: `https://primal.net/e/note1…`
+    // is the permalink clients share, and reading the entity out of it left the
+    // reader with a broken link and a post whose body had a hole in it.
+    if (
+      id !== null &&
+      !insideUrl(content, match.index, match.index + match[0].length)
+    ) {
       out.push({ id, start: match.index, end: match.index + match[0].length });
     }
     if (match[0].length === 0) pattern.lastIndex += 1;

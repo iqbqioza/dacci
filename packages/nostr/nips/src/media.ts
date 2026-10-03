@@ -64,9 +64,51 @@ const IMAGE_EXTENSIONS = new Set([
  * A url in the text. Trailing punctuation belongs to the sentence rather than
  * to the address, so it is left out of the match: a link at the end of a line
  * is almost always followed by a full stop.
+ *
+ * The closers are the exception, because a closer also belongs to the address:
+ * `https://en.wikipedia.org/wiki/Foo_(bar)` is one page, and cutting its `)`
+ * leaves a link to a page that does not exist. So a trailing `)`, `]` or `}` is
+ * only dropped when the address holds nothing for it to close — see
+ * `trimTrailing`.
  */
 const URL = /https?:\/\/[^\s<>"'，。、）】]+/gi;
-const TRAILING = /[.,;:!?)\]}»”’]+$/;
+/** Punctuation that ends a sentence and never ends an address. */
+const TRAILING = /[.,;:!?»”’]$/;
+/** The opener each closer would have to match to belong to the address. */
+const CLOSERS: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
+
+/**
+ * The address without the punctuation that follows it in the sentence.
+ *
+ * A closer is kept whenever the address opens one it never closes, because that
+ * is the shape of a url that legitimately ends in a bracket — every Wikipedia
+ * article with a qualifier in its name, and every documentation url for a
+ * function. Stripping it left the reader a link that goes nowhere, in the one
+ * kind of address that is almost always followed by nothing at all.
+ */
+function trimTrailing(raw: string): string {
+  let out = raw;
+  while (out.length > 0) {
+    const last = out[out.length - 1];
+    if (TRAILING.test(last)) {
+      out = out.slice(0, -1);
+      continue;
+    }
+    const opener = CLOSERS[last];
+    if (opener === undefined) break;
+    // Balance counted on the candidate, so removing this closer and finding an
+    // opener left open means it was closing something the address itself holds.
+    const candidate = out.slice(0, -1);
+    let depth = 0;
+    for (const char of candidate) {
+      if (char === opener) depth += 1;
+      else if (char === last) depth -= 1;
+    }
+    if (depth > 0) break;
+    out = candidate;
+  }
+  return out;
+}
 
 /**
  * The path of a url, without its query or fragment. Parsed with a pattern
@@ -201,8 +243,7 @@ export function urlSpans(text: string): UrlSpan[] {
   const pattern = new RegExp(URL.source, "gi");
   let match = pattern.exec(text);
   while (match !== null) {
-    const raw = match[0];
-    const trimmed = raw.replace(TRAILING, "");
+    const trimmed = trimTrailing(match[0]);
     if (trimmed !== "") {
       out.push({
         url: trimmed,
@@ -215,6 +256,25 @@ export function urlSpans(text: string): UrlSpan[] {
     match = pattern.exec(text);
   }
   return out;
+}
+
+/**
+ * True when a span of the text sits inside one of its urls.
+ *
+ * A NIP-19 entity written as part of a web address is not a reference in the
+ * author's own words, it is part of the address:
+ * `https://primal.net/e/nevent1…` is the link every client pastes when it
+ * shares a post, and taking the entity out of it both broke the link
+ * (`https://primal.net/e/`) and promoted the post to an embedded quotation. A
+ * `nostr:` uri inside a url is the same accident, and worse on a profile's own
+ * bio, where a bare entity is otherwise a mention.
+ *
+ * One judgement, deliberately: the reference scan, the mention scan and the
+ * address reader have to agree about where a url is, and this is where the
+ * address reader lives.
+ */
+export function insideUrl(text: string, start: number, end: number): boolean {
+  return urlSpans(text).some((span) => start < span.end && end > span.start);
 }
 
 /**

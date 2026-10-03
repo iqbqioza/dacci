@@ -238,7 +238,13 @@ export async function publishServers(): Promise<boolean> {
   // account's list would delete the servers the reader added elsewhere, so a
   // list that has not been read **for this account** is not published.
   if (readFor() !== pubkey) {
-    showNotice("サーバー一覧を読み込んでから保存してください");
+    // Not the same as "nothing to save": a removal with the gate shut still has
+    // to reach the account, so the reader is told which of the two it is.
+    showNotice(
+      servers().some((server) => server.builtin !== true)
+        ? "サーバー一覧を読み込んでから保存してください（追加と削除はアカウントにはまだ反映されていません）"
+        : "サーバー一覧を読み込んでから保存してください",
+    );
     return false;
   }
   const created_at = Math.floor(Date.now() / 1000);
@@ -247,7 +253,12 @@ export async function publishServers(): Promise<boolean> {
   // not a list the reader just emptied.
   const mine = servers().filter((server) => server.builtin !== true);
   if (mine.length === 0) {
-    showNotice("保存するサーバーがありません");
+    // BUD-03: the event "MUST include at least one `server` tag", and the kind
+    // replaces the whole list, so there is nothing to publish for a reader whose
+    // last server is gone. Saying so is the honest end of it — the account goes
+    // on naming that server until another one is added, and the reader is the
+    // one who has to decide that, not a silent failure.
+    showNotice("サーバーが 1 つも無いので保存できません。追加してから削除してください");
     return false;
   }
   const sent = await publishEvent(
@@ -375,10 +386,18 @@ async function loadServersInner(): Promise<void> {
         .filter((known) => !now.some((server) => server.url === known.url))
         .map((known) => known.url),
     );
-    // Nothing published leaves the reader with what they had — but a mid-read
-    // edit is still unpublished work, so it goes out now that the gate is open.
+    // A local edit the closed gate turned away is unpublished work, and the gate is
+    // open now. Every path below has to account for it, and the answer "the list
+    // has not changed" is the one that used to lose it: a pure removal leaves
+    // the list exactly as the reader already trimmed it, so the merge found
+    // nothing to do and returned — and the account went on naming the server
+    // they had just deleted.
+    const publishHeldEdits = (): void => {
+      if (added.length > 0 || removed.size > 0) void publishServers();
+    };
+    // Nothing published leaves the reader with what they had.
     if (list.servers.length === 0) {
-      if (added.length > 0) void publishServers();
+      publishHeldEdits();
       return;
     }
     // A relay can still be answering with a list older than the edit the
@@ -386,7 +405,10 @@ async function loadServersInner(): Promise<void> {
     // this browser knows about is dropped: it must never undo a change that
     // is still on screen. Anything as new or newer replaces the list, which
     // is what brings in servers published on another client.
-    if (list.at < lastWrite(pubkey)) return;
+    if (list.at < lastWrite(pubkey)) {
+      publishHeldEdits();
+      return;
+    }
     // The answer is older than the tap that just happened by construction —
     // the round started first — so replacing the list with it drops a server
     // the reader has just been told was saved. Additions merge in front, which
@@ -396,21 +418,16 @@ async function loadServersInner(): Promise<void> {
       ...list.servers.filter((server) => !removed.has(server.url)),
     ]);
     if (sameServers(next, now)) {
-      // The removal is the case that needs saying here: a pure removal changes
-      // nothing on screen once the answer is filtered by it, so the list matches
-      // what the reader already has and this returns — leaving the account to go
-      // on naming the server they deleted.
-      if (removed.size > 0) void publishServers();
+      publishHeldEdits();
       return;
     }
     setServers(next);
-    // The gate just opened, so an edit the closed gate turned away can go now.
-    // Leaving it unpublished would keep it local-only until the next edit, on
-    // this device alone. A list that merely *changed* is not republished: it
-    // says what the account already says, and the write would move this
-    // browser's stamp past a list another client publishes next, which the
-    // staleness check above would then drop.
-    if (added.length > 0) void publishServers();
+    // Published after the merge rather than before it, so one write carries the
+    // mid-read edit and whatever another client had published, together. A list
+    // that merely changed is not republished: it says what the account already
+    // says, and the write would move this browser's stamp past a list another
+    // client publishes next, which the staleness check above would then drop.
+    publishHeldEdits();
   } catch {
     // A relay that refuses leaves the stored list in place.
   }

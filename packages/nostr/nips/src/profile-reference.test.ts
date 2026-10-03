@@ -87,6 +87,28 @@ describe("profileReferences", () => {
     expect(profileReferences(encodeNpub(ALICE) as string)).toEqual([]);
   });
 
+  it("leaves an entity that is part of a web address alone", () => {
+    // `https://x.example/?u=nostr:npub1…` is a link to somewhere, and drawing the
+    // uri out of it split the address in two and left the reader with
+    // `https://x.example/?u= ` — a link that goes nowhere — next to a chip
+    // claiming someone had been written about.
+    for (const url of [
+      `https://x.example/?u=${npub(ALICE)}`,
+      `https://nostr.band/p/${encodeNpub(ALICE) as string}`,
+      `https://x.example/#${nprofile(BOB)}`,
+    ]) {
+      expect(profileReferences(url), url).toEqual([]);
+      expect(mentionedProfiles(url), url).toEqual([]);
+    }
+    // A profile's own bio is where a bare entity is otherwise a mention, and a
+    // bare entity *inside a link there* is still part of the link.
+    const bio = `my page https://nostr.band/p/${encodeNpub(ALICE) as string}`;
+    expect(mentionedProfiles(bio, true)).toEqual([]);
+    expect(mentionedProfiles(bio, false)).toEqual([]);
+    // The person is still named when they are written outside any address.
+    expect(mentionedProfiles(`ping ${npub(ALICE)}`, true)).toEqual([ALICE]);
+  });
+
   it("finds several in reading order", () => {
     const found = profileReferences(`${npub(ALICE)} and ${npub(BOB)}`);
     expect(found.map((f) => f.pubkey)).toEqual([ALICE, BOB]);

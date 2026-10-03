@@ -36,7 +36,7 @@ export {
   withMetadata,
 } from "./metadata.js";
 export type { MetadataValue } from "./metadata.js";
-export { contentSegments, imagesIn, urlSpans } from "./media.js";
+export { contentSegments, imagesIn, insideUrl, urlSpans } from "./media.js";
 export type { ContentSegment, MediaRef, UrlSpan } from "./media.js";
 export {
   emojify,

@@ -379,15 +379,31 @@ describe("buildQuoteRepost", () => {
 
 describe("buildReaction", () => {
   it("uses the NIP-25 layout with a plus symbol", () => {
+    // NIP-25: "The reaction event MAY include a `k` tag with the stringified
+    // kind number of the reacted event as its value", and its example writes
+    // `["k", String(liked.kind)]`. The symbol was written there instead, so the
+    // one single-letter tag NIP-01 has relays index held a plus sign, and a
+    // filter on the kind of what was reacted to matched nothing at all.
     const event = buildReaction({ pubkey: ME, target, createdAt: AT });
     expect(event.kind).toBe(7);
     expect(event.content).toBe("+");
     expect(tagValue(event, "e")?.[1]).toBe(target.id);
     expect(tagValue(event, "p")?.[1]).toBe(AUTHOR);
-    expect(tagValue(event, "k")?.[1]).toBe("+");
+    expect(tagValue(event, "k")?.[1]).toBe(String(target.kind));
+    // And the relay hint NIP-25 asks the `e` tag to carry, when one is offered.
+    expect(tagValue(event, "e")?.[2]).toBe("");
+    const hinted = buildReaction({
+      pubkey: ME,
+      target,
+      createdAt: AT,
+      relay: "wss://relay.example",
+    });
+    expect(tagValue(hinted, "e")?.[2]).toBe("wss://relay.example");
   });
 
   it("carries a custom symbol", () => {
+    // In the content, where NIP-25 puts it: "A reaction's `content` field MUST
+    // include user-generated-content indicating the value of the reaction".
     const event = buildReaction({
       pubkey: ME,
       target,
@@ -395,7 +411,20 @@ describe("buildReaction", () => {
       symbol: "🤙",
     });
     expect(event.content).toBe("🤙");
-    expect(tagValue(event, "k")?.[1]).toBe("🤙");
+    expect(tagValue(event, "k")?.[1]).toBe(String(target.kind));
+  });
+
+  it("names an addressable target by coordinate, and a plain note by id", () => {
+    // NIP-25: "If the event being reacted to is an addressable event, an `a`
+    // SHOULD be included together with the `e` tag, it must be set to the
+    // coordinates (kind:pubkey:d-tag) of the event being reacted to." It says
+    // addressable, and only addressable, so a kind 1 target is named by its `e`
+    // tag alone.
+    const article = { ...target, kind: 30023, tags: [["d", "my-article"]] };
+    expect(tagValue(buildReaction({ pubkey: ME, target: article, createdAt: AT }), "a")?.[1]).toBe(
+      `30023:${AUTHOR}:my-article`,
+    );
+    expect(tagValue(buildReaction({ pubkey: ME, target, createdAt: AT }), "a")).toBeUndefined();
   });
 });
 
@@ -580,6 +609,25 @@ describe("deletedEventIds", () => {
     // The reaction was deleted, so no action is remembered for it.
     expect(summarizeMyActivity(events).size).toBe(0);
   });
+
+  it("takes nothing from an `e` tag that names no event", () => {
+    // NIP-01: "Each tag is an array of one or more strings." `["e"]` is
+    // therefore a well-formed tag, with no value in it, and `tag[1]` is
+    // `undefined`. It went into the deletion set and into the activity map as a
+    // key nothing can ever match — an `undefined` where an id belongs, in a set
+    // the app reads the reader's own history through. Every other tag read in
+    // this file holds the value to a real id first.
+    expect([...deletedEventIds([signed(5, ME, [["e"]], 2000)])]).toEqual([]);
+    const summarised = summarizeMyActivity([
+      signed(7, ME, [["e"], ["p", AUTHOR]], 1000),
+    ]);
+    expect([...summarised.keys()]).toEqual([]);
+    // A real id beside it is still read, so the filter is not throwing the tag
+    // away.
+    expect(
+      [...deletedEventIds([signed(5, ME, [["e"], ["e", one]], 2000)])],
+    ).toEqual([one]);
+  });
 });
 
 describe("deletedAddresses", () => {
@@ -620,8 +668,36 @@ describe("eventAddress", () => {
     ).toEqual(new Set([`30023:${AUTHOR}:my-article`]));
   });
 
-  it("has no coordinate for events that are not addressable", () => {
+  it("has no coordinate for a kind that is neither addressable nor replaceable", () => {
+    // NIP-01 gives a coordinate to the addressable range and to the replaceable
+    // one. A regular event — a note, a reaction, a repost — has neither, and
+    // naming one would produce a coordinate nothing resolves to.
     expect(eventAddress(note("1".repeat(64), AUTHOR))).toBeNull();
+    expect(eventAddress(signed(1, AUTHOR, [], 1000))).toBeNull();
+    expect(eventAddress(signed(1111, AUTHOR, [], 1000))).toBeNull();
+    expect(eventAddress(signed(30023, AUTHOR, [], 1000))).toBe(
+      `30023:${AUTHOR}:`,
+    );
+  });
+
+  it("names a replaceable kind with the empty identifier NIP-01 asks for", () => {
+    // "for a normal replaceable event: ["a", "<kind integer>:<32-bytes lowercase
+    // hex of a pubkey>:", <recommended relay URL, optional>] (note: include the
+    // trailing colon)". The trailing colon is part of the coordinate, and these
+    // kinds were not recognised at all — so a repost of a relay list went out
+    // with no `a` tag, which NIP-18 reads as "a specific version, pasted whole"
+    // when the content does not hold it.
+    expect(eventAddress(signed(3, AUTHOR, [], 1000))).toBe(`3:${AUTHOR}:`);
+    expect(eventAddress(signed(10002, AUTHOR, [], 1000))).toBe(`10002:${AUTHOR}:`);
+    expect(eventAddress(signed(10000, AUTHOR, [], 1000))).toBe(`10000:${AUTHOR}:`);
+    expect(eventAddress(signed(0, AUTHOR, [], 1000))).toBe(`0:${AUTHOR}:`);
+    // A `d` tag on a replaceable kind is still read, since NIP-01's shape has
+    // the identifier in the same slot.
+    expect(eventAddress(signed(3, AUTHOR, [["d", "x"]], 1000))).toBe(`3:${AUTHOR}:x`);
+    // Out of both ranges, so no coordinate.
+    expect(eventAddress(signed(20000, AUTHOR, [], 1000))).toBeNull();
+    expect(eventAddress(signed(29999, AUTHOR, [], 1000))).toBeNull();
+    expect(eventAddress(signed(40000, AUTHOR, [], 1000))).toBeNull();
   });
 });
 

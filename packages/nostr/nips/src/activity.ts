@@ -15,7 +15,7 @@ import { mentionedProfiles } from "./profile-reference.js";
  *
  * - NIP-10 positional reply markers (`root`, `reply`)
  * - NIP-18 repost (`e`, `p`, `a`) and quote repost (adds `q`)
- * - NIP-25 reaction (`e`, `p`, `k`)
+ * - NIP-25 reaction (`e`, `p`, `k`, `a`)
  * - NIP-27/NIP-22 `p` for anyone addressed in the text
  */
 
@@ -27,11 +27,40 @@ export const DELETION_KIND = 5;
 export const COMMENT_KIND = 1111;
 export const REACTION_PLUS = "+";
 
-/** Long-form address from a `d` tag, as NIP-18 `a` tags want it. */
+/**
+ * NIP-01's kind ranges, and the coordinate each of them has.
+ *
+ * - addressable: `30000 <= n < 40000`, keyed by kind, pubkey and `d`
+ * - replaceable: `n == 0 || n == 3 || 10000 <= n < 20000`, keyed by kind and pubkey
+ *
+ * Both are what an `a` tag can name, and NIP-01 spells out the second one:
+ * *"for a normal replaceable event: `["a", "<kind integer>:<32-bytes lowercase
+ * hex of a pubkey>:", <recommended relay URL, optional>]` (note: include the
+ * trailing colon)"* — no `d` tag to read, so the identifier is empty and the
+ * colon is still part of it.
+ *
+ * Only two kinds were recognised here, both of them addressable long-form
+ * articles. Every other kind the NIP names lost its coordinate on the way out:
+ * a repost of a relay list (kind 10002) or a follow list (kind 3) went out with
+ * no `a` tag, which reads to every other client as "a specific version, pasted
+ * in full" — and NIP-18 only allows that reading when the content does hold the
+ * whole event. A NIP-09 request naming the same coordinate could not be matched
+ * back to the event either.
+ */
+function coordinateOf(event: NostrEvent, addressableOnly = false): string | null {
+  const kind = event.kind;
+  const addressable = kind >= 30000 && kind < 40000;
+  const replaceable =
+    kind === 0 || kind === 3 || (kind >= 10000 && kind < 20000);
+  if (!addressable && !(replaceable && !addressableOnly)) return null;
+  const d = event.tags.find((tag) => tag[0] === "d")?.[1] ?? "";
+  return `${kind}:${event.pubkey}:${d}`;
+}
+
+/** The NIP-18 `a` tag naming an event's coordinate, when it has one. */
 function addressTag(event: NostrEvent): string[] | null {
-  if (event.kind !== 30023 && event.kind !== 30024) return null;
-  const d = event.tags.find((tag) => tag[0] === "d")?.[1];
-  return d === undefined ? null : [`a`, `${event.kind}:${event.pubkey}:${d}`];
+  const coordinate = coordinateOf(event);
+  return coordinate === null ? null : ["a", coordinate];
 }
 
 /**
@@ -217,23 +246,38 @@ export function buildQuoteRepost(input: {
   return { ...base, tags, content: input.text };
 }
 
-/** NIP-25 reaction. The symbol lives in the content and in the `k` tag. */
+/**
+ * NIP-25 reaction. The symbol lives in the content; the `k` tag holds the kind
+ * of the event reacted to, which is what NIP-25 asks for and what the tag is
+ * for: it is a single-letter tag, so NIP-01 says relays index it, and the only
+ * thing an index of it can be useful for is a kind number. The symbol went
+ * there instead, so a filter on `k` matched nothing and a client reading the
+ * kind got a plus sign.
+ */
 export function buildReaction(input: {
   pubkey: string;
   target: NostrEvent;
   createdAt: number;
   symbol?: string;
+  /** A relay the target can be fetched from, as NIP-25 asks the `e` tag to carry. */
+  relay?: string;
 }): UnsignedEvent {
   const symbol = input.symbol ?? REACTION_PLUS;
+  const tags: string[][] = [
+    ["e", input.target.id, input.relay ?? ""],
+    ["p", input.target.pubkey],
+    ["k", String(input.target.kind)],
+  ];
+  // NIP-25: "If the event being reacted to is an addressable event, an `a`
+  // SHOULD be included together with the `e` tag." Addressable only, unlike the
+  // repost's `a`, because that is the wording.
+  const addressable = coordinateOf(input.target, true);
+  if (addressable !== null) tags.push(["a", addressable]);
   return {
     pubkey: input.pubkey,
     created_at: input.createdAt,
     kind: REACTION_KIND,
-    tags: [
-      ["e", input.target.id],
-      ["p", input.target.pubkey],
-      ["k", symbol],
-    ],
+    tags,
     content: symbol,
   };
 }
@@ -398,24 +442,31 @@ export interface MyActivity {
 
 export type MyActivityMap = Map<string, MyActivity>;
 
-/** Target event id of a repost, reaction or reply. */
+/**
+ * Target event id of a repost, reaction or reply.
+ *
+ * Held to a real id, like every other tag read in this file: NIP-01 allows a tag
+ * of one or more strings, so `["e"]` is well formed and its value is nothing at
+ * all. That went into the deletion set and into the activity map as a key
+ * nothing can ever match.
+ */
 function targets(event: NostrEvent): string[] {
-  return event.tags.filter((tag) => tag[0] === "e").map((tag) => tag[1]);
+  return event.tags
+    .filter((tag) => tag[0] === "e" && isHex64(tag[1]))
+    .map((tag) => tag[1]);
 }
 
 /**
- * The coordinate of an addressable event (`kind:pubkey:d`), or null.
+ * The coordinate an `a` tag names for this event, or null.
  *
- * NIP-09 deletions name addressable events with `a` tags rather than `e`
- * tags, so matching a deletion against an event id alone never fires for
- * them. The coordinate is computed the same way `addressTag` writes it, so the
- * two always agree.
+ * NIP-09 deletions name addressable events with `a` tags rather than `e` tags,
+ * so matching a deletion against an event id alone never fires for them, and
+ * `deletedAddresses` collects whatever coordinate the reader's own deletions
+ * carry — replaceable kinds included, since NIP-01 gives those a coordinate too.
+ * Computed the same way `addressTag` writes it, so the two always agree.
  */
 export function eventAddress(event: NostrEvent): string | null {
-  if (event.kind !== 30023 && event.kind !== 30024) return null;
-  const d = event.tags.find((tag) => tag[0] === "d")?.[1];
-  if (d === undefined) return null;
-  return `${event.kind}:${event.pubkey}:${d}`;
+  return coordinateOf(event);
 }
 
 /**
