@@ -546,6 +546,36 @@ export function clearFeed(): void {
 }
 
 /**
+ * The home feed's author list, after the reader's own follow list has changed.
+ *
+ * The list was read once at login and written once at login, so a follow made
+ * during the session never reached it. Everything downstream held the list from
+ * login — the paginator's `authors`, the live subscription on every relay — and
+ * since none of it changed, the person who had just been followed could not
+ * appear in Home at all until a reload re-read the list from the relays. The
+ * follow button said "フォロー中" and the feed disagreed with it.
+ *
+ * Persisted for the same reason `applyLoginFeed` persists: a reload restores the
+ * list from storage, and a copy that had not heard about the follow would put
+ * the reader back to a feed without that person in it.
+ *
+ * `relayVersion` is deliberately not bumped. Everything keyed on the feed list
+ * also rebuilds the reader's *own* lists — the follow list this call comes from
+ * among them — and a reload of the list that was just published would throw away
+ * the optimistic copy the follow button is painting from.
+ */
+export function adoptFeedAuthors(authors: string[]): void {
+  // The global feed (a signed-out reader) stays global. A follow needs a session,
+  // so this is only reached where a list already exists — guarded anyway, because
+  // quietly turning the global feed into a follows list is not a thing a follow
+  // button may do to a reader who never asked for one.
+  if (feedAuthors() === null) return;
+  const next = [...new Set(authors)];
+  setFeedAuthors(next);
+  writeStorage(FEED_STORAGE_KEY, JSON.stringify(next));
+}
+
+/**
  * Newest first, with NIP-01's tie-break: on equal timestamps the lowest id
  * comes first. `compareEvents` is a total order — the hand-written comparator
  * here returned `1` for two fully equal events, which is not an ordering at

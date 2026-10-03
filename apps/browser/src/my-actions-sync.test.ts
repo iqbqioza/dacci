@@ -114,6 +114,48 @@ async function signedIn(
   return store;
 }
 
+describe("a browser that refuses to store anything", () => {
+  it("reads an empty row instead of throwing out of the signal update", async () => {
+    // The read runs inside `setActivity`, which the login itself triggers. A
+    // refusal used to land in `loginWithNsec`'s catch and be reported as an
+    // invalid secret, leaving the app signed in with no method and no signer on
+    // any connection — all over a browser that had only declined to remember
+    // which posts it had already reacted to.
+    (globalThis as { localStorage?: Storage }).localStorage = {
+      getItem: () => {
+        throw new Error("storage refused");
+      },
+      setItem: () => {
+        throw new Error("storage refused");
+      },
+      removeItem: () => {
+        throw new Error("storage refused");
+      },
+    } as unknown as Storage;
+    const store = await signedIn(async () => ({ failed: true, events: [] }));
+    expect(store.hasDone("react", POST)).toBe(false);
+    expect(store.myActivityPubkey()).toBe(ME);
+  });
+
+  it("still records the action a relay has already accepted", async () => {
+    // The write is inside the signal updater, and the updater runs after the
+    // publish resolves. A refusal there used to come out of the same call that
+    // published, so a reaction that had gone out was reported as one that failed —
+    // and a reader who believed that would press it again.
+    (globalThis as { localStorage?: Storage }).localStorage = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("quota exceeded");
+      },
+      removeItem: () => undefined,
+    } as unknown as Storage;
+    const store = await signedIn(async () => ({ failed: true, events: [] }));
+    expect(() => store.markReacted(POST, reactionId())).not.toThrow();
+    // The row is what the reader sees, and it is right even with nothing stored.
+    expect(store.hasDone("react", POST)).toBe(true);
+  });
+});
+
 describe("reconciling with the relays", () => {
   it("throws away an answer that lands after the reader changed", async () => {
     // The round is raced against a 5 s deadline, so signing out and back in

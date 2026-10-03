@@ -4,6 +4,7 @@ import {
   buildFollowList,
   compareEvents,
   CONTACTS_KIND,
+  contactPubkeys,
   contactTags,
   followsIn,
   withFollowed,
@@ -13,7 +14,7 @@ import { useAuth } from "./auth.jsx";
 import { publishEvent, publishFailureText } from "./compose.js";
 import { showNotice } from "./notice.js";
 import { getConnection } from "./nostr.js";
-import { useRelays } from "./relays.js";
+import { adoptFeedAuthors, useRelays } from "./relays.js";
 
 /**
  * The reader's own NIP-02 follow list.
@@ -181,6 +182,10 @@ export async function toggleFollow(pubkey: string): Promise<void> {
     if (generation !== readGeneration || useAuth().pubkey() !== key) return;
     setTags(next);
     setLoaded(true);
+    // The home feed is filtered by this very list, and it was only ever told
+    // about it at login. Without this the person just followed was in the
+    // reader's list, in the button, and in nobody's timeline.
+    adoptFeedAuthors([key, ...contactPubkeys(next)]);
     showNotice(was ? "フォロー解除しました" : "フォローしました");
   } finally {
     // Only the call that queued the round clears the flag; a newer read has

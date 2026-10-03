@@ -5,6 +5,7 @@ import {
   addRelay,
   applyLoginFeed,
   applyLoginRelaySet,
+  adoptFeedAuthors,
   clearFeed,
   DEFAULT_RELAYS,
   initRelays,
@@ -40,6 +41,25 @@ function makeListEvent(createdAt: number, relays: string[]): NostrEvent {
  * this constant is derived from.
  */
 const PUBKEY = fixturePubkey("reader");
+
+/**
+ * A localStorage and sessionStorage in memory, so a test can read back what the
+ * app persisted without touching the browser's.
+ */
+function stubStorage(): Map<string, string> {
+  const store = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => void store.set(key, value),
+    removeItem: (key: string) => void store.delete(key),
+  });
+  vi.stubGlobal("sessionStorage", {
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+  });
+  return store;
+}
 
 /**
  * Changing the relay set fires a status refresh over the whole set, and this
@@ -156,22 +176,76 @@ describe("applyLoginFeed", () => {
   });
 });
 
-describe("relay/feed persistence", () => {
-  function stubStorage() {
-    const store = new Map<string, string>();
-    vi.stubGlobal("localStorage", {
-      getItem: (key: string) => store.get(key) ?? null,
-      setItem: (key: string, value: string) => void store.set(key, value),
-      removeItem: (key: string) => void store.delete(key),
-    });
-    vi.stubGlobal("sessionStorage", {
-      getItem: () => null,
-      setItem: () => {},
-      removeItem: () => {},
-    });
-    return store;
-  }
+describe("adoptFeedAuthors", () => {
+  it("takes the list as it now stands, and persists it", async () => {
+    // The list is written to storage on the same terms as the one read at login,
+    // so a reload does not put the reader back to a feed that never heard about
+    // the follow they made.
+    const store = stubStorage();
+    restoreDefaults();
+    try {
+      await applyLoginFeed(PUBKEY, async () => []);
+      adoptFeedAuthors([PUBKEY, "b".repeat(64)]);
+      expect(useFeed().feedAuthors()).toEqual([PUBKEY, "b".repeat(64)]);
+      expect(JSON.parse(store.get("dacci.feed") ?? "[]")).toEqual([
+        PUBKEY,
+        "b".repeat(64),
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+      clearFeed();
+      restoreDefaults();
+    }
+  });
 
+  it("names nobody twice", async () => {
+    // A list that names the reader twice asks for their posts twice over, and
+    // the filter a relay receives is what decides how much work it does.
+    restoreDefaults();
+    try {
+      await applyLoginFeed(PUBKEY, async () => []);
+      adoptFeedAuthors([PUBKEY, "b".repeat(64), PUBKEY, "b".repeat(64)]);
+      expect(useFeed().feedAuthors()).toEqual([PUBKEY, "b".repeat(64)]);
+    } finally {
+      clearFeed();
+      restoreDefaults();
+    }
+  });
+
+  it("leaves the global feed alone", async () => {
+    // Signed out, the home feed is everybody's. Turning it into one reader's
+    // follows behind their back is not something a follow may do, and the
+    // button that would have asked is not there without a session.
+    restoreDefaults();
+    clearFeed();
+    try {
+      expect(useFeed().feedAuthors()).toBeNull();
+      adoptFeedAuthors([PUBKEY, "b".repeat(64)]);
+      expect(useFeed().feedAuthors()).toBeNull();
+    } finally {
+      restoreDefaults();
+    }
+  });
+
+  it("does not claim the relay set changed", async () => {
+    // Everything keyed on the feed list also rebuilds the reader's own lists,
+    // the list this call comes from among them, so bumping the relay version here
+    // would drop the copy the follow button is painting from and read the list
+    // back off the relays mid-publish.
+    restoreDefaults();
+    try {
+      await applyLoginFeed(PUBKEY, async () => []);
+      const before = useRelays().relayVersion();
+      adoptFeedAuthors([PUBKEY, "b".repeat(64)]);
+      expect(useRelays().relayVersion()).toBe(before);
+    } finally {
+      clearFeed();
+      restoreDefaults();
+    }
+  });
+});
+
+describe("relay/feed persistence", () => {
   it("persists the switched set", async () => {
     stubStorage();
     try {

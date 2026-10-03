@@ -21,6 +21,18 @@ function stubStorage() {
 const PUBKEY = "b".repeat(64);
 
 /**
+ * Whether the relay connection the mock below hands out is holding a signer.
+ *
+ * The only thing that mock records about a connection, and the thing signing out
+ * exists to change: what the reader can publish with is decided here, not by any
+ * signal the interface draws.
+ */
+let lastConnection: { hasSigner: boolean } | null = null;
+function connectionSigner(): boolean {
+  return lastConnection?.hasSigner === true;
+}
+
+/**
  * Signing out restores the default relay set, and every set change fires a status
  * refresh over the whole set — so `beforeEach` was dialling four public relays
  * before each test even began. The assertions here are about the session, never
@@ -51,6 +63,7 @@ vi.mock(new URL("../src/nostr.ts", import.meta.url).pathname, () => {
       subscribe: () => () => {},
       close: () => {},
     };
+    lastConnection = conn;
     return conn;
   };
   return {
@@ -128,6 +141,54 @@ describe("restoreSession", () => {
     expect(store.has("dacci.auth")).toBe(true);
   });
 
+  it("never rejects when the browser refuses every storage call", async () => {
+  // The old path read the entry inside a try and, when the read threw, cleaned up
+  // by calling `removeItem` — from inside the catch, where a second refusal threw
+  // again and left the promise rejected. `App.tsx` starts the upload-server read
+  // in a `then` on this promise, so the reader got the built-in servers and an
+  // unhandled rejection over a browser that had simply said no.
+    stubStorage();
+    vi.stubGlobal("localStorage", {
+      getItem: () => {
+        throw new Error("storage refused");
+      },
+      setItem: () => {
+        throw new Error("storage refused");
+      },
+      removeItem: () => {
+        throw new Error("storage refused");
+      },
+    });
+    await expect(
+      restoreSession({ queryFn: async () => [] }),
+    ).resolves.toBe(false);
+    expect(useAuth().restoring()).toBe(false);
+    expect(useAuth().pubkey()).toBeNull();
+  });
+
+  it("does not reject when the tab's storage cannot be read either", async () => {
+    // The secret read sits outside the try that guards the stored entry, so it
+    // has to answer for itself: a refusal here used to reject the restore, and
+    // with it the upload-server read chained onto it.
+    stubStorage();
+    const { store } = stubStorage();
+    store.set(
+      "dacci.auth",
+      JSON.stringify({ pubkey: PUBKEY, method: "nsec-session" }),
+    );
+    vi.stubGlobal("sessionStorage", {
+      getItem: () => {
+        throw new Error("storage refused");
+      },
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    });
+    await expect(
+      restoreSession({ queryFn: async () => [] }),
+    ).resolves.toBe(false);
+    expect(useAuth().pubkey()).toBeNull();
+  });
+
   it("keeps the resolved relay set when the session cannot be restored", async () => {
     const { store } = stubStorage();
     store.set(
@@ -191,6 +252,71 @@ describe("loginWithNsec", () => {
     stubStorage();
     expect(await loginWithNsec("not-a-key", offline.queryFn)).toBe(false);
     expect(useAuth().pubkey()).toBeNull();
+  });
+
+  it("signs in anyway when the browser refuses to remember it", async () => {
+    // A reader whose browser will not keep the session has not typed a bad key,
+    // and saying so sends them off to check a key that was fine all along. The
+    // login works; it is only the reload that will not.
+    const { session } = stubStorage();
+    vi.stubGlobal("localStorage", {
+      getItem: () => {
+        throw new Error("storage refused");
+      },
+      setItem: () => {
+        throw new Error("storage refused");
+      },
+      removeItem: () => {
+        throw new Error("storage refused");
+      },
+    });
+    const secret = "11".repeat(32);
+    expect(await loginWithNsec(secret, offline.queryFn)).toBe(true);
+    expect(useAuth().authError()).toBeNull();
+    expect(useAuth().pubkey()).not.toBeNull();
+    // The nsec secret is in the tab's own storage, which did work.
+    expect(session.get("dacci.nsec")).toBe(secret);
+    logout();
+  });
+
+  it("signs in even when the tab's own storage refuses the secret", async () => {
+    // The same refusal, one store over: the write that keeps the secret for a
+    // reload sits inside the try meant for a bad key, so a browser that would not
+    // take it reported "秘密鍵が不正です" for a key it had just accepted. The
+    // signer is in memory either way, so the visit works.
+    stubStorage();
+    vi.stubGlobal("sessionStorage", {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("storage refused");
+      },
+      removeItem: () => undefined,
+    });
+    expect(await loginWithNsec("11".repeat(32), offline.queryFn)).toBe(true);
+    expect(useAuth().authError()).toBeNull();
+    expect(useAuth().pubkey()).not.toBeNull();
+    logout();
+  });
+
+  it("drops the signer from every connection even when storage refuses", async () => {
+    // The step that made signing out mean anything: `applySignerToConnections(null)`
+    // ran *after* the storage removal, so a `removeItem` that threw took it with
+    // it and every relay connection kept the key. The interface said signed out
+    // and anything published was still signed as the reader — the one outcome
+    // worse than a logout that does not finish.
+    stubStorage();
+    expect(await loginWithNsec("11".repeat(32), offline.queryFn)).toBe(true);
+    expect(connectionSigner()).toBe(true);
+    vi.stubGlobal("localStorage", {
+      getItem: () => null,
+      setItem: () => undefined,
+      removeItem: () => {
+        throw new Error("storage refused");
+      },
+    });
+    logout();
+    expect(useAuth().pubkey()).toBeNull();
+    expect(connectionSigner()).toBe(false);
   });
 
   it("restores the session after a reload", async () => {

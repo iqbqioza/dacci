@@ -8,6 +8,7 @@ import {
 import type { AuthSigner } from "dacci-nostr-ws";
 import { createSignal } from "solid-js";
 import { eachConnection } from "./nostr.js";
+import { safeStorage } from "./storage.js";
 import {
   applyLoginProfile,
   defaultQuery,
@@ -79,13 +80,19 @@ export function extensionAvailable(): boolean {
   return hasNip07Extension();
 }
 
-function sessionStore(): Storage | null {
-  try {
-    return (globalThis as { sessionStorage?: Storage }).sessionStorage ?? null;
-  } catch {
-    return null;
-  }
-}
+/**
+ * Where this file keeps the reader's session: which account is signed in, under
+ * which method, and the nsec itself while the tab lives.
+ *
+ * Both stores are read and written through the shared guard, because every way
+ * of touching them directly turned "this browser will not remember me" into
+ * something else — see `storage.ts` for what those ways were. What a refusal
+ * costs here is small and is worth saying plainly: a login that cannot be
+ * remembered works until the tab closes, and a sign-out that cannot clear the
+ * stored entry may offer the session back once on reload.
+ */
+const session = safeStorage("local");
+const tab = safeStorage("session");
 
 export async function loginWithExtension(): Promise<boolean> {
   setAuthError(null);
@@ -95,9 +102,9 @@ export async function loginWithExtension(): Promise<boolean> {
     activeSigner = signer;
     setPubkey(key);
     setMethod("nip07");
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ pubkey: key, method: "nip07" }));
+    session.set(STORAGE_KEY, JSON.stringify({ pubkey: key, method: "nip07" }));
     // The extension owns the key, so nothing secret is kept here.
-    sessionStore()?.removeItem(SECRET_KEY);
+    tab.remove(SECRET_KEY);
     applySignerToConnections(signer);
     await applyLoginProfile(key);
     return true;
@@ -141,10 +148,13 @@ export async function loginWithNsec(
     activeSigner = signer;
     setPubkey(key);
     setMethod("nsec");
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ pubkey: key, method: "nsec-session" }));
+    session.set(
+      STORAGE_KEY,
+      JSON.stringify({ pubkey: key, method: "nsec-session" }),
+    );
     // Session-scoped so a reload keeps the login, but the secret never
     // leaves the tab and is never written to localStorage.
-    sessionStore()?.setItem(SECRET_KEY, secretHex);
+    tab.set(SECRET_KEY, secretHex);
     applySignerToConnections(signer);
     await applyLoginProfile(key, queryFn);
     return true;
@@ -176,8 +186,8 @@ function clearSession(options: { keepStoredEntry?: boolean } = {}): void {
   setMethod(null);
   setAuthError(null);
   if (options.keepStoredEntry !== true) {
-    localStorage.removeItem(STORAGE_KEY);
-    sessionStore()?.removeItem(SECRET_KEY);
+    session.remove(STORAGE_KEY);
+    tab.remove(SECRET_KEY);
   }
   applySignerToConnections(null);
 }
@@ -215,15 +225,15 @@ async function restoreSessionInner(deps: {
 }): Promise<boolean> {
   let stored: unknown;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = session.get(STORAGE_KEY);
     if (raw === null) return false;
     stored = JSON.parse(raw);
   } catch {
-    localStorage.removeItem(STORAGE_KEY);
+    session.remove(STORAGE_KEY);
     return false;
   }
   if (typeof stored !== "object" || stored === null) {
-    localStorage.removeItem(STORAGE_KEY);
+    session.remove(STORAGE_KEY);
     return false;
   }
   const method = (stored as { method?: unknown }).method;
@@ -231,9 +241,9 @@ async function restoreSessionInner(deps: {
   // nsec: the secret lives in sessionStorage, so a reload can pick the
   // login back up without ever persisting it beyond the tab.
   if (method === "nsec-session") {
-    const secret = sessionStore()?.getItem(SECRET_KEY) ?? null;
+    const secret = tab.get(SECRET_KEY);
     if (secret === null) {
-      localStorage.removeItem(STORAGE_KEY);
+      session.remove(STORAGE_KEY);
       return false;
     }
     try {
@@ -250,7 +260,7 @@ async function restoreSessionInner(deps: {
   }
 
   if (method !== "nip07") {
-    localStorage.removeItem(STORAGE_KEY);
+    session.remove(STORAGE_KEY);
     return false;
   }
   const signer = new Nip07Signer();
@@ -264,10 +274,7 @@ async function restoreSessionInner(deps: {
   }
   await establishSession(signer, key);
   setMethod("nip07");
-  localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify({ pubkey: key, method: "nip07" }),
-  );
+  session.set(STORAGE_KEY, JSON.stringify({ pubkey: key, method: "nip07" }));
   await applyLoginProfile(key, deps.queryFn);
   return true;
 }

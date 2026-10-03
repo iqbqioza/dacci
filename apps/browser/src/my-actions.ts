@@ -9,6 +9,7 @@ import {
 import { createSignal } from "solid-js";
 import { getConnection } from "./nostr.js";
 import { useRelays } from "./relays.js";
+import { safeStorage } from "./storage.js";
 
 /**
  * What the signed-in reader has already done to each post.
@@ -46,13 +47,19 @@ let readGeneration = 0;
 export const myActivity = activity;
 export const myActivityPubkey = pubkey;
 
-function storage(): Storage | null {
-  return (globalThis as { localStorage?: Storage }).localStorage ?? null;
-}
+/**
+ * The reader's own action rows, kept per account so two accounts in one browser
+ * never see each other's.
+ *
+ * Storage is not load-bearing here — the relays hold the reader's own events and
+ * every login reconciles against them — so a browser that will not store this
+ * loses a faster first paint and nothing else.
+ */
+const store = safeStorage("local");
 
 function read(pubkey: string): MyActivityMap {
-  const raw = storage()?.getItem(`${STORAGE_PREFIX}${pubkey}`);
-  if (raw === null || raw === undefined) return new Map();
+  const raw = store.get(`${STORAGE_PREFIX}${pubkey}`);
+  if (raw === null) return new Map();
   try {
     const parsed: unknown = JSON.parse(raw);
     if (parsed === null || typeof parsed !== "object") return new Map();
@@ -63,10 +70,7 @@ function read(pubkey: string): MyActivityMap {
 }
 
 function write(pubkey: string, map: MyActivityMap): void {
-  storage()?.setItem(
-    `${STORAGE_PREFIX}${pubkey}`,
-    JSON.stringify(Object.fromEntries(map)),
-  );
+  store.set(`${STORAGE_PREFIX}${pubkey}`, JSON.stringify(Object.fromEntries(map)));
 }
 
 function update(pubkey: string, mutate: (map: MyActivityMap) => MyActivityMap): void {

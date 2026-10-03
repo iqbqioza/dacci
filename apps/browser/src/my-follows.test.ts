@@ -24,6 +24,9 @@ const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 /** Who the fake vault is signed in as; the tests change this mid-flight. */
 let signedInAs: string | null = ME;
 
+/** Every author list the store handed the home feed, in order. */
+let adoptedAuthors: string[][] = [];
+
 /** The store is module level, so a fresh import gives a clean list. */
 async function freshStore() {
   vi.resetModules();
@@ -82,11 +85,18 @@ beforeEach(() => {
     }),
   }));
   answerWith([listEvent([["p", ALICE]])]);
+  adoptedAuthors = [];
   vi.doMock("./relays.js", () => ({
     useRelays: () => ({
       readRelays: () => ["wss://read.example"],
       writeRelays: () => ["wss://write.example"],
     }),
+    // The home feed is filtered by this list and was only told about it at
+    // login, so what the store hands over here is the whole difference between a
+    // follow that shows up in the timeline and one that does not.
+    adoptFeedAuthors: (authors: string[]) => {
+      adoptedAuthors.push(authors);
+    },
     // The publisher reports each relay's outcome through this, so the store
     // keeps a per-relay state the panel shows.
     noteWriteResult: () => undefined,
@@ -205,6 +215,54 @@ describe("my follows", () => {
     await store.useFollowState(ALICE).toggle();
     expect(published[0]).toMatchObject({ tags: [["p", BOB]] });
     expect(store.useFollowState(ALICE).following()).toBe(false);
+  });
+
+  it("tells the home feed about the follow, so the feed can show them", async () => {
+    // The button and the list both said "following", and the timeline said
+    // nothing: the feed's author list is read once at login and never again, so
+    // the person who had just been followed could not appear in Home until a
+    // reload re-read the list from the relays.
+    answerWith([listEvent([["p", ALICE]])]);
+    const store = await freshStore();
+    store.requestMyFollows();
+    await settled();
+    await store.useFollowState(BOB).toggle();
+    // Self first, then the list as it now stands — the same shape the login read
+    // produces, so the two cannot disagree about what a follow list is.
+    expect(adoptedAuthors).toEqual([[ME, ALICE, BOB]]);
+  });
+
+  it("tells the home feed about an unfollow too", async () => {
+    answerWith([listEvent([["p", ALICE], ["p", BOB]])]);
+    const store = await freshStore();
+    store.requestMyFollows();
+    await settled();
+    await store.useFollowState(ALICE).toggle();
+    expect(adoptedAuthors).toEqual([[ME, BOB]]);
+  });
+
+  it("tells the home feed nothing when the publish did not happen", async () => {
+    // A list that was not published is not the reader's list, and the timeline
+    // has to keep the one it already had.
+    vi.doMock("./compose.js", () => ({ publishEvent: async () => null }));
+    const store = await freshStore();
+    store.requestMyFollows();
+    await settled();
+    await store.useFollowState(BOB).toggle();
+    expect(adoptedAuthors).toEqual([]);
+  });
+
+  it("tells the home feed nothing while the list is still unknown", async () => {
+    answerWith([], []);
+    vi.doMock("./nostr.js", () => ({
+      getConnection: () => ({ query: async () => ({ failed: true }) }),
+      publish: async () => ({ accepted: true }),
+    }));
+    const store = await freshStore();
+    store.requestMyFollows();
+    await settled();
+    await store.useFollowState(BOB).toggle();
+    expect(adoptedAuthors).toEqual([]);
   });
 
   it("refuses to publish while the list is still unknown", async () => {
