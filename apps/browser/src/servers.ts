@@ -284,8 +284,14 @@ export async function loadServers(): Promise<void> {
   if (inFlight !== null && inFlightFor === key) return inFlight;
   inFlightFor = key;
   inFlight = loadServersInner().finally(() => {
-    inFlight = null;
-    inFlightFor = null;
+    // Only when still ours. An account switch starts a second round and moves
+    // the guard to it; the first round settling afterwards must not clear the
+    // second's guard, which would let a third call start a duplicate round
+    // while the second is still out.
+    if (inFlightFor === key) {
+      inFlight = null;
+      inFlightFor = null;
+    }
   });
   return inFlight;
 }
@@ -312,17 +318,41 @@ async function loadServersInner(): Promise<void> {
     // or a sign-in cannot open the gate for whoever is here now.
     if (useAuth().pubkey() !== pubkey) return;
     setReadFor(pubkey);
-    // Nothing published leaves the reader with what they had.
-    if (list.servers.length === 0) return;
+    // Whatever was added while the round was out, measured against the list as
+    // it stood when the round started. Computed before every exit below,
+    // because an edit the closed gate turned away is unpublished work no
+    // matter what the answer holds.
+    const now = servers();
+    const added = now.filter(
+      (server) => !atStart.some((known) => known.url === server.url),
+    );
+    // Nothing published leaves the reader with what they had — but a mid-read
+    // edit is still unpublished work, so it goes out now that the gate is open.
+    if (list.servers.length === 0) {
+      if (added.length > 0) void publishServers();
+      return;
+    }
     // A relay can still be answering with a list older than the edit the
     // reader just published, so an answer that predates the newest thing
     // this browser knows about is dropped: it must never undo a change that
     // is still on screen. Anything as new or newer replaces the list, which
     // is what brings in servers published on another client.
     if (list.at < lastWrite(pubkey)) return;
-    const next = dedupe(list.servers);
-    if (sameServers(next, atStart)) return;
+    // The answer is older than the tap that just happened by construction —
+    // the round started first — so replacing the list with it drops a server
+    // the reader has just been told was saved. Additions merge in front, which
+    // is also where the upload order reads them.
+    //
+    // Removals need no half of this: taking one out publishes at once, which
+    // moves `lastWrite` past any answer that could bring it back, and an
+    // answer newer than that is newer than the removal too.
+    const next = dedupe([...added, ...list.servers]);
+    if (sameServers(next, now)) return;
     setServers(next);
+    // The gate just opened, so an edit the closed gate turned away can go now.
+    // Leaving it unpublished would keep it local-only until the next edit, on
+    // this device alone.
+    if (added.length > 0) void publishServers();
   } catch {
     // A relay that refuses leaves the stored list in place.
   }
@@ -411,9 +441,12 @@ async function fetchServerPreference(pubkey: string): Promise<FetchedList> {
   })) as NostrEvent[];
   const events = signedCandidates(answer, pubkey);
   // A replaceable event: relays lag behind each other, so only the newest
-  // answer describes the list the reader has now. The newer kind wins over
-  // an older one even when its copy was published earlier, because the
-  // reader has since moved to it.
+  // answer per kind describes the list the reader has now. Both kinds are
+  // then unioned rather than resolved in favour of the newer kind: neither
+  // BUD-03 (kind 10063) nor NIP-96 (kind 10096) defines cross-kind
+  // precedence, and dropping the older kind's servers would strand a reader
+  // whose other client still publishes it. A removal therefore takes effect
+  // on the next publish from this device, not on the read.
   const out: UploadServer[] = [];
   let at = 0;
   // A relay may answer with events of other kinds than were asked for, so

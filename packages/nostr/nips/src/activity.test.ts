@@ -328,6 +328,22 @@ describe("buildRepost", () => {
   });
 });
 
+  it("names a self-thread's author once, not twice", () => {
+    // Answering one's own reply used to carry the same `p` tag for the root
+    // and for the target, because both branches named their author
+    // unconditionally. A duplicated `p` tag notifies nobody twice, but it is
+    // noise every other client has to carry.
+    const mine = signed(1, ME, [], 1000);
+    const event = buildReply({
+      pubkey: ME,
+      text: "x",
+      target: mine,
+      root: { id: "9".repeat(64), pubkey: ME },
+      createdAt: AT,
+    });
+    expect(event.tags.filter((t) => t[0] === "p" && t[1] === ME)).toHaveLength(1);
+  });
+
 describe("buildQuoteRepost", () => {
   it("adds the q tag and keeps the quoter text", () => {
     const event = buildQuoteRepost({

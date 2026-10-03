@@ -18,7 +18,6 @@ export type UploadFailure =
   | "too-large"
   | "unsupported-type"
   | "rejected"
-  | "no-url"
   | "unknown";
 
 export type UploadResult =
@@ -47,8 +46,6 @@ interface ServerInfo {
   method: "POST" | "PUT";
   /** Where a stored file is read from, when it differs from the endpoint. */
   downloadUrl: string;
-  /** True when the request must carry a signature. */
-  authRequired: boolean;
   /** The types the server accepts, or null when it does not say. */
   contentTypes: string[] | null;
 }
@@ -79,7 +76,14 @@ function absoluteOrResolved(address: string, server: string): string {
   }
 }
 
-async function serverInfo(server: string, seen: Set<string> = new Set()): Promise<ServerInfo> {  const wellKnown = `${server}/.well-known/nostr/nip96.json`;
+/** How many well-known documents one upload may chase across hosts. */
+const MAX_DELEGATION_HOPS = 2;
+
+async function serverInfo(
+  server: string,
+  seen: Set<string> = new Set(),
+  hops = 0,
+): Promise<ServerInfo> {  const wellKnown = `${server}/.well-known/nostr/nip96.json`;
   let record: {
     api_url?: unknown;
     download_url?: unknown;
@@ -90,9 +94,10 @@ async function serverInfo(server: string, seen: Set<string> = new Set()): Promis
   try {
     const response = await fetch(wellKnown, {
       headers: { Accept: "application/json" },
-      // The deadline covers the document as well as the upload. A host that
-      // completes the handshake and then says nothing would otherwise leave the
-      // reader watching a spinner with no way forward and no error.
+      // One of two independent deadlines: this one for the document, another
+      // for the upload itself below. A host that completes the handshake and
+      // then says nothing would otherwise leave the reader watching a spinner
+      // with no way forward and no error.
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     if (response.ok && servesItself(response.url, server)) {
@@ -119,10 +124,9 @@ async function serverInfo(server: string, seen: Set<string> = new Set()): Promis
         typeof record.download_url === "string" && record.download_url !== ""
           ? absoluteOrResolved(record.download_url, server)
           : endpoint,
-      // NIP-96 marks the upload AUTH required. A plan may also accept an
-      // unsigned one (`is_nip98_required: false`), but signing still works
-      // there, so a signature is sent either way.
-      authRequired: true,
+      // A signature is sent either way: NIP-96 marks the upload AUTH required,
+      // and a plan that also accepts an unsigned one (`is_nip98_required:
+      // false`) still takes a signed one.
       contentTypes: readContentTypes(record.content_types),
     };
   }
@@ -131,16 +135,27 @@ async function serverInfo(server: string, seen: Set<string> = new Set()): Promis
   // to be asked of the host the relay named instead.
   const delegated = record.delegated_to_url;
   if (typeof delegated === "string" && delegated !== "" && !seen.has(delegated)) {
+    // Chased at most this far. NIP-96 documents `delegated_to_url` for a relay
+    // pointing at one file server, not for servers pointing at each other, so
+    // no legitimate chain is longer — and every hop holds the picker another
+    // minute. Past the cap the host at hand is addressed as BUD-02, the same
+    // fallback a document-less host gets below.
+    if (hops >= MAX_DELEGATION_HOPS) return bud02(server);
     seen.add(server);
-    return serverInfo(delegated.replace(/\/+$/, ""), seen);
+    return serverInfo(delegated.replace(/\/+$/, ""), seen, hops + 1);
   }
-  // BUD-02: the upload lives at /upload on the host itself. The document says
-  // nothing about which types are taken, so nothing is refused up front.
+  return bud02(server);
+}
+
+/**
+ * BUD-02: the upload lives at /upload on the host itself. The document says
+ * nothing about which types are taken, so nothing is refused up front.
+ */
+function bud02(server: string): ServerInfo {
   return {
     endpoint: `${server}/upload`,
     method: "PUT",
     downloadUrl: server,
-    authRequired: true,
     contentTypes: null,
   };
 }
@@ -212,7 +227,11 @@ async function authorization(
   let blossomServer: string | null = null;
   if (info.method === "PUT") {
     try {
-      blossomServer = new URL(endpoint).host;
+      // BUD-11: the `server` tag "MUST be a lowercase domain name only", not a
+      // full URL — and `host` keeps a non-default port, which fails the
+      // server's exact match. A port-less host reads the same either way, which
+      // is why the tests never caught it.
+      blossomServer = new URL(endpoint).hostname.toLowerCase();
     } catch {
       return "invalid-endpoint";
     }
@@ -306,7 +325,10 @@ function nip96Answer(body: unknown): {
 /** What a server says when it refuses, in the reader's words. */
 function refusalText(status: number): string | null {
   if (status === 401) return "このサーバーは署名つきアップロードが必要です";
-  if (status === 403) return "サーバーが署名を拒否しました";
+  // Forbidden by server policy (BUD-02), or not allowed / hash mismatch
+  // (NIP-96) — neither means the signature itself was refused, so neither
+  // says so. The previous wording blamed the signature for every 403.
+  if (status === 403) return "サーバーがアップロードを許可しませんでした";
   if (status === 409) return "アップロード内容がハッシュと一致しません";
   if (status === 415) return "このサーバーはそのファイル形式を受け付けません";
   return null;
@@ -327,9 +349,13 @@ function isTimeout(error: unknown): boolean {
  * True when the request never reached the server.
  *
  * A fetch that never finishes its preflight fails with a TypeError, and a
- * transport fault fails the same way; either way nothing crossed the network,
- * so a cross-origin refusal is the likeliest cause and the one the reader can
- * act on by picking a different server.
+ * transport fault fails the same way. `fetch` rejects with nothing else —
+ * only `TypeError` for the request failing and `AbortError` for the deadline
+ * — so excluding the deadline leaves the request-failed case, and a
+ * cross-origin refusal is its likeliest member. It is not proven: DNS, an
+ * offline reader and a refused connection fail the same way, and the message
+ * below says CORS because that is the one the reader can act on by picking a
+ * different server, not because the others were ruled out.
  *
  * A deadline is not that. The server was reached and simply did not answer
  * within the time allowed, which happens to a busy or half-open host, and
@@ -351,7 +377,10 @@ export async function uploadFile(
   server: UploadServer,
   file: File,
 ): Promise<UploadResult> {
-  const digest = sha256(new Uint8Array(await file.arrayBuffer()));
+  // Read once: the digest below and the PUT body further down shared this read,
+  // so a large file sat in memory twice.
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const digest = sha256(bytes);
 
   let info: ServerInfo;
   try {
@@ -374,7 +403,7 @@ export async function uploadFile(
     // BUD-02 takes the bytes themselves, not a form.
     headers["Content-Type"] = file.type === "" ? "application/octet-stream" : file.type;
     headers["X-SHA-256"] = bytesToHex(digest);
-    body = await file.arrayBuffer();
+    body = bytes;
   } else {
     const form = new FormData();
     form.append("file", file);
@@ -519,8 +548,6 @@ export function uploadFailureText(failure: UploadFailure): string {
       return "この形式はアップロードできません";
     case "rejected":
       return "サーバーがアップロードを拒否しました";
-    case "no-url":
-      return "サーバーの応答にURLが含まれていませんでした";
     case "unknown":
       return "アップロードに失敗しました";
   }

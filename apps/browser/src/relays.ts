@@ -299,19 +299,32 @@ async function firstAnswer(
 }
 
 function setStatus(url: string, status: RelayConnStatus): void {
+  // Only for a relay that is still in the set. A probe started before a relay
+  // was removed lands after the reset otherwise, and re-adds a ghost row for
+  // a relay the reader just deleted. The same holds for a write result that
+  // arrives after its relay is gone.
+  if (!relayEntries().some((entry) => entry.url === url)) return;
   setRelayStatuses((prev) => ({ ...prev, [url]: status }));
 }
 
 async function checkOne(url: string): Promise<void> {
+  // The set this probe belongs to. A relay-set change mid-probe resets every
+  // status to "unknown" and starts a fresh round for the new set; an answer
+  // for the old set landing afterwards must not overwrite it — including the
+  // "checking" this probe wrote before it, which the reset has already cleared.
+  const version = relayVersion();
+  const stale = (): boolean => version !== relayVersion();
   setStatus(url, "checking");
   try {
     // limit: 0 fetches no stored events; EOSE alone proves reachability.
     const result = await getConnection(url).query({ limit: 0 }, 3000);
+    if (stale()) return;
     setStatus(
       url,
       result.failed ? (result.authRequired ? "auth" : "offline") : "online",
     );
   } catch {
+    if (stale()) return;
     setStatus(url, "offline");
   }
 }

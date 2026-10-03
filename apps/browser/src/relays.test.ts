@@ -342,6 +342,51 @@ describe("relay set editing", () => {
     restoreDefaults();
   });
 
+  it("does not resurrect a relay removed while its probe is out", async () => {
+    // Switching sets resets every status to "unknown" and probes the new set.
+    // A probe started before a relay was removed used to land after the reset
+    // and re-add a status row for it — so the settings panel showed a ghost
+    // relay the reader had just deleted, with a state nobody had asked for.
+    vi.stubGlobal("localStorage", {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {},
+    });
+    try {
+      vi.resetModules();
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      vi.doMock("./nostr.js", () => ({
+        getConnection: (url: string) => ({
+          url,
+          query: async () => {
+            if (url === "wss://doomed.example") await gate;
+            return { events: [], eose: true, failed: false, authRequired: false };
+          },
+        }),
+      }));
+      const fresh = await import("./relays.js");
+      fresh.restoreDefaults();
+      fresh.addRelay("wss://doomed.example", "both");
+      const probing = fresh.refreshStatuses();
+      await new Promise((r) => setTimeout(r, 10));
+      fresh.removeRelay("wss://doomed.example");
+      release();
+      await probing;
+      // Gone from the set, and no status row for it either.
+      expect(fresh.useRelays().relayUrls()).not.toContain("wss://doomed.example");
+      expect(
+        fresh.useRelays().relayStatuses()["wss://doomed.example"],
+      ).toBeUndefined();
+      fresh.restoreDefaults();
+    } finally {
+      vi.doUnmock("./nostr.js");
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("does not call a relay that answered us offline", () => {
     // A write-only relay is never probed, so the only thing the list knows about
     // it is what a publish came back with. NIP-01 answers a publish it will not

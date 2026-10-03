@@ -617,6 +617,116 @@ describe("publishServers", () => {
     expect(own(firstAgain.store)).toEqual(["https://first.example"]);
   });
 
+  it("keeps a server added while the startup read is out, and publishes it after", async () => {
+    // The read closes the publish gate for the whole relay round, so an edit
+    // made mid-read was kept locally but published nothing — and when the
+    // answer landed it replaced the list wholesale, dropping the server the
+    // reader had just been told was saved.
+    const pubkey = READER;
+    const sent: Array<Record<string, unknown>> = [];
+    vi.resetModules();
+    vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
+    vi.doMock("./compose.js", () => ({
+      publishEvent: async (template: Record<string, unknown>) => {
+        sent.push(template);
+        return { ...template, id: "f".repeat(64), sig: "e".repeat(128) };
+      },
+    }));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    vi.doMock("./nostr.js", () => ({
+      getConnection: () => ({
+        url: "wss://read.example",
+        query: async () => {
+          calls += 1;
+          if (calls === 1) await gate;
+          return { failed: false, events: [] };
+        },
+      }),
+    }));
+    vi.doMock("./relays.js", () => ({
+      useRelays: () => ({ readRelays: () => ["wss://read.example"] }),
+    }));
+    const store = await import("./servers.js");
+    const reading = store.loadServers();
+    await new Promise((r) => setTimeout(r, 10));
+    // The gate is closed while the round is out, so this saves locally only.
+    expect(await store.addServerAndPublish("https://mid-read.example")).toBe(
+      "ok",
+    );
+    expect(sent).toHaveLength(0);
+    release();
+    await reading;
+    await new Promise((r) => setTimeout(r, 10));
+    // Still there after the answer lands — and now published, since the read
+    // that refused it is the read that just finished.
+    expect(own(store)).toEqual(["https://mid-read.example"]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].tags).toEqual([["server", "https://mid-read.example"]]);
+  });
+
+  it("merges a mid-read addition into an answer that differs", async () => {
+    // The other half of the race: the answer holds something this device does
+    // not have, so replacing wholesale is what brings it in — but the server
+    // added mid-read is newer than the round by construction, and replacing
+    // drops it all the same.
+    const pubkey = READER;
+    const sent: Array<Record<string, unknown>> = [];
+    vi.resetModules();
+    vi.doMock("./auth.js", () => ({ useAuth: () => ({ pubkey: () => pubkey }) }));
+    vi.doMock("./compose.js", () => ({
+      publishEvent: async (template: Record<string, unknown>) => {
+        sent.push(template);
+        return { ...template, id: "f".repeat(64), sig: "e".repeat(128) };
+      },
+    }));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    const now = Math.floor(Date.now() / 1000);
+    vi.doMock("./nostr.js", () => ({
+      getConnection: () => ({
+        url: "wss://read.example",
+        query: async () => {
+          calls += 1;
+          if (calls === 1) await gate;
+          return {
+            failed: false,
+            events: [
+              listEvent(["https://other.example"], { at: now - 100 }),
+            ],
+          };
+        },
+      }),
+    }));
+    vi.doMock("./relays.js", () => ({
+      useRelays: () => ({ readRelays: () => ["wss://read.example"] }),
+    }));
+    const store = await import("./servers.js");
+    const reading = store.loadServers();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(await store.addServerAndPublish("https://mid-read.example")).toBe(
+      "ok",
+    );
+    release();
+    await reading;
+    await new Promise((r) => setTimeout(r, 10));
+    // The other client's server arrives, and the mid-read one survives it.
+    expect(own(store).sort()).toEqual(
+      ["https://mid-read.example", "https://other.example"].sort(),
+    );
+    expect(sent).toHaveLength(1);
+    expect(sent[0].tags).toEqual([
+      ["server", "https://mid-read.example"],
+      ["server", "https://other.example"],
+    ]);
+  });
+
   it("publishes nothing when the reader is not signed in", async () => {
     const store = await freshStore();
     store.addServer("https://files.example");

@@ -126,7 +126,9 @@ export function buildReply(input: ReplyInput): UnsignedEvent {
     // notifying one participant. The other order notified everyone and named the
     // wrong post as the root, which split the thread for every reader.
     if (rootPubkey !== undefined) tags.push(carried(rootPubkey));
-    tags.push(carried(target.pubkey));
+    // Unless it is the same person answering themselves: a self-thread carries
+    // one `p` tag for its author, not two copies of it.
+    if (rootPubkey !== target.pubkey) tags.push(carried(target.pubkey));
   } else {
     // A direct reply to the root: one marked tag, naming it as both the thread
     // it belongs to and the post being answered.

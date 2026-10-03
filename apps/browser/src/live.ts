@@ -64,22 +64,49 @@ export function watchProfileSubject(pubkey: string | null): void {
   setProfileBuffer([]);
   for (const sub of profileSubs) sub.unsubscribe();
   profileSubs.length = 0;
-  const [url] = readRelaysValue();
-  if (pubkey === null || url === undefined) return;
-  profileSubs.push(
-    getConnection(url).subscribe(
-      {
-        // The same kinds the profile's paginator asks for. A kind only this one
-        // left out can never reach the reader: the paginator's `until` moves
-        // backwards only, so a comment published after it was built would sit
-        // off the end of the list until a reset.
-        kinds: PROFILE_KINDS,
-        authors: [pubkey],
-        since: Math.floor(Date.now() / 1000),
-      },
-      push(setProfileBuffer),
-    ),
-  );
+  if (pubkey === null) return;
+  subscribeProfile(pubkey);
+}
+
+/**
+ * Opens the profile stream on every relay that may be queried.
+ *
+ * One relay only used to carry it, so its outage — or a relay-set change,
+ * which never re-pointed the stream at all — silently killed profile live
+ * arrivals while the paginator went on paging every relay. The bar then never
+ * appeared until the subject changed, and the reader only learned on reload.
+ */
+function subscribeProfile(pubkey: string): void {
+  for (const url of readRelaysValue()) {
+    profileSubs.push(
+      getConnection(url).subscribe(
+        {
+          // The same kinds the profile's paginator asks for. A kind only this one
+          // left out can never reach the reader: the paginator's `until` moves
+          // backwards only, so a comment published after it was built would sit
+          // off the end of the list until a reset.
+          kinds: PROFILE_KINDS,
+          authors: [pubkey],
+          since: Math.floor(Date.now() / 1000),
+        },
+        push(setProfileBuffer),
+      ),
+    );
+  }
+}
+
+/**
+ * Re-points the profile stream after the relay set changed, keeping whatever
+ * arrived. The rebuild used to drop the stream without opening a new one, and
+ * clearing the buffer with it would break the same promise the bar makes as
+ * discarding arrivals does — so the buffer stays.
+ */
+export function refreshProfileStream(): void {
+  const subject = profileSubject();
+  if (subject === null) return;
+  for (const sub of profileSubs) sub.unsubscribe();
+  profileSubs.length = 0;
+  subscribeProfile(subject);
 }
 
 function push(buffer: (updater: (prev: NostrEvent[]) => NostrEvent[]) => void) {
@@ -108,6 +135,9 @@ export interface LiveFeedDeps {
   selfPubkey: () => string | undefined;
 }
 
+/** Whose arrivals the buffers hold, so a rebuild knows whether they survive. */
+let liveIdentity: string | null = null;
+
 /**
  * Opens (and keeps) one live subscription per relay for the home feed and,
  * when signed in, for notifications. Lives at app level so navigation
@@ -119,11 +149,22 @@ export function startLiveFeeds(deps: LiveFeedDeps): () => void {
   const build = (): void => {
     for (const sub of subs) sub.unsubscribe();
     subs.length = 0;
-    setFeedBuffer([]);
-    setNotificationBuffer([]);
-
     const authors = deps.feedAuthors() ?? undefined;
     const self = deps.selfPubkey();
+    // Arrivals survive a rebuild for the same reader: adding a relay
+    // re-opens every stream with `since: now`, so whatever arrived before the
+    // rebuild would neither be re-delivered nor, if dropped here, ever reach
+    // the list — and the bar that promised it vanishes with no insertion and
+    // no notice. A different reader, or a different follow filter, gets empty
+    // buffers instead: the old arrivals are somebody else's, or match a filter
+    // that no longer holds.
+    const identity = `${self ?? ""}|${JSON.stringify(deps.feedAuthors())}`;
+    const sameReader = identity === liveIdentity;
+    liveIdentity = identity;
+    if (!sameReader) {
+      setFeedBuffer([]);
+      setNotificationBuffer([]);
+    }
 
     const readable = deps.readRelays();
     for (const url of readable) {
@@ -156,6 +197,10 @@ export function startLiveFeeds(deps: LiveFeedDeps): () => void {
     }
     setLiveRelays(subs.length);
     setNotificationRelays(subs.length - readable.length);
+    // The profile stream belongs to whoever is on screen, not to the relay
+    // set it was opened on. Rebuilding without it left the profile with no
+    // stream after every relay change until the subject changed.
+    refreshProfileStream();
   };
 
   build();

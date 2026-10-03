@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isUploadableFile, uploadFailureText, uploadFile } from "./upload.js";
+import {
+  isUploadableFile,
+  type UploadFailure,
+  uploadFailureText,
+  uploadFile,
+} from "./upload.js";
 
 const HOST = "https://blossom.example";
 const NIP96 = "https://nip96.example";
@@ -60,6 +65,11 @@ function stubFetch(options: {
   throwOn?: "wellknown" | "upload";
   /** Reject with a deadline instead of a transport fault. */
   timeoutOn?: "wellknown" | "upload";
+  /**
+   * A document per well-known host, for delegation chains. Hosts not named
+   * here fall back to `document`.
+   */
+  byHost?: Record<string, Record<string, unknown> | null>;
 }) {
   const calls: Call[] = [];
   const deadline = (what: "wellknown" | "upload"): Error => {
@@ -76,6 +86,13 @@ function stubFetch(options: {
     if (url.includes(".well-known")) {
       if (options.throwOn === "wellknown") throw new TypeError("Failed to fetch");
       if (options.timeoutOn === "wellknown") throw deadline("wellknown");
+      if (options.byHost !== undefined) {
+        const entry = options.byHost[new URL(url).host];
+        if (entry !== undefined) {
+          if (entry === null) return new Response("", { status: 404 });
+          return document(entry, url);
+        }
+      }
       if (options.document === null) return new Response("", { status: 404 });
       return document(
         options.document ?? {},
@@ -116,7 +133,11 @@ describe("Blossom upload", () => {
     // BUD-02 puts the upload at /upload and takes the bytes themselves.
     expect(calls[1].url).toBe(`${HOST}/upload`);
     expect(calls[1].init?.method).toBe("PUT");
-    expect(calls[1].init?.body).toBeInstanceOf(ArrayBuffer);
+    // The file's own bytes, read once: the digest above and this body shared
+    // one read, so a large file no longer sits in memory twice.
+    const sent = calls[1].init?.body;
+    expect(sent).toBeInstanceOf(Uint8Array);
+    expect([...(sent as Uint8Array)]).toEqual([...new Uint8Array(await target.arrayBuffer())]);
     // The hash is offered so the server can check the bytes it received.
     const headers = calls[1].init?.headers as Record<string, string>;
     expect(headers["X-SHA-256"]).toBe(await hash(target));
@@ -404,6 +425,26 @@ describe("Blossom authorization", () => {
     expect(Number(expiration?.[1])).toBeGreaterThan(event.created_at as number);
   });
 
+  it("scopes the token to the bare domain, without a port", async () => {
+    // BUD-11: the `server` tag "MUST be a lowercase domain name only", and the
+    // server exact-matches it. `URL.host` keeps a non-default port, so an
+    // upload to `https://blossom.example:8443` carried
+    // `["server", "blossom.example:8443"]` and failed validation server-side.
+    const calls = stubFetch({
+      document: null,
+      body: { url: "https://x.example/a.png" },
+    });
+    const { uploadFile: upload } = await import("./upload.js");
+    await upload({ url: "https://blossom.example:8443" }, file());
+    const event = decode(
+      (calls[1].init?.headers as Record<string, string>).Authorization,
+    );
+    expect((event.tags as string[][])).toContainEqual([
+      "server",
+      "blossom.example",
+    ]);
+  });
+
   it("sends a NIP-98 header to a server that publishes a NIP-96 api_url", async () => {
     const calls = stubFetch({
       document: { api_url: `${NIP96}/upload`, supported_nips: [96, 98] },
@@ -490,6 +531,33 @@ describe("the server's own document", () => {
       `${NIP96}/.well-known/nostr/nip96.json`,
       `${NIP96}/upload`,
     ]);
+  });
+
+  it("stops chasing a delegation chain and uploads as BUD-02", async () => {
+    // NIP-96 documents `delegated_to_url` for a relay pointing at one file
+    // server, not for servers pointing at each other. Chasing a longer chain
+    // holds the picker a minute per hop, so past the cap the host at hand is
+    // addressed as BUD-02 instead.
+    const chain = (host: string, next: string): Record<string, unknown> => ({
+      api_url: "",
+      delegated_to_url: `https://${next}/`,
+    });
+    const calls = stubFetch({
+      byHost: {
+        "h0.example": chain("h0.example", "h1.example"),
+        "h1.example": chain("h1.example", "h2.example"),
+        "h2.example": chain("h2.example", "h3.example"),
+        "h3.example": chain("h3.example", "h4.example"),
+      },
+      body: { url: "https://h2.example/abc.png", sha256: "abc" },
+    });
+    const { uploadFile: upload } = await import("./upload.js");
+    const result = await upload({ url: "https://h0.example" }, file());
+    // Three documents chased (the start plus two hops), then BUD-02 on the
+    // host whose document delegated too far — not two more minutes per hop.
+    expect(calls.filter((call) => call.url.includes(".well-known"))).toHaveLength(3);
+    expect(calls.at(-1)?.url).toBe("https://h2.example/upload");
+    expect(result).toEqual({ url: "https://h2.example/abc.png" });
   });
 
   it("refuses a type the document does not list, without sending the file", async () => {
@@ -623,18 +691,43 @@ describe("uploadFailureText", () => {
   });
 
   it("has a message for every failure", () => {
-    for (const reason of [
+    // Every member of the union, so adding a failure without wording it fails
+    // here rather than shipping a blank line under the input. `satisfies`
+    // keeps the list honest in the other direction too: removing a member
+    // without touching this list is a type error, not a silent shrink.
+    const reasons = [
       "no-signer",
       "cancelled",
       "network",
+      "timeout",
       "too-large",
       "unsupported-type",
       "rejected",
-      "no-url",
       "unknown",
-    ] as const) {
+    ] as const;
+    const all: readonly UploadFailure[] = reasons;
+    expect(all).toHaveLength(8);
+    for (const reason of reasons) {
       expect(uploadFailureText(reason).length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("upload bytes", () => {
+  it("reads the file once for both the digest and the body", async () => {
+    stubFetch({ document: null, body: { url: "https://x.example/a.png" } });
+    const { uploadFile: upload } = await import("./upload.js");
+    const target = file();
+    let reads = 0;
+    const original = target.arrayBuffer.bind(target);
+    vi.spyOn(target, "arrayBuffer").mockImplementation(async () => {
+      reads += 1;
+      return original();
+    });
+    await upload({ url: HOST }, target);
+    // The digest and the PUT body shared one read; a large file no longer
+    // sits in memory twice.
+    expect(reads).toBe(1);
   });
 });
 
