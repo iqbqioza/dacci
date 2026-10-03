@@ -2,6 +2,7 @@ import type { NostrEvent } from "dacci-nostr-nips";
 import { describe, expect, it } from "vitest";
 import { DEADLINE_MS as DEADLINE } from "./event-cache.js";
 import {
+  answerEvents,
   clearEventCache,
   fetchEventById,
   lookupEvent,
@@ -166,5 +167,187 @@ describe("event cache", () => {
       async () => [],
     );
     expect(found).toBeNull();
+  });
+
+  it("takes one relay's 'no' as the answer, whatever the others did", async () => {
+    // A deleted post is answered by some relays and simply not by others — one
+    // that was closed, one whose query was refused for want of a subscription
+    // slot. One honest "I do not have it" settles it; the others never spoke.
+    clearEventCache();
+    const started = Date.now();
+    const found = await fetchEventById(
+      "d1".padEnd(64, "0"),
+      ["wss://a", "wss://b", "wss://c"],
+      async (url) => (url === "wss://a" ? [] : null),
+      5000,
+    );
+    expect(found).toBeNull();
+    expect(Date.now() - started).toBeLessThan(1000);
+    clearEventCache();
+  });
+
+  it("waits for the deadline when nobody answered at all", async () => {
+    // Every read relay was closed or refused the query, which says nothing about
+    // the post. This used to resolve the moment they came back — a few hundred
+    // milliseconds — and the page said the post does not exist, which is the one
+    // thing a client with no answer cannot know.
+    clearEventCache();
+    const asked = Date.now();
+    const looking = fetchEventById(
+      "e1".padEnd(64, "0"),
+      ["wss://a", "wss://b"],
+      async () => null,
+      150,
+    );
+    const settled = await Promise.race([
+      looking,
+      new Promise<"still looking">((r) => setTimeout(() => r("still looking"), 40)),
+    ]);
+    expect(settled).toBe("still looking");
+    // And then it gives up on the deadline, rather than never giving up at all.
+    expect(await looking).toBeNull();
+    expect(Date.now() - asked).toBeLessThan(2000);
+    clearEventCache();
+  });
+
+  it("counts a relay that threw as silence, and one that answered as a verdict", async () => {
+    // The two are told apart by the same rule as the `null` answer: a query that
+    // rejected is not a relay saying "no". With one throwing and one answering
+    // empty the post is still known to be missing; with both throwing it is not.
+    clearEventCache();
+    expect(
+      await fetchEventById(
+        "f1".padEnd(64, "0"),
+        ["wss://a", "wss://b"],
+        async (url) => {
+          if (url === "wss://a") throw new Error("socket closed");
+          return [];
+        },
+        400,
+      ),
+    ).toBeNull();
+    const both = fetchEventById(
+      "f2".padEnd(64, "0"),
+      ["wss://a", "wss://b"],
+      async () => {
+        throw new Error("socket closed");
+      },
+      120,
+    );
+    expect(
+      await Promise.race([
+        both,
+        new Promise<"still looking">((r) => setTimeout(() => r("still looking"), 40)),
+      ]),
+    ).toBe("still looking");
+    expect(await both).toBeNull();
+    clearEventCache();
+  });
+
+  it("still finds the post when one relay answers and another cannot", async () => {
+    // The silence must not hold up a hit, or the fix would have cost the deep
+    // link its speed.
+    clearEventCache();
+    const event = makeEvent("a1".padEnd(64, "0"));
+    const started = Date.now();
+    const found = await fetchEventById(
+      event.id,
+      ["wss://a", "wss://dead"],
+      async (url) => (url === "wss://a" ? [event] : null),
+      5000,
+    );
+    expect(found).toBe(event);
+    expect(Date.now() - started).toBeLessThan(1000);
+    clearEventCache();
+  });
+
+  it(
+    "asks again when nobody answered, and finds the post once they can",
+    { timeout: 20_000 },
+    async () => {
+      // Waiting is not enough on its own: the relays are asked once, nothing comes
+      // back, and the post is still not on screen — the only reason being that
+      // every dial failed a moment ago. A reader whose network is on its feet is
+      // who opens a deep link, so the question is asked again while the deadline
+      // has room for it.
+      clearEventCache();
+      const event = makeEvent("a2".padEnd(64, "0"));
+      let round = 0;
+      const found = await fetchEventById(event.id, ["wss://a"], async () => {
+        round += 1;
+        return round >= 2 ? [event] : null;
+      }, 5000);
+      expect(found).toBe(event);
+      expect(round).toBeGreaterThanOrEqual(2);
+      clearEventCache();
+    },
+  );
+
+  it(
+    "gives up after a bounded number of retries, not on the first silence",
+    { timeout: 20_000 },
+    async () => {
+      // A relay that is simply gone stays gone. Asking forever would be a loop
+      // with a timeout in the middle of it, so the rounds are capped — and the
+      // cap is what this pins.
+      clearEventCache();
+      let round = 0;
+      const asked = Date.now();
+      const found = await fetchEventById(
+        "a3".padEnd(64, "0"),
+        ["wss://a"],
+        async () => {
+          round += 1;
+          return null;
+        },
+        5000,
+      );
+      expect(found).toBeNull();
+      expect(round).toBeGreaterThan(1);
+      expect(round).toBeLessThanOrEqual(4);
+      expect(Date.now() - asked).toBeLessThan(5000);
+      clearEventCache();
+    },
+  );
+
+  it(
+    "does not ask again once a relay has answered",
+    { timeout: 20_000 },
+    async () => {
+      // The deleted post is the commonest shape, and it is answered on the first
+      // round. Retrying it would cost three relays × several rounds of requests
+      // to learn the same nothing, and hold the page for the whole deadline.
+      clearEventCache();
+      let asked = 0;
+      const started = Date.now();
+      const found = await fetchEventById(
+        "a4".padEnd(64, "0"),
+        ["wss://a", "wss://b", "wss://c"],
+        async () => {
+          asked += 1;
+          return [];
+        },
+        5000,
+      );
+      expect(found).toBeNull();
+      expect(asked).toBe(3);
+      expect(Date.now() - started).toBeLessThan(1000);
+      clearEventCache();
+    },
+  );
+});
+
+describe("answerEvents", () => {
+  it("treats a failed query as no answer, and an EOSE as a verdict", () => {
+    // `failed` is the relay being closed, timing out, or never asked — an empty
+    // `events` array under it says nothing about whether the post exists, and
+    // reading it as "no" is what turned a network blip into a dead deep link.
+    const events = [makeEvent("b1".padEnd(64, "0"))];
+    expect(answerEvents({ events, failed: false })).toBe(events);
+    expect(answerEvents({ events, failed: true })).toBeNull();
+    // An empty answer that really came is kept as one: a deleted post is answered
+    // with nothing, and that is worth knowing straight away.
+    expect(answerEvents({ events: [], failed: false })).toEqual([]);
+    expect(answerEvents({ events: [], failed: true })).toBeNull();
   });
 });

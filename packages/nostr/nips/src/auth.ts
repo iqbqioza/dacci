@@ -104,7 +104,17 @@ export async function signHttpAuth(input: {
   /** 32-byte x-only pubkey of the signer. */
   pubkey: string;
   signEvent: (template: UnsignedEvent) => Promise<NostrEvent>;
-  /** SHA-256 of the file, or of whatever else the header must bind. */
+  /**
+   * SHA-256 of the file, or of whatever else the header must bind.
+   *
+   * Written as **base64**, and that is deliberate: NIP-98's own wording for the
+   * `payload` tag is hex — *"clients SHOULD include a SHA256 hash of the request
+   * body in a `payload` tag as hex"* — but NIP-96's Auth section overrides it for
+   * the one request this is used for: *"optionally with the encoded `payload`
+   * tag set to the base64-encoded 256-bit SHA-256 hash of the file - not the hash
+   * of the whole request body"*. A NIP-96 server that checks the tag answers
+   * `403` when the two disagree, so the encoding is the server's, not NIP-98's.
+   */
   payload?: Uint8Array;
   createdAt?: number;
 }): Promise<HttpAuth> {

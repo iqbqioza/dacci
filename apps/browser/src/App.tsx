@@ -15,7 +15,7 @@ import { restoreSession, useAuth } from "./auth.jsx";
 import { resetEmbeds } from "./embeds.js";
 import { trapFocus } from "./focus-trap.js";
 import { createDetail } from "./detail.js";
-import { fetchEventById } from "./event-cache.js";
+import { answerEvents, fetchEventById } from "./event-cache.js";
 import {
   closeCompose,
   composeBusy,
@@ -606,10 +606,10 @@ function EventDetailView(props: {
   // the post at once, with no request, and the detail page keeps it.
   const detail = createDetail(
     (id) =>
-      fetchEventById(id, untrack(() => props.urls), (url, f) =>
-        getConnection(url)
-          .query(f, 6000)
-          .then((r) => (r.failed ? [] : r.events)),
+      fetchEventById(id, untrack(() => props.urls), async (url, f) =>
+        // `null` for a relay that gave no answer at all, so one that was closed
+        // or timed out is not read as "this post does not exist".
+        answerEvents(await getConnection(url).query(f, 6000)),
       ),
   );
 
